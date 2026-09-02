@@ -7,10 +7,10 @@ Pragtig is pronounced **prakh-tik** and means **gorgeous** in Afrikaans.
 
 ## Current status
 
-- Current phase: Phase 0, Charter and project governance
-- Completed gates: G0.1, G0.2, and G0.3
-- Active step: Step 0.4, Risk, licensing, and naming
-- Pending gate: G0.4, Phase 0 exit approval
+- Current phase: Phase 1, Market, user, and technical research
+- Completed gates: G0.1 through G0.4
+- Active step: Step 1.1, Framework landscape analysis
+- Pending gate: G1.1, Research quality and market-opening review
 - Implementation status: Not started
 
 ## Authoritative documents
@@ -23,10 +23,10 @@ Pragtig is pronounced **prakh-tik** and means **gorgeous** in Afrikaans.
 | gates/G0.1-charter-approval.md | Durable approval record for the project charter | Approved |
 | gates/G0.2-documentation-governance-review.md | Approval record for Step 0.2 | Approved |
 | gates/G0.3-project-standards-review.md | Approval record for Step 0.3 | Approved |
-| risks/register.md | Current project risks, mitigations, owners, and review points | Draft for G0.4 |
+| risks/register.md | Current project risks, mitigations, owners, and review points | Active; approved at G0.4 |
 | decisions/ADR-0001-project-license.md | Project license decision and rationale | Accepted: Apache-2.0 |
-| research/naming-and-brand.md | Preliminary collision findings and formal clearance plan | Draft for G0.4 |
-| gates/G0.4-phase-0-exit-review.md | Review package for Step 0.4 and Phase 0 | In review |
+| research/naming-and-brand.md | Preliminary collision findings and formal clearance plan | Approved at G0.4 |
+| gates/G0.4-phase-0-exit-review.md | Review package for Step 0.4 and Phase 0 | Approved |
 
 PROJECT_PLAN.md remains the authoritative plan. Specialized documents become
 authoritative for their subject only after an approval record says so.

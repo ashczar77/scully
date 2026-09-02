@@ -6,7 +6,7 @@ Pragtig is an explainable application framework for Java and Kotlin that
 brings productive automation to JVM backend services without opaque runtime
 behavior.
 
-The project is currently in its planning and design phase. See the
+The project is currently in its research phase. See the
 [project documentation](docs/README.md) for its status, decisions, and roadmap.
 
 ## License

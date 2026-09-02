@@ -1,7 +1,7 @@
 # Pragtig Risk Register
 
-**Status:** Draft for Gate G0.4  
-**Version:** 0.2  
+**Status:** Active; approved at Gate G0.4  
+**Version:** 0.3  
 **Date:** 2026-09-02
 
 ## 1. Assessment scale
@@ -19,7 +19,7 @@ review gate.
 |---|---|---|---|---|---|---|
 | RISK-0001 | Scope expands toward recreating all of Spring | High | High | Critical | Project owner | Every scope gate |
 | RISK-0002 | Pragtig lacks a defensible advantage over existing JVM frameworks | Medium | High | High | Phase 1 author | G1.1 and G1.3 |
-| RISK-0003 | The Pragtig name conflicts with an existing or similar software brand | Medium | High | High | Project owner | G0.4 and before public branding |
+| RISK-0003 | The Pragtig name conflicts with an existing or similar software brand | Medium | High | High | Project owner | Before package registration or major promotion |
 | RISK-0004 | Compile-time processing creates slow clean or incremental builds | Medium | High | High | Compiler owner | G3.2, G4.3, and Phase 10 |
 | RISK-0005 | Java and Kotlin semantics or diagnostics diverge | Medium | High | High | Language frontend owners | Every language gate |
 | RISK-0006 | Annotation convenience recreates hidden framework behavior | Medium | High | High | API owner | G2.1 through G2.4 |
@@ -55,9 +55,10 @@ review gate.
 
 ### RISK-0003: Name conflict
 
-- Keep Pragtig as the selected provisional working name.
-- Do not publish branded artifacts, register coordinates, commission a logo,
-  or build brand equity before clearance.
+- Keep Pragtig as the provisional public project name for limited repository
+  use.
+- Do not publish release artifacts, register coordinates, commission a final
+  logo, or build substantial brand equity before clearance.
 - Include the adjacent Pracht framework in the similarity assessment.
 - Follow the naming research and legal-review plan.
 
@@ -113,12 +114,11 @@ review gate.
 - A realized risk becomes an issue or incident while remaining linked here.
 - Closing a risk requires evidence and a recorded review decision.
 
-## 5. Immediate Gate G0.4 decisions
+## 5. Gate G0.4 decisions
 
 - Accept the current risks as sufficient to begin Phase 1 research.
 - Keep RISK-0003 open and Pragtig provisional.
-- Keep RISK-0016 open until the project license and contribution model are
-  approved.
+- Keep RISK-0016 open until the contribution model is approved.
 
 ## 6. Revision history
 
@@ -126,3 +126,4 @@ review gate.
 |---|---|---|---|
 | 0.1 | 2026-09-02 | Initial risk register | Pending G0.4 |
 | 0.2 | 2026-09-02 | Updated naming risk for the selected Pragtig working name | Pending G0.4 |
+| 0.3 | 2026-09-02 | Accepted Phase 1 risks and limited public use of the provisional name | Approved G0.4 |

@@ -1,14 +1,15 @@
 # Pragtig Naming and Brand Research Plan
 
-**Status:** Draft for Gate G0.4  
+**Status:** Approved at Gate G0.4  
 **Date:** 2026-09-02  
-**Current name status:** Selected provisional working name  
+**Current name status:** Approved provisional public project name  
 **Pronunciation:** prakh-tik
 
 ## 1. Purpose
 
 Define how the Pragtig name, artifact coordinates, package namespace,
-domains, and public identity will be evaluated before public release.
+domains, and public identity will be evaluated before broader promotion and
+public release.
 
 This document records a preliminary collision check. It is not a trademark
 clearance opinion or legal advice.
@@ -24,9 +25,9 @@ does not establish trademark or identifier availability.
 
 ### 2.2 Searchability
 
-Pragtig is an Afrikaans adjective meaning beautiful, magnificent, or splendid.
-Ordinary-language use creates some search noise, but exact searches remain
-reasonably distinctive for a software framework.
+Pragtig is an Afrikaans adjective meaning gorgeous, beautiful, magnificent, or
+splendid. Ordinary-language use creates some search noise, but exact searches
+remain reasonably distinctive for a software framework.
 
 The intended pronunciation is prakh-tik. Public documentation should provide
 the pronunciation until it becomes familiar to the project's audience.
@@ -76,14 +77,16 @@ Official search sources:
 
 ## 3. Immediate policy
 
-- Pragtig is the selected provisional working name.
+- Pragtig is the approved provisional public project name.
+- Limited use in the public source repository and its documentation is
+  permitted.
 - Do not claim trademark ownership.
 - Do not use the registered trademark symbol.
-- Do not commission a final logo or publish branded artifacts.
+- Do not commission a final logo or publish release artifacts under the brand.
 - Do not register package coordinates, domains, or social handles as a
   substitute for legal clearance.
-- Internal module names may use Pragtig temporarily if renaming remains
-  straightforward.
+- Repository, documentation, and internal module names may use Pragtig while
+  renaming remains straightforward.
 
 ## 4. Clearance plan
 
@@ -147,9 +150,9 @@ Evaluate availability and ownership requirements for:
 
 ### Step N5: Legal review
 
-Before public branding or meaningful investment, obtain a qualified trademark
-review appropriate to target jurisdictions if the project owner intends
-commercial or broad public use.
+Before package registration, final branding, major promotion, or meaningful
+investment, obtain a qualified trademark review appropriate to target
+jurisdictions if the project owner intends commercial or broad public use.
 
 **Review criterion:** Risks are accepted, mitigated, or the name is rejected.
 
@@ -184,16 +187,22 @@ A public name should:
 The preliminary search found no prominent exact-name framework or developer
 tool. The adjacent Pracht framework and incomplete trademark, registry,
 domain, and identifier searches mean Pragtig must not yet be treated as
-cleared. It is suitable as the selected internal name while the remaining
-clearance work continues.
+cleared. It is suitable as the provisional public project name for limited
+repository use while the remaining clearance work continues.
 
 ## 7. Required decision timing
 
 Complete full name clearance before:
 
-- public repository launch;
 - Maven or Gradle coordinate registration;
 - public preview announcement;
 - logo or visual identity work;
 - domain or social campaign;
 - accepting external contributions under the brand.
+
+## 8. Gate G0.4 approval
+
+On 2026-09-02, the project owner approved Pragtig as the provisional public
+project name for limited repository use. The project must not claim trademark
+ownership or use the registered symbol. Structured name clearance remains
+required before package registration, final branding, or major promotion.
