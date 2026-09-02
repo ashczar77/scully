@@ -24,7 +24,7 @@ delivery records for Pragtig.
 | gates/G0.2-documentation-governance-review.md | Approval record for Step 0.2 | Approved |
 | gates/G0.3-project-standards-review.md | Approval record for Step 0.3 | Approved |
 | risks/register.md | Current project risks, mitigations, owners, and review points | Draft for G0.4 |
-| decisions/ADR-0001-project-license.md | Project license options and recommendation | Proposed for G0.4 |
+| decisions/ADR-0001-project-license.md | Project license decision and rationale | Accepted: Apache-2.0 |
 | research/naming-and-brand.md | Preliminary collision findings and formal clearance plan | Draft for G0.4 |
 | gates/G0.4-phase-0-exit-review.md | Review package for Step 0.4 and Phase 0 | In review |
 

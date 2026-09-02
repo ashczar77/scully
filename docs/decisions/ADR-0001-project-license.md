@@ -1,6 +1,6 @@
 # ADR-0001: Project license
 
-**Status:** Proposed  
+**Status:** Accepted  
 **Date:** 2026-09-02  
 **Owner:** Project owner  
 **Related gate:** G0.4  
@@ -13,9 +13,9 @@ Pragtig is intended to become a serious framework adopted by Java and Kotlin
 developers, including commercial users and extension authors. The license
 should permit broad use while providing clear contributor and patent terms.
 
-This proposal is project planning, not legal advice. The project owner should
-obtain legal advice if the ownership structure, employment obligations,
-contributors, or commercialization model requires it.
+This decision is project planning, not legal advice. The project owner has
+confirmed that Pragtig is a personal project. Obtain legal advice if its
+ownership, contribution, or commercialization model changes materially.
 
 ## Decision drivers
 
@@ -86,13 +86,13 @@ Costs:
 - More compliance complexity than a permissive license.
 - Less aligned with the intended low-friction adoption position.
 
-## Proposed decision
+## Decision
 
-Adopt **Apache License 2.0**, SPDX identifier **Apache-2.0**, subject to project
-owner approval and any necessary legal review.
+Adopt **Apache License 2.0**, SPDX identifier **Apache-2.0**.
 
-Do not create the final LICENSE, NOTICE, source headers, or contributor process
-until this ADR is approved.
+Include the unmodified official license text in the repository. A NOTICE file
+is not required initially because the project has no existing attribution
+notices to preserve; add one if that changes.
 
 ## Rationale
 
@@ -136,7 +136,7 @@ After approval:
 
 ## Compatibility impact
 
-The proposed license permits proprietary applications and extensions to use
+The selected license permits proprietary applications and extensions to use
 Pragtig without requiring their code to use the same license. Individual
 dependency compatibility still requires review.
 
@@ -151,8 +151,8 @@ None.
 
 ## Validation
 
-- Confirm project ownership and any employer obligations.
-- Verify the final official license text before adding it.
+- Project owner confirmed that Pragtig is a personal project.
+- Verified and added the official Apache License 2.0 text.
 - Review artifact and NOTICE requirements before distribution.
 - Reassess if a commercial open-core model is proposed.
 
@@ -174,7 +174,7 @@ None.
 
 ## Approval
 
-- Decision: Pending
+- Decision: Approved
 - Reviewer: Project owner
-- Date:
-- Conditions:
+- Date: 2026-09-02
+- Conditions: None for the current personal-project scope
