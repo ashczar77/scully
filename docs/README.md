@@ -3,7 +3,7 @@
 This directory contains the product, design, decision, review, research, and
 delivery records for Pragtig.
 
-**Pronunciation:** prakh-tik
+Pragtig is pronounced **prakh-tik** and means **gorgeous** in Afrikaans.
 
 ## Current status
 
