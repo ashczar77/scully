@@ -3,3 +3,6 @@
 
 # Generated working files
 /tmp/
+
+# Local agent instructions
+/AGENTS.md
