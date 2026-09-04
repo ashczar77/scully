@@ -1,6 +1,5 @@
-# Internal planning and working standards
-/docs/PROJECT_PLAN.md
-/docs/STANDARDS.md
-
 # macOS metadata
 .DS_Store
+
+# Generated working files
+/tmp/

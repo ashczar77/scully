@@ -1,126 +1,35 @@
-# Pragtig Documentation
+# Scully Documentation
 
-This directory contains the product, design, decision, review, research, and
-delivery records for Pragtig.
+## Current direction
 
-Pragtig is pronounced **prakh-tik** and means **gorgeous** in Afrikaans.
+The project is exploring a safe incident-reproduction system for the Nebius x
+NVIDIA Global AI Hackathon.
+
+The system would turn a sanitized, read-only production incident bundle into a
+minimal executable reproduction without giving AI production credentials or
+customer data.
 
 ## Current status
 
-- Current phase: Phase 1, Market, user, and technical research
-- Completed gates: G0.1 through G0.4
-- Active step: Step 1.1, Framework landscape analysis
-- Pending gate: G1.1, Research quality and market-opening review
-- Implementation status: Not started
+- Phase: Problem and boundary validation
+- Proposed next gate: P0
+- Implementation: Not started
+- Out-of-pocket cost limit: Zero
+- Submission deadline: 30 October 2026
 
-## Authoritative documents
+## Active documents
 
 | Document | Purpose | Status |
 |---|---|---|
-| PROJECT_PLAN.md | Product charter, architecture direction, standards, roadmap, phases, and gates | Active internal plan |
-| STANDARDS.md | Enforceable project standards, checks, and exception process | Approved at G0.3 |
-| GOVERNANCE.md | Documentation ownership, decision workflow, review gates, and contribution process | Approved at G0.2 |
-| gates/G0.1-charter-approval.md | Durable approval record for the project charter | Approved |
-| gates/G0.2-documentation-governance-review.md | Approval record for Step 0.2 | Approved |
-| gates/G0.3-project-standards-review.md | Approval record for Step 0.3 | Approved |
-| risks/register.md | Current project risks, mitigations, owners, and review points | Active; approved at G0.4 |
-| decisions/ADR-0001-project-license.md | Project license decision and rationale | Accepted: Apache-2.0 |
-| research/naming-and-brand.md | Preliminary collision findings and formal clearance plan | Approved at G0.4 |
-| gates/G0.4-phase-0-exit-review.md | Review package for Step 0.4 and Phase 0 | Approved |
+| [Hackathon project plan](HACKATHON_PROJECT_PLAN.md) | Product boundary, trust UI, architecture, delivery phases, demo, risks, and acceptance gates | Proposed |
+| [Problem-first opportunity search](research/problem-first-opportunity-search.md) | Evidence and ranking that led to the current direction | Research complete |
 
-PROJECT_PLAN.md remains the authoritative plan. Specialized documents become
-authoritative for their subject only after an approval record says so.
+The Apache License 2.0 in the repository root remains the project license.
 
-## Planned structure
+## Immediate decision
 
-    docs/
-    ├── README.md
-    ├── PROJECT_PLAN.md
-    ├── STANDARDS.md
-    ├── GOVERNANCE.md
-    ├── vision.md
-    ├── charter.md
-    ├── principles.md
-    ├── glossary.md
-    ├── architecture/
-    ├── benchmarks/
-    ├── decisions/
-    ├── features/
-    ├── gates/
-    ├── research/
-    ├── risks/
-    ├── roadmap/
-    └── templates/
+Before implementation, Gate P0 must determine whether at least two real or
+safely reconstructable incidents can be reproduced using only sanitized
+evidence. If not, the concept must be narrowed or rejected.
 
-Directories and documents should be created when their approved phase requires
-them. Empty structure should not be added only for appearance.
-
-## Document types
-
-### Project plan
-
-Defines project intent, scope, standards, sequence, acceptance criteria, and
-review gates.
-
-### Architecture Decision Record
-
-Records one significant decision, the alternatives considered, the reason for
-the choice, consequences, and reconsideration triggers.
-
-Template: templates/ADR_TEMPLATE.md
-
-### Feature specification
-
-Defines the developer experience and complete implementation approach for one
-capability.
-
-Template: templates/FEATURE_SPEC_TEMPLATE.md
-
-### Gate review
-
-Presents the evidence required to approve, revise, reject, or defer a project
-step.
-
-Template: templates/GATE_REVIEW_TEMPLATE.md
-
-### Risk record
-
-Tracks a risk, its impact, likelihood, mitigation, evidence, owner, and review
-date.
-
-Template: templates/RISK_TEMPLATE.md
-
-## Document lifecycle
-
-Documents use one of these statuses:
-
-- Draft
-- In review
-- Approved
-- Superseded
-- Withdrawn
-
-Approved records should not be silently rewritten. Corrections may be made
-with a revision note. A changed decision requires a new ADR or gate record
-that supersedes the previous one.
-
-## Naming
-
-- ADRs: decisions/ADR-NNNN-short-title.md
-- Gate records: gates/Gx.y-short-title.md
-- Feature specifications: features/short-capability-name.md
-- Risk records: risks/RISK-NNNN-short-title.md
-- Benchmark reports: benchmarks/reports/YYYY-MM-DD-short-name.md
-
-Use lowercase names except for the standard uppercase prefixes and the current
-internal files already established by the plan.
-
-## Public and internal material
-
-Internal working documents listed in the root .gitignore remain local until
-the project owner approves publication. Ignoring a file is not a security
-control. Sensitive data must never be added to documentation.
-
-Public material must follow the project-writing standard. Use direct language,
-plain punctuation, and no assistant signatures or generated-by notices unless
-disclosure is required by policy or law.
+New documentation should support the active hackathon project.
