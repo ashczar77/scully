@@ -301,99 +301,492 @@ artifact. Import must fail closed when a required safety check cannot run.
 
 ## 10. Delivery plan
 
+### 10.1 Gate system
+
+Every step ends at a review gate. A gate has one of four outcomes:
+
+- **Approved:** the step is complete and dependent work may begin;
+- **Revise:** the step remains active until identified defects are corrected;
+- **Rejected:** the proposed direction is not viable and must be replaced or
+  the project must stop;
+- **Deferred:** work is intentionally postponed, with an owner, reason, and
+  latest acceptable decision date.
+
+Each gate review must record:
+
+- the reviewed deliverables and their locations;
+- the acceptance criteria and evidence for each result;
+- unresolved risks, assumptions, and deviations;
+- the decision, reviewer, and review date;
+- required follow-up work and its owner.
+
+Gate records use `docs/gates/Gx.y-short-title.md` and begin from the
+[gate review template](templates/GATE_REVIEW_TEMPLATE.md). A gate is not
+approved until its record is complete and committed.
+
+Downstream work may be explored before a gate, but it may not become the
+project baseline until the prerequisite gate is approved. The last gate in
+each phase is also the phase exit gate. A failed phase exit triggers a scope,
+schedule, or viability decision before the next phase starts.
+
 ### Phase 0: Problem and boundary validation, 4 to 8 September
 
-Objectives:
+Goal: prove that Scully addresses a real, narrow problem using evidence that
+can be handled safely.
 
-- collect three public or personally known, safely reconstructable incidents;
-- define the smallest plausible capsule for each;
-- reproduce them manually without production access;
-- interview at least three engineers about the workflow and trust UI;
-- select one narrow incident class for the demo.
+#### Step 0.1: Define the problem boundary
 
-Gate P0 passes only if at least two incidents can be reproduced from sanitized
-evidence and engineers identify reproduction as materially more useful than an
-AI explanation.
+Deliverables:
 
-### Phase 1: Sponsor-stack feasibility, 9 to 15 September
+- a precise primary user and job to be done;
+- an initial incident class and explicit exclusions;
+- a deterministic definition of successful reproduction;
+- falsifiable assumptions and concept kill conditions.
 
-Objectives:
+**Gate G0.1, problem framing review:** Approve only if the problem is narrow
+enough for the hackathon, reproduction can be distinguished from diagnosis,
+and the success condition can be measured without subjective model judgment.
 
-- verify Token Factory model access and remaining credit;
-- confirm sandbox beta access, pricing, egress, limits, and checkpoint support;
-- run one Nemotron tool-calling loop;
-- create, branch, execute, compare, and discard a minimal sandbox experiment;
-- retrieve one version-specific source through Tavily;
-- measure the credit cost of one investigation.
+#### Step 0.2: Assemble candidate incident capsules
 
-Gate P1 passes only if all sponsor technologies have necessary roles and the
-complete demo can remain within supplied credits. If hosted branching is not
-available, decide whether a local fallback remains competition-compliant
-before continuing.
+Deliverables:
+
+- three public, synthetic, or safely reconstructed incident candidates;
+- a draft capsule for each candidate;
+- an artifact-level inventory of provenance, sensitivity, and redaction;
+- a documented failure signature and expected environment delta for each case.
+
+**Gate G0.2, evidence safety review:** Approve only if all three candidates can
+be investigated without production credentials, customer records, secrets, or
+unclear data rights.
+
+#### Step 0.3: Prove manual reproducibility
+
+Deliverables:
+
+- clean-room reproduction attempts for all three candidates;
+- exact commands, environment details, and observed results;
+- a comparison between the supplied and reproduced failure signatures;
+- a record of missing evidence and failed attempts.
+
+**Gate G0.3, reproduction viability review:** Approve only if at least two
+incidents can be reproduced using only their sanitized capsules. Narrow or
+reject the concept if reproduction depends on a production clone.
+
+#### Step 0.4: Validate user value and select the demonstration case
+
+Deliverables:
+
+- at least three structured engineer interviews;
+- feedback on the evidence boundary, proof artifact, and trust experience;
+- a ranked incident shortlist;
+- one selected incident class and one backup case.
+
+**Gate G0.4, Phase 0 exit review:** Approve only if target engineers consider
+an executable reproduction materially more useful than an explanation alone,
+the selected incident satisfies G0.3, and the project scope remains credible
+before the deadline.
+
+### Phase 1: Sponsor-stack and architecture feasibility, 9 to 15 September
+
+Goal: prove that every required platform capability works, remains within the
+cost limit, and contributes directly to the product.
+
+#### Step 1.1: Confirm access, limits, and cost controls
+
+Deliverables:
+
+- verified access to Nebius Token Factory, Nemotron, and required sandbox
+  features;
+- verified Tavily access and applicable limits;
+- a written record of pricing, supplied credits, egress rules, and quotas;
+- a hard usage budget and a method for measuring each investigation.
+
+**Gate G1.1, access and cost review:** Approve only if the required services are
+available, no step requires out-of-pocket spend, and usage can be stopped
+before supplied credits are exhausted.
+
+#### Step 1.2: Prove the sponsor primitives independently
+
+Deliverables:
+
+- one Nemotron tool-calling loop with structured output;
+- one Tavily retrieval with source provenance;
+- one sandbox lifecycle covering create, execute, branch or equivalent,
+  compare, and discard;
+- latency, reliability, and usage measurements for each primitive.
+
+**Gate G1.2, primitive capability review:** Approve only if each sponsor
+technology performs a necessary role with stable enough behavior for the demo.
+Record any fallback and confirm that it remains competition-compliant.
+
+#### Step 1.3: Prove isolation and deterministic evaluation
+
+Deliverables:
+
+- two experiments created from the same clean checkpoint;
+- evidence that changes in one experiment do not leak into another;
+- a deterministic failure-signature evaluator;
+- timeout, cancellation, and failed-experiment behavior.
+
+**Gate G1.3, execution integrity review:** Approve only if experiment isolation
+is demonstrated and only deterministic code, not the language model, can mark
+a reproduction as successful.
+
+#### Step 1.4: Establish the implementation architecture
+
+Deliverables:
+
+- accepted component boundaries and data flow;
+- selected language, framework, state store, and streaming mechanism;
+- an incident-capsule schema direction;
+- identified technical risks, fallback decisions, and measured cost envelope;
+- a thin vertical proof backlog.
+
+**Gate G1.4, Phase 1 exit review:** Approve only if the sponsor stack can run
+the proposed end-to-end path within the budget, the architecture preserves the
+safety boundary, and no unresolved dependency blocks Phase 2.
 
 ### Phase 2: Thin vertical proof, 16 to 24 September
 
-Build one end-to-end path with an intentionally simple incident:
+Goal: build the smallest complete path from capsule import to runnable failing
+test before investing in presentation quality.
 
-1. import a capsule;
-2. normalize evidence;
-3. generate three hypotheses;
-4. execute three isolated branches;
-5. detect the matching failure signature;
-6. return a runnable failing test;
-7. stream state to an unstyled diagnostic UI.
+#### Step 2.1: Establish the project foundation and contracts
 
-Gate P2 passes only when the result is repeatable on a clean machine and the
-model cannot declare success without the deterministic evaluator.
+Deliverables:
+
+- repository structure and repeatable local development commands;
+- versioned schemas for capsules, normalized evidence, hypotheses,
+  experiments, events, and reproduction results;
+- fixture conventions and a seeded simple incident;
+- baseline unit, integration, and schema validation checks.
+
+**Gate G2.1, foundation review:** Approve only if a clean checkout can install,
+run checks, and load the seeded fixture, and the contracts cover the complete
+vertical path without hidden production dependencies.
+
+#### Step 2.2: Implement safe capsule ingestion
+
+Deliverables:
+
+- capsule import and manifest validation;
+- path, size, type, and malformed-input controls;
+- secret scanning and fail-closed behavior;
+- evidence normalization with provenance and redaction status;
+- tests for valid, invalid, adversarial, and partial capsules.
+
+**Gate G2.2, ingestion safety review:** Approve only if unsafe capsules are
+rejected predictably, accepted evidence retains its lineage, and tests show
+that secrets are not copied into normalized output or logs.
+
+#### Step 2.3: Implement hypothesis planning
+
+Deliverables:
+
+- a constrained Nemotron planning loop;
+- structured, mutually exclusive hypotheses;
+- evidence references and stated uncertainty for every hypothesis;
+- tool and experiment plans constrained by an explicit allowlist;
+- tests for missing evidence, malformed model output, and prompt injection.
+
+**Gate G2.3, planning review:** Approve only if hypotheses are traceable to
+evidence, model output cannot bypass tool restrictions, and unsupported claims
+remain visibly inferred rather than observed.
+
+#### Step 2.4: Implement branched execution and signature matching
+
+Deliverables:
+
+- experiment scheduling from a clean checkpoint;
+- at least three isolated hypothesis branches;
+- streamed command, status, and result events;
+- deterministic signature matching and elimination reasons;
+- cancellation, timeout, retry, and resource-limit handling.
+
+**Gate G2.4, execution review:** Approve only if branches remain isolated,
+results are reproducible, failure states are explicit, and a model response
+cannot override the evaluator.
+
+#### Step 2.5: Produce the first end-to-end proof
+
+Deliverables:
+
+- a minimal diagnostic interface for the full event stream;
+- one complete seeded investigation;
+- a generated reproduction package and runnable failing test;
+- exact clean-machine setup and execution instructions;
+- recorded latency, usage, and known limitations.
+
+**Gate G2.5, Phase 2 exit review:** Approve only if a clean machine can process
+the seeded capsule, execute competing branches, identify the matching
+signature, and run the resulting failing test without manual repair.
 
 ### Phase 3: Trust UI and visual system, 25 September to 6 October
 
-Objectives:
+Goal: make the investigation understandable, auditable, and visually distinct
+without hiding uncertainty or execution detail.
 
-- establish navigation, tokens, typography, evidence states, and components;
-- implement the five primary screens;
-- build the interactive hypothesis map and branch transitions;
-- implement evidence lineage, diff, timeline, and command-output views;
-- cover loading, error, partial, inconclusive, and completed states;
-- conduct five short comprehension tests with engineers.
+#### Step 3.1: Define the interaction and visual foundations
 
-Gate P3 passes when a new viewer can identify the observed failure, current
-hypotheses, winning experiment, and supporting proof in under 60 seconds
-without verbal guidance.
+Deliverables:
+
+- navigation and information architecture for the five primary screens;
+- color, typography, spacing, motion, and evidence-state tokens;
+- low-fidelity flows for new, active, failed, inconclusive, and completed
+  investigations;
+- keyboard, contrast, focus, and reduced-motion requirements.
+
+**Gate G3.1, experience foundation review:** Approve only if every screen
+answers a defined engineering question, all evidence states are distinguishable
+without color alone, and the primary flow works without decorative motion.
+
+#### Step 3.2: Build intake and incident overview
+
+Deliverables:
+
+- capsule selection, manifest review, and start controls;
+- secret-scan, redaction, and excluded-evidence states;
+- incident signature, environment delta, timeline, observed facts, and
+  missing-evidence views;
+- responsive and keyboard-accessible behavior for both screens.
+
+**Gate G3.2, intake trust review:** Approve only if a user can determine what
+will enter the investigation, what was rejected, and why no production access
+is required before starting a run.
+
+#### Step 3.3: Build the hypothesis map and experiment inspector
+
+Deliverables:
+
+- branch graph with active, eliminated, inconclusive, and reproduced states;
+- evidence-linked hypothesis cards and experiment plans;
+- branch comparison, command output, input diff, and environment diff views;
+- pause, inspect, and exclude controls where supported.
+
+**Gate G3.3, investigation legibility review:** Approve only if an unfamiliar
+viewer can identify what is known, what is suspected, what is running, and why
+a branch changed state without reading a chat transcript.
+
+#### Step 3.4: Build the reproduction proof experience
+
+Deliverables:
+
+- original and reproduced signatures shown side by side;
+- evidence lineage from observation through experiment to result;
+- smallest known input and environment delta;
+- runnable test, reproduction steps, export controls, and limitations;
+- complete empty, loading, error, partial, and completed states.
+
+**Gate G3.4, proof and accessibility review:** Approve only if the final claim
+is supported by inspectable evidence, exported artifacts match the displayed
+result, and the primary workflow meets the defined accessibility requirements.
+
+#### Step 3.5: Validate comprehension
+
+Deliverables:
+
+- five short, consistently moderated tests with target engineers;
+- time-to-understanding measurements;
+- observed confusion points and ranked corrections;
+- a revised interface with critical issues resolved.
+
+**Gate G3.5, Phase 3 exit review:** Approve only if a new viewer can identify
+the observed failure, current hypotheses, winning experiment, and proof in
+under 60 seconds without verbal guidance.
 
 ### Phase 4: Realistic investigation and artifact quality, 7 to 16 October
 
-Objectives:
+Goal: replace the teaching fixture with a credible incident and make the result
+safe, repeatable, and useful outside the interface.
 
-- replace the simple incident with the selected realistic case;
-- add reproduction minimization and synthetic-data support if needed;
-- make runs deterministic enough for a live demonstration;
-- export the reproduction package and regression test;
-- add audit logs, redaction evidence, and explicit limitations;
-- test clean setup from the public repository.
+#### Step 4.1: Integrate the selected realistic incident
 
-Gate P4 passes when two independent runs produce an equivalent proof and no
-secret or customer data enters stored fixtures, prompts, logs, or artifacts.
+Deliverables:
 
-### Phase 5: Submission and demo, 17 to 27 October
+- a sanitized, rights-cleared realistic capsule;
+- a stable target failure signature;
+- at least three plausible competing hypotheses;
+- a documented expected reproduction and known-good comparison;
+- updated fixtures and test coverage.
 
-Objectives:
+**Gate G4.1, incident fidelity review:** Approve only if the case represents a
+credible production-only failure, contains no restricted data, and cannot be
+solved by a trivial hard-coded lookup.
 
-- write a public README with architecture, setup, safety, and limitations;
-- add the required open-source license and dependency notices;
-- create a polished seeded demo and optional live path;
-- record a three-minute video with captions;
-- prepare the Devpost narrative around problem, proof, sponsor fit, and impact;
-- test the repository with a clean reviewer setup.
+#### Step 4.2: Minimize and package the reproduction
 
-Gate P5 passes when an unfamiliar reviewer can run the project, understand the
-value in the first 30 seconds of the video, and see the complete proof within
-three minutes.
+Deliverables:
 
-### Submission buffer, 28 to 30 October
+- automated or guided minimization of the successful branch;
+- synthetic triggering data where the case requires data shape;
+- a self-contained reproduction package;
+- a failing regression test and machine-readable result manifest;
+- a comparison between full and minimized reproductions.
 
-Only bug fixes, documentation corrections, rehearsal, upload verification, and
-submission checks are permitted during the buffer.
+**Gate G4.2, artifact usefulness review:** Approve only if the package preserves
+the target signature, removes unrelated material, contains no source secrets,
+and can be run independently of the Scully interface.
+
+#### Step 4.3: Harden safety and operational behavior
+
+Deliverables:
+
+- adversarial capsule and prompt-injection coverage;
+- secret, path traversal, command policy, and export tests;
+- resource ceilings, cancellation, retry, and recovery behavior;
+- audit logs with provenance and redaction evidence;
+- explicit handling for insufficient evidence and inconclusive results.
+
+**Gate G4.3, safety review:** Approve only if high-severity safety tests pass,
+unsafe failures close the investigation rather than weaken controls, and no
+secret reaches prompts, logs, screenshots, fixtures, or exported artifacts.
+
+#### Step 4.4: Prove reliability and clean setup
+
+Deliverables:
+
+- repeated local and sponsor-stack runs;
+- clean-checkout installation and setup verification;
+- latency, failure-rate, and credit-consumption measurements;
+- a deterministic seeded path and a tested live path;
+- documented recovery instructions for external-service failure.
+
+**Gate G4.4, reliability review:** Approve only if two independent runs produce
+equivalent proof, a clean reviewer setup succeeds, and the demo remains within
+the measured time and credit budgets.
+
+#### Step 4.5: Freeze the feature set
+
+Deliverables:
+
+- an accepted release scope and deferred-work list;
+- resolved critical and high-severity defects;
+- final architecture, data-flow, and threat-boundary diagrams;
+- a release candidate tagged for submission work.
+
+**Gate G4.5, Phase 4 exit review:** Approve only if the product proves its core
+claim with the realistic incident, has no open release-blocking defect, and can
+enter submission work without additional feature development.
+
+### Phase 5: Submission narrative and demonstration, 17 to 27 October
+
+Goal: make the finished work easy for judges and developers to understand,
+verify, and run.
+
+#### Step 5.1: Lock the story and demonstration script
+
+Deliverables:
+
+- a concise problem, product, proof, and impact narrative;
+- a timed storyboard targeting 2 minutes 40 seconds;
+- exact seeded and live demo scripts;
+- an evidence checklist for every public claim;
+- a fallback plan for network or service failure.
+
+**Gate G5.1, narrative review:** Approve only if the first 30 seconds establish
+the user problem and safety boundary, the demonstration proves the claim, and
+all sponsor technologies have clear, necessary roles.
+
+#### Step 5.2: Prepare the public repository
+
+Deliverables:
+
+- a README covering value, architecture, setup, demonstration, safety, and
+  limitations;
+- license, dependency notices, contribution guidance, and example capsule;
+- verified installation and execution commands;
+- repository-history, secret, link, spelling, and formatting checks.
+
+**Gate G5.2, public repository review:** Approve only if an unfamiliar developer
+can understand and run the project from a clean checkout, every public claim is
+supportable, and no private or sensitive material is present.
+
+#### Step 5.3: Record and finish the demonstration video
+
+Deliverables:
+
+- a polished recording at the target resolution;
+- captions and legible interface text;
+- clear coverage of capsule review, competing branches, deterministic proof,
+  and the resulting test;
+- a verified upload-ready video within the competition limit.
+
+**Gate G5.3, video review:** Approve only if a first-time viewer understands the
+value within 30 seconds, sees the complete proof within three minutes, and can
+read all critical evidence without pausing.
+
+#### Step 5.4: Complete the submission package
+
+Deliverables:
+
+- final title, summary, problem statement, technical description, and impact;
+- accurate sponsor-technology and prize-category selections;
+- repository, video, demonstration, and supporting links;
+- required team, license, eligibility, and disclosure fields;
+- a character-limit and link validation pass.
+
+**Gate G5.4, submission completeness review:** Approve only if every required
+field is complete, all links work without private access, claims match the
+repository and video, and the selected categories are defensible.
+
+#### Step 5.5: Conduct an independent release review
+
+Deliverables:
+
+- one full review by a person unfamiliar with the project;
+- a clean-machine setup run;
+- a complete video and submission read-through;
+- a final release-blocker list and disposition;
+- the approved submission candidate.
+
+**Gate G5.5, Phase 5 exit review:** Approve only if the independent reviewer can
+run the project, understand the submission, and observe the promised proof
+without author assistance, with no unresolved release blocker.
+
+### Phase 6: Submission buffer, 28 to 30 October
+
+Goal: protect the submission from late regression, upload, and administrative
+failure. New features are prohibited in this phase.
+
+#### Step 6.1: Freeze and verify the release
+
+Deliverables:
+
+- a versioned release commit and artifact checksum;
+- a final automated test, secret scan, and clean-setup result;
+- verified seeded-demo data and service configuration;
+- a documented rollback point.
+
+**Gate G6.1, release freeze review:** Approve only if the release candidate is
+reproducible, all required checks pass, and any remaining issue is explicitly
+accepted as non-blocking.
+
+#### Step 6.2: Upload and verify every submission artifact
+
+Deliverables:
+
+- uploaded video, repository link, images, and submission text;
+- playback, permissions, link, caption, and rendering verification;
+- screenshots of the completed submission fields;
+- a deadline and timezone check.
+
+**Gate G6.2, upload review:** Approve only if every artifact is accessible in a
+signed-out session, the correct versions are live, and the submission can be
+completed before the deadline without another build.
+
+#### Step 6.3: Submit and archive the final evidence
+
+Deliverables:
+
+- confirmed submission receipt;
+- final submitted text and link inventory;
+- archived release commit, video, screenshots, and gate records;
+- a short list of post-submission issues that do not alter the entry.
+
+**Gate G6.3, Phase 6 exit review:** Approve only after receipt is confirmed and
+the exact submitted state can be reconstructed from the archived evidence.
+After approval, only competition-requested corrections are permitted.
 
 ## 11. Demo storyboard
 
@@ -476,8 +869,8 @@ hackathon. It requires repeated use with real engineering teams.
 4. Sketch the five screens using the exact evidence from that incident.
 5. Ask three engineers whether the proof view changes what they would trust.
 6. Confirm sponsor sandbox access and zero-cost limits.
-7. Approve, narrow, or reject the concept at Gate P0 before building the full
-   interface.
+7. Complete Gate G0.1 before treating the current problem framing as the
+   project baseline.
 
 The UI concept and technical architecture should develop from the same real
 incident. A visually polished fictional workflow is not sufficient validation.
