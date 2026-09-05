@@ -14,7 +14,7 @@ customer data.
 - Phase: Problem and boundary validation
 - Completed gates: G0.1
 - Active step: Step 0.2, assemble candidate incident capsules
-- Next gate: G0.2, evidence safety review
+- Active gate: G0.2, evidence safety review
 - Implementation: Not started
 - Out-of-pocket cost limit: Zero
 - Submission deadline: 30 October 2026
@@ -27,6 +27,8 @@ customer data.
 | [Problem-first opportunity search](research/problem-first-opportunity-search.md) | Evidence and ranking that led to the current direction | Research complete |
 | [Problem boundary](product/problem-boundary.md) | Primary user, incident class, system boundary, reproduction contract, assumptions, and kill conditions | Approved at G0.1 |
 | [Gate G0.1 review](gates/G0.1-problem-framing-review.md) | Evidence and decision record for the problem framing | Approved |
+| [Candidate incidents](validation/candidate-incidents.md) | Three synthetic incident capsules and their comparative safety case | Proposed for G0.2 |
+| [Gate G0.2 review](gates/G0.2-evidence-safety-review.md) | Evidence and decision record for candidate capsule safety | In review |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |
 
 The Apache License 2.0 in the repository root remains the project license.
