@@ -9,32 +9,41 @@
 Step 0.2 requires three incident candidates that can be investigated without
 production credentials, customer records, secrets, or unclear data rights.
 These candidates are synthetic reconstructions based on publicly documented
-Node.js and Express behavior. No third-party application code, private logs, or
-personal data is included.
+behavior across three application ecosystems. No third-party application code,
+private logs, or personal data is included.
 
-All three candidates use the same broad implementation environment so later
-validation measures the reproduction workflow rather than cross-language
-support:
+## Selection rules
 
-- JavaScript or TypeScript;
-- Node.js;
-- small HTTP services or workers;
-- container-runnable dependencies;
-- machine-readable failure signatures.
+Phase 0 selects incidents by problem quality and evidence safety, not by the
+language or framework that Scully may later use for its own implementation.
+The candidate set must:
+
+- define the capsule independently of programming language;
+- cover at least two application ecosystems;
+- represent different failure variables and evidence shapes;
+- prefer a real, public, or safely reconstructable incident pattern when one
+  is available;
+- use synthetic evidence when it provides the clearest safety boundary;
+- remain executable in an isolated environment;
+- provide a stable machine-readable signature and known-good comparison;
+- defer Scully's implementation stack decision to Gate G1.4.
+
+Language diversity is not a product promise. It is a Phase 0 control against
+mistaking one ecosystem's tooling conventions for a general capsule contract.
 
 ## Candidate summary
 
-| Rank | Candidate | Primary variable | Required signature | Safety disposition |
-|---:|---|---|---|---|
-| 1 | [Proxy identity collapse](candidates/proxy-identity-collapse.md) | Reverse-proxy trust configuration plus forwarded client addresses | Two distinct clients produce HTTP 200 then HTTP 429 under one internal identity | Safe to validate |
-| 2 | [Express wildcard upgrade failure](candidates/express-wildcard-upgrade.md) | Express 4 to Express 5 dependency change plus an unnamed wildcard route | Process exits with a normalized missing-parameter route error | Safe to validate |
-| 3 | [Localhost address-family mismatch](candidates/localhost-address-family.md) | Node.js DNS result order plus an IPv4-only local dependency | Connection fails with `ECONNREFUSED` to `::1` | Safe to validate |
+| Rank | Candidate | Ecosystem | Primary variable | Required signature | Safety disposition |
+|---:|---|---|---|---|---|
+| 1 | [Proxy identity collapse](candidates/proxy-identity-collapse.md) | Node.js and Express | Reverse-proxy trust configuration plus forwarded client addresses | Two distinct clients produce HTTP 200 then HTTP 429 under one internal identity | Safe to validate |
+| 2 | [Pydantic settings migration failure](candidates/pydantic-settings-migration.md) | Python and Pydantic | Resolved dependency version plus a settings import | Process exits with a normalized `PydanticImportError` | Safe to validate |
+| 3 | [Jackson classpath version skew](candidates/jackson-classpath-version-skew.md) | JVM and Jackson | Compile-time and runtime library-version mismatch | Request fails with a normalized `NoSuchMethodError` | Safe to validate |
 
 The ranking is provisional. Gate G0.2 decides only whether the evidence is
 safe and rights-cleared. Steps 0.3 and 0.4 determine reproducibility, user
 value, and the final demonstration case.
 
-## Common capsule rules
+## Technology-neutral capsule rules
 
 Each draft capsule contains or plans only:
 
@@ -76,19 +85,21 @@ their own licenses and will be installed through their normal package manager.
 
 ## Cross-candidate comparison
 
-| Dimension | Proxy identity collapse | Express wildcard upgrade | Localhost address-family mismatch |
+| Dimension | Proxy identity collapse | Pydantic settings migration | Jackson classpath version skew |
 |---|---|---|---|
-| Production-specific quality | High, depends on reverse-proxy topology | Medium, depends on deployed dependency version | High, depends on runtime and resolver environment |
-| Branching value | High, several config and header hypotheses | Medium, dependency and route hypotheses | Medium, runtime, resolver, bind-address, and network hypotheses |
-| Signature clarity | High, HTTP sequence plus normalized client identity | High, process exit plus stable error tokens | High, error code, address, and port |
-| Known-good comparison | Correct trusted-proxy boundary | Express 4 or named Express 5 wildcard | IPv4-first resolution or dual-stack listener |
+| Production-specific quality | High, depends on reverse-proxy topology | Medium, depends on deployed dependency resolution | High, depends on the packaged runtime classpath |
+| Branching value | High, several config and header hypotheses | Medium, package and import hypotheses | High, several transitive dependency and classpath hypotheses |
+| Signature clarity | High, HTTP sequence plus normalized client identity | High, process exit plus stable error type and tokens | High, request failure plus missing method descriptor |
+| Known-good comparison | Correct trusted-proxy boundary | Pydantic 1 or migrated settings import | Consistent Jackson versions managed as one set |
 | External services required | None | None | None |
 | Expected manual setup | Low | Low | Medium |
-| Main validation risk | A custom limiter may feel artificial | Failure may be too easy to diagnose | Host resolver behavior may vary unless fully controlled |
+| Main validation risk | A custom limiter may feel artificial | Failure may be too easy to diagnose | Exact version-skew fixture may require careful pinning |
 
 ## Step 0.2 conclusion
 
 All three candidate capsules are safe to assemble for manual reproduction.
-They use synthetic evidence, documented software behavior, explicit licenses,
-reserved network examples, and no production access. This conclusion does not
-claim that the cases reproduce successfully. That claim belongs to Gate G0.3.
+They span Node.js, Python, and JVM applications while using the same
+technology-neutral evidence contract. They use synthetic evidence, documented
+software behavior, explicit licenses, reserved network examples where needed,
+and no production access. This conclusion does not claim that the cases
+reproduce successfully. That claim belongs to Gate G0.3.

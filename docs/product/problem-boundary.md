@@ -90,6 +90,13 @@ The first release excludes:
 
 ## 6. System boundary
 
+An incident capsule is a portable, versioned, engineer-reviewed evidence
+bundle. It describes the observed failure and contains only the artifacts that
+the engineer has explicitly approved for investigation. It is independent of
+programming language, package manager, application framework, and Scully's own
+implementation stack. A capsule is not a production export, container image,
+or request for live system access.
+
 ### Inputs
 
 Scully may receive only artifacts explicitly selected for an incident capsule:

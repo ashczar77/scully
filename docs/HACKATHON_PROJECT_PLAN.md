@@ -285,6 +285,10 @@ These choices become binding only after the technical spike.
 
 ## 9. Incident capsule contract
 
+An incident capsule is a portable, versioned, engineer-reviewed evidence
+bundle. Its contract is technology-neutral even when an individual capsule
+contains ecosystem-specific artifacts.
+
 The first capsule should contain only explicitly selected artifacts:
 
 - failure signature and expected matching rules;
