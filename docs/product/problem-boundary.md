@@ -1,6 +1,6 @@
 # Scully Problem Boundary
 
-**Status:** Proposed for Gate G0.1
+**Status:** Approved at Gate G0.1
 
 **Date:** 2026-09-05
 
