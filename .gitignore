@@ -7,5 +7,10 @@
 /validation/**/.venv/
 /validation/**/target/
 
+# Local credentials and environment
+.env
+.env.*
+!.env.example
+
 # Local agent instructions
 /AGENTS.md
