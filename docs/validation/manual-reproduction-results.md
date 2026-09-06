@@ -1,6 +1,6 @@
 # Step 0.3 Manual Reproduction Results
 
-**Status:** Proposed for Gate G0.3
+**Status:** Approved at Gate G0.3
 
 **Run date:** 2026-09-06
 

@@ -1,6 +1,6 @@
 # Phase 0 Candidate Incidents
 
-**Status:** Manual validation complete, proposed for Gate G0.3
+**Status:** Manual validation approved at Gate G0.3
 
 **Date:** 2026-09-05
 

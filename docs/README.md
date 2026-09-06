@@ -12,9 +12,9 @@ customer data.
 ## Current status
 
 - Phase: Problem and boundary validation
-- Completed gates: G0.1 and G0.2
-- Active step: Step 0.3, prove manual reproducibility
-- Active gate: G0.3, reproduction viability review
+- Completed gates: G0.1 through G0.3
+- Active step: Step 0.4, validate user value and select the demonstration case
+- Next gate: G0.4, Phase 0 exit review
 - Implementation: Not started
 - Out-of-pocket cost limit: Zero
 - Submission deadline: 30 October 2026
@@ -29,16 +29,17 @@ customer data.
 | [Gate G0.1 review](gates/G0.1-problem-framing-review.md) | Evidence and decision record for the problem framing | Approved |
 | [Candidate incidents](validation/candidate-incidents.md) | Three synthetic incident capsules and their comparative safety case | Approved at G0.2 |
 | [Gate G0.2 review](gates/G0.2-evidence-safety-review.md) | Evidence and decision record for candidate capsule safety | Approved after revision |
-| [Manual reproduction results](validation/manual-reproduction-results.md) | Clean-run results, exact versions, failed attempts, and limitations for all three incidents | Proposed for G0.3 |
-| [Gate G0.3 review](gates/G0.3-reproduction-viability-review.md) | Evidence and decision record for manual reproduction viability | In review |
+| [Manual reproduction results](validation/manual-reproduction-results.md) | Clean-run results, exact versions, failed attempts, and limitations for all three incidents | Approved at G0.3 |
+| [Gate G0.3 review](gates/G0.3-reproduction-viability-review.md) | Evidence and decision record for manual reproduction viability | Approved |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |
 
 The Apache License 2.0 in the repository root remains the project license.
 
 ## Immediate decision
 
-Gate G0.3 must decide whether the three clean manual reproductions are
-sufficient to establish viability. Approval authorizes user-value validation
-and demonstration-case selection in Step 0.4.
+Step 0.4 must collect structured feedback from at least three target engineers,
+determine whether executable proof is materially more useful than explanation
+alone, and select one demonstration case plus one backup. Gate G0.4 decides
+whether the project may enter sponsor-stack feasibility work.
 
 New documentation should support the active hackathon project.
