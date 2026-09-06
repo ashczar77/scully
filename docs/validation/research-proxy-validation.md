@@ -1,6 +1,6 @@
 # Step 0.4 Research-Based Proxy Validation
 
-**Status:** Proposed for Gate G0.4
+**Status:** Approved at Gate G0.4 with explicit validation debt
 
 **Research date:** 2026-09-06
 

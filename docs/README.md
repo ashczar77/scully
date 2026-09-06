@@ -11,10 +11,10 @@ customer data.
 
 ## Current status
 
-- Phase: Problem and boundary validation
-- Completed gates: G0.1 through G0.3
-- Active step: Step 0.4, submitted for review
-- Active gate: G0.4, Phase 0 exit review
+- Phase: Sponsor-stack and architecture feasibility
+- Completed gates: G0.1 through G0.4
+- Active step: Step 1.1, confirm access, limits, and cost controls
+- Next gate: G1.1, access and cost review
 - Implementation: Not started
 - Out-of-pocket cost limit: Zero
 - Submission deadline: 30 October 2026
@@ -23,7 +23,7 @@ customer data.
 
 | Document | Purpose | Status |
 |---|---|---|
-| [Hackathon project plan](HACKATHON_PROJECT_PLAN.md) | Product boundary, trust UI, architecture, delivery phases, demo, risks, and acceptance gates | Proposed |
+| [Hackathon project plan](HACKATHON_PROJECT_PLAN.md) | Product boundary, trust UI, architecture, delivery phases, demo, risks, and acceptance gates | Active baseline |
 | [Problem-first opportunity search](research/problem-first-opportunity-search.md) | Evidence and ranking that led to the current direction | Research complete |
 | [Problem boundary](product/problem-boundary.md) | Primary user, incident class, system boundary, reproduction contract, assumptions, and kill conditions | Approved at G0.1 |
 | [Gate G0.1 review](gates/G0.1-problem-framing-review.md) | Evidence and decision record for the problem framing | Approved |
@@ -31,8 +31,8 @@ customer data.
 | [Gate G0.2 review](gates/G0.2-evidence-safety-review.md) | Evidence and decision record for candidate capsule safety | Approved after revision |
 | [Manual reproduction results](validation/manual-reproduction-results.md) | Clean-run results, exact versions, failed attempts, and limitations for all three incidents | Approved at G0.3 |
 | [Gate G0.3 review](gates/G0.3-reproduction-viability-review.md) | Evidence and decision record for manual reproduction viability | Approved |
-| [Research-based proxy validation](validation/research-proxy-validation.md) | Public evidence, three proxy analyses, scorecard, and demonstration-case selection | Proposed for G0.4 |
-| [Gate G0.4 review](gates/G0.4-phase-0-exit-review.md) | Evidence and decision record for the Phase 0 exit | In review |
+| [Research-based proxy validation](validation/research-proxy-validation.md) | Public evidence, three proxy analyses, scorecard, and demonstration-case selection | Approved at G0.4 with validation debt |
+| [Gate G0.4 review](gates/G0.4-phase-0-exit-review.md) | Evidence and decision record for the Phase 0 exit | Approved with validation debt |
 | [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol retained for later direct validation | Deferred evidence |
 | [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for later direct validation | Ready for future use |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |
@@ -41,10 +41,9 @@ The Apache License 2.0 in the repository root remains the project license.
 
 ## Immediate decision
 
-Gate G0.4 must decide whether public practitioner evidence and three explicit
-proxy analyses provide enough confidence to enter sponsor-stack feasibility
-work. The submission selects proxy identity collapse as the demonstration case
-and Jackson classpath version skew as the backup while retaining direct user
-validation as evidence debt.
+Step 1.1 must verify access to the required sponsor services, document current
+pricing and limits, establish a zero-spend usage budget, and define a method for
+measuring each investigation. Gate G1.1 decides whether the required services
+can be used without out-of-pocket spending.
 
 New documentation should support the active hackathon project.
