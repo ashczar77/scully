@@ -3,6 +3,9 @@
 
 # Generated working files
 /tmp/
+/validation/**/node_modules/
+/validation/**/.venv/
+/validation/**/target/
 
 # Local agent instructions
 /AGENTS.md

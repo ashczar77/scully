@@ -2,7 +2,7 @@
 
 **Capsule ID:** `proxy-identity-collapse-v0`
 
-**Status:** Approved at Gate G0.2 for manual validation
+**Status:** Manually reproduced for Gate G0.3
 
 **Evidence class:** Synthetic reconstruction
 
@@ -34,8 +34,8 @@ and the [Express application setting](https://expressjs.com/en/5x/api/applicatio
 
 | Field | Incident value | Known-good value |
 |---|---|---|
-| Runtime | Node.js 24 LTS candidate image, pinned during Step 0.3 | Same |
-| Framework | Express 5, exact version pinned during Step 0.3 | Same |
+| Runtime | Node.js 22.22.2 | Same |
+| Framework | Express 5.2.1 | Same |
 | Proxy topology | One controlled local reverse-proxy hop | Same |
 | `trust proxy` | `false` | Trusted loopback proxy only |
 | Limiter | Project-created in-memory limiter, one request per identity | Same |
@@ -120,6 +120,12 @@ that forwarded headers must be overwritten by the last trusted proxy.
 
 ## Open questions
 
-- Should the limiter remain project-created or use a common package?
-- Which proxy implementation produces the smallest credible fixture?
-- Does trusting loopback alone behave consistently in the chosen sandbox?
+- Should a common rate-limiter package replace the project-created limiter for
+  the demonstration candidate?
+- Does trusting loopback alone behave consistently in Token Factory Sandboxes?
+
+## Manual validation result
+
+The incident and known-good configurations each passed their deterministic
+expectations in three clean temporary directories on 2026-09-06. See
+[Step 0.3 manual reproduction results](../manual-reproduction-results.md).

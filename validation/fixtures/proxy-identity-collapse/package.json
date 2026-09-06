@@ -1,0 +1,12 @@
+{
+  "name": "scully-validation-proxy-identity-collapse",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "validate": "node run-case.mjs"
+  },
+  "dependencies": {
+    "express": "5.2.1"
+  }
+}

@@ -1,6 +1,6 @@
 # Phase 0 Candidate Incidents
 
-**Status:** Approved at Gate G0.2 for manual validation
+**Status:** Manual validation complete, proposed for Gate G0.3
 
 **Date:** 2026-09-05
 
@@ -101,5 +101,7 @@ All three candidate capsules are safe to assemble for manual reproduction.
 They span Node.js, Python, and JVM applications while using the same
 technology-neutral evidence contract. They use synthetic evidence, documented
 software behavior, explicit licenses, reserved network examples where needed,
-and no production access. This conclusion does not claim that the cases
-reproduce successfully. That claim belongs to Gate G0.3.
+and no production access. Manual validation later reproduced all three cases
+in three clean runs each, with three known-good non-matches each. The evidence
+and limitations are recorded in the
+[Step 0.3 results](manual-reproduction-results.md).

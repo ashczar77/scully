@@ -2,7 +2,7 @@
 
 **Capsule ID:** `pydantic-settings-migration-v0`
 
-**Status:** Approved at Gate G0.2 for manual validation
+**Status:** Manually reproduced for Gate G0.3
 
 **Evidence class:** Synthetic reconstruction based on a documented migration
 
@@ -35,19 +35,18 @@ reporter metadata from the issue.
 
 | Field | Incident value | Known-good value |
 |---|---|---|
-| Runtime | Python 3.11, exact patch pinned during Step 0.3 | Same |
-| Pydantic | Exact 2.x version pinned during Step 0.3 | Exact 1.10.x version pinned during Step 0.3 |
+| Runtime | Python 3.14.6 | Same |
+| Pydantic | 2.13.5 | 1.10.26 |
 | Settings import | `from pydantic import BaseSettings` | Same source |
-| Install mode | Hash-pinned requirements file | Hash-pinned requirements file |
-| Service fixture | Original minimal API startup module | Same |
+| Install mode | Exact-version requirements file | Exact-version requirements file |
+| Service fixture | Original minimal startup module | Same |
 
 ### Synthetic input sequence
 
 1. Create a clean virtual environment.
 2. Install the declared dependency set.
 3. Start the fixture service.
-4. Capture process exit, normalized standard error, and readiness result.
-5. If startup succeeds, request `/health` and record the response.
+4. Capture process exit, normalized standard error, and ready output.
 
 No user or customer records are required. The settings class contains only
 synthetic names and non-secret defaults.
@@ -64,7 +63,7 @@ Required matchers:
 | Error type | `PydanticImportError` |
 | Required message tokens | `BaseSettings`, `moved`, `pydantic-settings` |
 | Required stack module | `pydantic` migration module |
-| Readiness probe | No successful listener response |
+| Ready output | Absent |
 
 Absolute paths, line numbers, and documentation-version segments are excluded
 from matching.
@@ -72,8 +71,8 @@ from matching.
 ### Known-good non-match
 
 With the same application source and the pinned Pydantic 1 dependency set, the
-service must start, `/health` must return HTTP 200, and the target import-error
-signature must not match.
+service must exit successfully, print its JSON ready result, and avoid the
+target import-error signature.
 
 A migrated Pydantic 2 comparison using `pydantic-settings` may be tested as
 additional evidence. It is not required for the initial reproduction contract.
@@ -110,15 +109,19 @@ unchanged.
 
 ## Step 0.3 manual reproduction outline
 
-1. Generate or verify hash-pinned Pydantic 1 and Pydantic 2 requirements.
+1. Verify the exact Pydantic 1 and Pydantic 2 requirements.
 2. Run the unchanged fixture with Pydantic 2 in three clean environments.
 3. Run the unchanged fixture with Pydantic 1 in three clean environments.
-4. Compare exit, error, readiness, and health behavior.
+4. Compare exit, error, and ready-output behavior.
 5. Test the migrated Pydantic 2 import separately if time permits.
 
 ## Open questions
 
-- Which exact Pydantic 1 and 2 versions should be pinned?
-- Does the fixture need an API framework, or is an import-time service module
-  sufficient to represent the incident?
 - Is this case complex enough to demonstrate useful hypothesis branching?
+
+## Manual validation result
+
+Pydantic 2.13.5 produced the target import failure in three clean virtual
+environments. Pydantic 1.10.26 produced the ready result in three separate
+clean virtual environments using identical source. See
+[Step 0.3 manual reproduction results](../manual-reproduction-results.md).

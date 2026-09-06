@@ -2,16 +2,16 @@
 
 **Capsule ID:** `jackson-classpath-version-skew-v0`
 
-**Status:** Approved at Gate G0.2 for manual validation
+**Status:** Manually reproduced for Gate G0.3
 
 **Evidence class:** Synthetic reconstruction based on a public dependency issue
 
 ## Incident narrative
 
-A JVM HTTP service starts, but a JSON-producing endpoint fails at request time
-with `NoSuchMethodError`. One Jackson component was compiled against a method
-that is absent from the version loaded on the deployed runtime classpath. A
-development build with a consistent managed dependency set succeeds.
+A JVM application fails during JSON serialization with `NoSuchMethodError`.
+Jackson Databind was compiled against a method that is absent from the Jackson
+Core version loaded on the deployed runtime classpath. A development run with
+a consistent dependency set succeeds.
 
 The [Spring Boot build-system guide](https://docs.spring.io/spring-boot/reference/using/build-systems.html)
 explains that each Spring Boot release manages a curated, consistent dependency
@@ -28,7 +28,7 @@ and purpose-built version pins rather than copied application artifacts.
   graphs.
 - Maven or Gradle dependency reports provide strong but incomplete evidence.
 - The failure type and missing method descriptor are machine-readable.
-- The full service and dependency graph can run without external systems.
+- The complete probe and dependency graph can run without external systems.
 
 ## Draft capsule
 
@@ -36,24 +36,22 @@ and purpose-built version pins rather than copied application artifacts.
 
 | Field | Incident value | Known-good value |
 |---|---|---|
-| Runtime | Eclipse Temurin Java 21, exact image pinned during Step 0.3 | Same |
-| Build tool | Maven or Gradle, selected during Step 0.3 | Same |
-| Application | Original minimal JSON endpoint | Same |
-| Compile-time Jackson set | Exact compatible versions pinned during Step 0.3 | Same |
-| Runtime Jackson set | Deliberately incompatible version skew | One consistent managed set |
-| Input | Synthetic `GET /sample` request | Same |
+| Runtime | Java 26.0.2.1, compiling for release 21 | Same |
+| Build tool | Maven 3.9.16 | Same |
+| Application | Original minimal JSON serialization probe | Same |
+| Compile-time Jackson set | Databind, Annotations, and Core 2.18.2 | Same |
+| Runtime Jackson set | Databind 2.18.2, Annotations 2.18.2, Core 2.15.4 | Databind, Annotations, and Core 2.18.2 |
+| Input | Synthetic map containing `status=ready` | Same |
 
-The exact Jackson method and versions remain to be selected through a small
-fixture spike. The candidate is not considered reproduced until those values
-are pinned and pass Gate G0.3.
+The incident removes `BufferRecycler.releaseToPool()` from the effective
+runtime API by loading Jackson Core 2.15.4 with Jackson Databind 2.18.2.
 
 ### Synthetic input sequence
 
 1. Build the service against the declared compile-time dependency set.
 2. Assemble the incident runtime classpath with the declared incompatible set.
-3. Start the service and wait for readiness.
-4. Request the JSON-producing endpoint with a fixed correlation identifier.
-5. Capture HTTP status, normalized exception chain, runtime artifact versions,
+3. Execute the fixed serialization probe.
+4. Capture process exit, normalized exception chain, runtime artifact versions,
    and dependency graph.
 
 The request and response objects contain only small project-created fields.
@@ -66,35 +64,33 @@ Required matchers:
 
 | Matcher | Expected value |
 |---|---|
-| Service readiness | Successful before target request |
-| Target request outcome | HTTP 500 or declared failing test outcome |
+| Process outcome | Nonzero exit during serialization |
 | Error type | `java.lang.NoSuchMethodError` |
-| Missing owner | Declared Jackson class |
-| Missing method | Exact normalized method name and descriptor, pinned during Step 0.3 |
-| Request correlation | Synthetic target request only |
+| Missing owner | `com.fasterxml.jackson.core.util.BufferRecycler` |
+| Missing method | `releaseToPool()` |
+| Trigger | Serialization of the fixed ready object |
 
 Absolute paths, JVM-generated identifiers, timestamps, and unstable stack
 line numbers are excluded from matching.
 
 ### Known-good non-match
 
-With the consistent managed Jackson set, the service must start, the target
-endpoint must return HTTP 200 with the expected JSON fixture, and the target
-linkage-error signature must not match.
+With Jackson Core 2.18.2, the identical compiled probe must exit successfully,
+print `{"status":"ready"}`, and avoid the target linkage-error signature.
 
 ### Expected environment delta
 
-The expected delta is the runtime Jackson dependency graph. Application source,
-compiled application classes, Java runtime, request fixture, and startup
-configuration remain unchanged.
+The expected delta is Jackson Core 2.15.4 instead of 2.18.2 on the runtime
+classpath. Application source, compiled application classes, Java runtime,
+Jackson Databind, Jackson Annotations, and input remain unchanged.
 
 ## Artifact inventory
 
 | Planned artifact | Provenance | Sensitivity | Redaction | Rights and handling |
 |---|---|---|---|---|
 | `manifest.json` | Project-created | Public | Not required | Repository license |
-| `signature.json` | Project-created after the version spike | Public | Not required | Repository license |
-| `service/` fixture | Original minimal JVM service | Public | Not required | Repository license |
+| `signature.json` | Project-created from the pinned result | Public | Not required | Repository license |
+| probe fixture | Original minimal JVM application | Public | Not required | Repository license |
 | build definition | Original dependency declarations | Public | Not required | Repository license |
 | lock or verification metadata | Generated through the build tool | Public | Local-path scan | Dependency metadata under applicable terms |
 | dependency graph | Generated from the fixture build | Public | Normalize local repository paths | Facts about declared dependencies |
@@ -115,7 +111,7 @@ configuration remain unchanged.
 
 ## Step 0.3 manual reproduction outline
 
-1. Select a documented Jackson method-removal pair and exact versions.
+1. Build the original fixture against Jackson 2.18.2.
 2. Build the original fixture against the declared compile-time set.
 3. Run the skewed runtime classpath in three clean environments.
 4. Run the consistent managed classpath in three clean environments.
@@ -124,7 +120,11 @@ configuration remain unchanged.
 
 ## Open questions
 
-- Which exact Jackson method and version pair gives the smallest stable case?
-- Should the fixture use plain Java or a minimal Spring Boot endpoint?
-- Can the runtime classpath be changed without rebuilding application classes?
 - Is the setup compact enough for the final demonstration if this case wins?
+
+## Manual validation result
+
+Jackson Databind 2.18.2 with Jackson Core 2.15.4 produced the target
+`NoSuchMethodError` in three clean builds. The same compiled source with a
+consistent Jackson 2.18.2 runtime produced the ready result three times. See
+[Step 0.3 manual reproduction results](../manual-reproduction-results.md).
