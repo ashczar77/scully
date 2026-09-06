@@ -2,7 +2,7 @@
 
 **Capsule ID:** `jackson-classpath-version-skew-v0`
 
-**Status:** Draft for Gate G0.2
+**Status:** Approved at Gate G0.2 for manual validation
 
 **Evidence class:** Synthetic reconstruction based on a public dependency issue
 
