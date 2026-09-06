@@ -31,6 +31,8 @@ customer data.
 | [Gate G0.2 review](gates/G0.2-evidence-safety-review.md) | Evidence and decision record for candidate capsule safety | Approved after revision |
 | [Manual reproduction results](validation/manual-reproduction-results.md) | Clean-run results, exact versions, failed attempts, and limitations for all three incidents | Approved at G0.3 |
 | [Gate G0.3 review](gates/G0.3-reproduction-viability-review.md) | Evidence and decision record for manual reproduction viability | Approved |
+| [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol, privacy rules, pass criteria, and case-selection rubric for Step 0.4 | Ready for interviews |
+| [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for each Step 0.4 participant | Ready for use |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |
 
 The Apache License 2.0 in the repository root remains the project license.
