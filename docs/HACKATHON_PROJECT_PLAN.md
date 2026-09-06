@@ -381,15 +381,20 @@ reject the concept if reproduction depends on a production clone.
 
 Deliverables:
 
-- at least three structured engineer interviews;
-- feedback on the evidence boundary, proof artifact, and trust experience;
+- a triangulated evidence base from primary public engineering sources;
+- at least three source-grounded proxy analyses, with published observations
+  separated from project inferences;
+- evidence signals concerning the boundary, proof artifact, and trust needs;
 - a ranked incident shortlist;
 - one selected incident class and one backup case.
 
 **Gate G0.4, Phase 0 exit review:** Approve only if target engineers consider
 an executable reproduction materially more useful than an explanation alone,
-the selected incident satisfies G0.3, and the project scope remains credible
-before the deadline.
+or public practitioner behavior and explicit proxy analysis provide a credible
+substitute. The selected incident must satisfy G0.3 and the project scope must
+remain credible before the deadline. A proxy-based approval must record direct
+user validation as evidence debt and must not be represented as interview
+evidence.
 
 ### Phase 1: Sponsor-stack and architecture feasibility, 9 to 15 September
 

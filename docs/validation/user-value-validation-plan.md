@@ -1,6 +1,6 @@
 # Step 0.4 User-Value Validation Plan
 
-**Status:** Ready for interviews
+**Status:** Retained for later direct validation
 
 **Date prepared:** 2026-09-06
 
@@ -12,6 +12,12 @@ need before trusting the result, and select one demonstration case plus one
 backup for Gate G0.4.
 
 This step does not select Scully's implementation language or framework.
+
+The current Gate G0.4 submission uses
+[research-based proxy validation](research-proxy-validation.md) because eligible
+participants are not presently accessible. This protocol remains the required
+method when direct validation becomes practical. It is not represented as
+completed evidence for the current gate.
 
 ## Capsule definition
 
@@ -158,9 +164,10 @@ Classify each completed record using only the participant's stated reasoning.
 | Preferred case | Proxy, Pydantic, Jackson, none |
 | Backup case | Proxy, Pydantic, Jackson, none |
 
-## Gate G0.4 pass criteria
+## Direct-validation pass criteria
 
-The step is ready for review only when all of the following are true:
+A future direct-validation round is complete only when all of the following are
+true:
 
 - at least three eligible interviews are complete and sanitized;
 - at least two participants answer yes to executable proof being materially
@@ -221,7 +228,7 @@ final Step 0.4 ranking.
 User relevance, trust, comprehension, and case preference remain unscored until
 the interviews are complete.
 
-## Required outputs
+## Required outputs for direct validation
 
 - at least three completed copies of the
   [engineer interview record template](../templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md);

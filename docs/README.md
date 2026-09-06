@@ -13,8 +13,8 @@ customer data.
 
 - Phase: Problem and boundary validation
 - Completed gates: G0.1 through G0.3
-- Active step: Step 0.4, validate user value and select the demonstration case
-- Next gate: G0.4, Phase 0 exit review
+- Active step: Step 0.4, submitted for review
+- Active gate: G0.4, Phase 0 exit review
 - Implementation: Not started
 - Out-of-pocket cost limit: Zero
 - Submission deadline: 30 October 2026
@@ -31,17 +31,20 @@ customer data.
 | [Gate G0.2 review](gates/G0.2-evidence-safety-review.md) | Evidence and decision record for candidate capsule safety | Approved after revision |
 | [Manual reproduction results](validation/manual-reproduction-results.md) | Clean-run results, exact versions, failed attempts, and limitations for all three incidents | Approved at G0.3 |
 | [Gate G0.3 review](gates/G0.3-reproduction-viability-review.md) | Evidence and decision record for manual reproduction viability | Approved |
-| [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol, privacy rules, pass criteria, and case-selection rubric for Step 0.4 | Ready for interviews |
-| [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for each Step 0.4 participant | Ready for use |
+| [Research-based proxy validation](validation/research-proxy-validation.md) | Public evidence, three proxy analyses, scorecard, and demonstration-case selection | Proposed for G0.4 |
+| [Gate G0.4 review](gates/G0.4-phase-0-exit-review.md) | Evidence and decision record for the Phase 0 exit | In review |
+| [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol retained for later direct validation | Deferred evidence |
+| [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for later direct validation | Ready for future use |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |
 
 The Apache License 2.0 in the repository root remains the project license.
 
 ## Immediate decision
 
-Step 0.4 must collect structured feedback from at least three target engineers,
-determine whether executable proof is materially more useful than explanation
-alone, and select one demonstration case plus one backup. Gate G0.4 decides
-whether the project may enter sponsor-stack feasibility work.
+Gate G0.4 must decide whether public practitioner evidence and three explicit
+proxy analyses provide enough confidence to enter sponsor-stack feasibility
+work. The submission selects proxy identity collapse as the demonstration case
+and Jackson classpath version skew as the backup while retaining direct user
+validation as evidence debt.
 
 New documentation should support the active hackathon project.
