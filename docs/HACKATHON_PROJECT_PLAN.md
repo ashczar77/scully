@@ -446,6 +446,10 @@ framework.
 can run the configuration and measurement tests without credentials, provider
 dependencies, network access, or live infrastructure use.
 
+**Checkpoint G1.2c, provider contract review:** Approve only if mocked tests show
+that every provider boundary enforces its budget, validates external output,
+preserves required provenance, and matches the documented sponsor interfaces.
+
 **Gate G1.2, primitive capability review:** Approve only if each sponsor
 technology performs a necessary role with stable enough behavior for the demo.
 Record any fallback and confirm that it remains competition-compliant.

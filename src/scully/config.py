@@ -78,11 +78,40 @@ class RunBudget:
 
 
 @dataclass(frozen=True, slots=True)
+class ModelPricing:
+    """Published model prices used for preflight and measured-cost checks."""
+
+    input_per_million_usd: Decimal = Decimal("0.06")
+    output_per_million_usd: Decimal = Decimal("0.24")
+
+    def __post_init__(self) -> None:
+        prices = {
+            "input_per_million_usd": self.input_per_million_usd,
+            "output_per_million_usd": self.output_per_million_usd,
+        }
+        for name, value in prices.items():
+            if not value.is_finite() or value < 0:
+                raise ConfigurationError(f"{name} must be finite and non-negative")
+
+    def cost(self, input_tokens: int, output_tokens: int) -> Decimal:
+        """Calculate token cost without converting currency values to floats."""
+
+        if input_tokens < 0 or output_tokens < 0:
+            raise ConfigurationError("Token counts cannot be negative")
+        million = Decimal(1_000_000)
+        return (
+            Decimal(input_tokens) * self.input_per_million_usd
+            + Decimal(output_tokens) * self.output_per_million_usd
+        ) / million
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     """Runtime settings with live access disabled unless explicitly enabled."""
 
     live_enabled: bool
     budget: RunBudget
+    nemotron_pricing: ModelPricing
     nebius_api_key: SecretValue | None = field(default=None, repr=False)
     nebius_project_id: SecretValue | None = field(default=None, repr=False)
     tavily_api_key: SecretValue | None = field(default=None, repr=False)
@@ -131,6 +160,16 @@ class Settings:
                 timeout_seconds=_parse_positive_int(
                     source.get("SCULLY_TIMEOUT_SECONDS", "60"),
                     "SCULLY_TIMEOUT_SECONDS",
+                ),
+            ),
+            nemotron_pricing=ModelPricing(
+                input_per_million_usd=_parse_nonnegative_decimal(
+                    source.get("NEBIUS_INPUT_PRICE_PER_MILLION_USD", "0.06"),
+                    "NEBIUS_INPUT_PRICE_PER_MILLION_USD",
+                ),
+                output_per_million_usd=_parse_nonnegative_decimal(
+                    source.get("NEBIUS_OUTPUT_PRICE_PER_MILLION_USD", "0.24"),
+                    "NEBIUS_OUTPUT_PRICE_PER_MILLION_USD",
                 ),
             ),
             nebius_api_key=_optional_secret(source.get("NEBIUS_API_KEY")),
@@ -227,4 +266,14 @@ def _parse_positive_decimal(value: str, name: str) -> Decimal:
         raise ConfigurationError(f"{name} must be a decimal number") from error
     if not parsed.is_finite() or parsed <= 0:
         raise ConfigurationError(f"{name} must be a finite value above zero")
+    return parsed
+
+
+def _parse_nonnegative_decimal(value: str, name: str) -> Decimal:
+    try:
+        parsed = Decimal(value)
+    except InvalidOperation as error:
+        raise ConfigurationError(f"{name} must be a decimal number") from error
+    if not parsed.is_finite() or parsed < 0:
+        raise ConfigurationError(f"{name} must be finite and non-negative")
     return parsed

@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from decimal import Decimal
 
-from scully.config import ConfigurationError, Provider, Settings
+from scully.config import ConfigurationError, ModelPricing, Provider, Settings
 
 
 class SettingsTests(unittest.TestCase):
@@ -15,6 +15,10 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.budget.max_model_cost_usd, Decimal("0.01"))
         self.assertEqual(settings.budget.max_tavily_credits, 1)
         self.assertEqual(settings.budget.max_sandbox_operations, 1)
+        self.assertEqual(
+            settings.nemotron_pricing.cost(1_000_000, 1_000_000),
+            Decimal("0.30"),
+        )
 
     def test_secrets_are_redacted_from_representations(self) -> None:
         marker = "sensitive-token-marker"
@@ -92,6 +96,10 @@ class SettingsTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ConfigurationError, "Unsupported provider"):
             settings.assert_live_ready("unknown")  # type: ignore[arg-type]
+
+    def test_negative_model_price_fails_closed(self) -> None:
+        with self.assertRaisesRegex(ConfigurationError, "non-negative"):
+            ModelPricing(input_per_million_usd=Decimal("-1"))
 
 
 if __name__ == "__main__":

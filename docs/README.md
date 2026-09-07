@@ -14,8 +14,8 @@ customer data.
 - Phase: Sponsor-stack and architecture feasibility
 - Completed gates: G0.1 through G1.1
 - Active step: Step 1.2, prove the sponsor primitives independently
-- Next checkpoint: G1.2b, offline scaffold review
-- Implementation: Initial offline scaffold submitted for review
+- Next checkpoint: G1.2c, provider contract review
+- Implementation: Mocked provider contracts submitted for review
 - Out-of-pocket cost limit: Zero
 - Submission deadline: 30 October 2026
 
@@ -37,7 +37,9 @@ customer data.
 | [Gate G1.1 review](gates/G1.1-access-and-cost-review.md) | Evidence and decision record for sponsor access and zero-spend controls | Approved with execution conditions |
 | [Phase 1 scaffold specification](feasibility/scaffold-specification.md) | Minimal Python harness boundary for sponsor capability proofs | Approved at G1.2a |
 | [Checkpoint G1.2a review](gates/G1.2a-scaffold-specification-review.md) | Decision record for the Phase 1 scaffold specification | Approved |
-| [Checkpoint G1.2b review](gates/G1.2b-offline-scaffold-review.md) | Evidence and decision record for the initial offline scaffold | In review |
+| [Checkpoint G1.2b review](gates/G1.2b-offline-scaffold-review.md) | Evidence and decision record for the initial offline scaffold | Approved |
+| [Provider contracts](feasibility/provider-contracts.md) | Documented request, response, safety, and measurement boundaries for all three providers | In review at G1.2c |
+| [Checkpoint G1.2c review](gates/G1.2c-provider-contract-review.md) | Evidence and decision record for mocked provider contracts | In review |
 | [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol retained for later direct validation | Deferred evidence |
 | [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for later direct validation | Ready for future use |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |
@@ -46,9 +48,9 @@ The Apache License 2.0 in the repository root remains the project license.
 
 ## Immediate decision
 
-The initial Python feasibility scaffold is submitted at checkpoint G1.2b. It
-includes fail-closed configuration, bounded measurement records, and offline
-tests. Provider implementation, the first live model call, and the first
-Sandbox operation remain blocked pending their respective reviews.
+The mocked Nemotron, Tavily, and Sandbox provider contracts are submitted at
+checkpoint G1.2c. Provider dependencies, executable probe entry points, the
+first live model call, and the first Sandbox operation remain blocked pending
+their respective reviews.
 
 New documentation should support the active hackathon project.
