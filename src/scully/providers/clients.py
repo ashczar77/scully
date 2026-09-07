@@ -9,28 +9,27 @@ from scully.dependencies import assert_locked_provider
 
 if TYPE_CHECKING:
     from contree_sdk import ContreeSync
-    from openai.resources.chat.completions import Completions
+    from openai import OpenAI
     from tavily import TavilyClient
 
 
 TOKEN_FACTORY_BASE_URL = "https://api.tokenfactory.nebius.com/v1/"
 
 
-def create_nemotron_client(settings: Settings) -> Completions:
-    """Construct a non-retrying Token Factory completion client."""
+def create_nemotron_client(settings: Settings) -> OpenAI:
+    """Construct a closable, non-retrying Token Factory client."""
 
     settings.assert_live_ready(Provider.NEMOTRON)
     assert_locked_provider("openai")
     from openai import OpenAI
 
     assert settings.nebius_api_key is not None
-    client = OpenAI(
+    return OpenAI(
         api_key=settings.nebius_api_key.reveal(),
         base_url=TOKEN_FACTORY_BASE_URL,
         timeout=settings.budget.timeout_seconds,
         max_retries=0,
     )
-    return client.chat.completions
 
 
 def create_tavily_client(settings: Settings) -> TavilyClient:

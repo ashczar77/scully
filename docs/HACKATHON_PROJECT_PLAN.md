@@ -457,6 +457,11 @@ live access remains closed. Approval authorizes only the first bounded
 Nemotron probe. Tavily and Sandbox execution require their own subsequent
 reviews.
 
+**Checkpoint G1.2e, Nemotron probe review:** Approve only if one real request
+returns a schema-valid tool call, reported usage stays within the fixed token
+and cost caps, retries remain zero, and the saved record contains no generated
+argument values or credentials.
+
 **Gate G1.2, primitive capability review:** Approve only if each sponsor
 technology performs a necessary role with stable enough behavior for the demo.
 Record any fallback and confirm that it remains competition-compliant.

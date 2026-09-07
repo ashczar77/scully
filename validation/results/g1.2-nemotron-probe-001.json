@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "probe_id": "g1.2-nemotron-001",
+  "provider": "nemotron",
+  "status": "failed",
+  "error_type": "ProviderContractError",
+  "failure_stage": "contract_validation",
+  "request_count": 1,
+  "retries": 0,
+  "started_at": "2026-09-07T17:16:05.024977+00:00",
+  "ended_at": "2026-09-07T17:16:09.094113+00:00",
+  "duration_seconds": 4.069136,
+  "usage_observed": false,
+  "input_tokens": null,
+  "output_tokens": null,
+  "model_cost_usd": null,
+  "rate_limit_header_names": [
+    "x-ratelimit-dynamic-period-remaining",
+    "x-ratelimit-dynamic-period-usage-requests",
+    "x-ratelimit-dynamic-period-usage-tokens",
+    "x-ratelimit-dynamic-scale-requests",
+    "x-ratelimit-dynamic-scale-tokens",
+    "x-ratelimit-limit-requests",
+    "x-ratelimit-limit-tokens",
+    "x-ratelimit-remaining-requests",
+    "x-ratelimit-remaining-tokens",
+    "x-ratelimit-reset-requests",
+    "x-ratelimit-reset-tokens"
+  ],
+  "limitations": [
+    "The initial runner recorded the exception type but not the safe contract-failure category.",
+    "The initial runner read usage after contract validation, so token use and cost are unknown.",
+    "No generated argument values or provider error messages were retained."
+  ]
+}

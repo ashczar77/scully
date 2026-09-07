@@ -42,12 +42,11 @@ class ProviderClientTests(unittest.TestCase):
             create_nemotron_client(settings_for_clients())
 
     def test_constructs_nemotron_client_without_request(self) -> None:
-        completion_client = create_nemotron_client(settings_for_clients())
-        root_client = completion_client._client
-        self.addCleanup(root_client.close)
+        client = create_nemotron_client(settings_for_clients())
+        self.addCleanup(client.close)
 
-        self.assertEqual(str(root_client.base_url), TOKEN_FACTORY_BASE_URL)
-        self.assertEqual(root_client.max_retries, 0)
+        self.assertEqual(str(client.base_url), TOKEN_FACTORY_BASE_URL)
+        self.assertEqual(client.max_retries, 0)
 
     def test_constructs_tavily_client_without_request(self) -> None:
         client = create_tavily_client(settings_for_clients())
