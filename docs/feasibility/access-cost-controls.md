@@ -1,8 +1,8 @@
 # Step 1.1 Access, Limits, and Cost Controls
 
-**Status:** In progress, account verification required
+**Status:** Approved at G1.1, execution checks deferred to Step 1.2
 
-**Review date:** 2026-09-06
+**Review date:** 2026-09-07
 
 ## Objective
 
@@ -10,9 +10,11 @@ Verify access to every required sponsor service, document current pricing and
 operational limits, and establish controls that prevent out-of-pocket spending
 before any paid request or sandbox execution occurs.
 
-Gate G1.1 is not ready for review. Public service capabilities are documented,
-but this workspace has no configured credentials and the account-level billing
-controls have not been inspected.
+Gate G1.1 is approved with execution conditions. Token Factory, Tavily, and
+Sandbox access are authenticated, the zero-spend boundary is recorded, and the
+account is configured to stop usage after the trial. Live inference and
+Sandbox probes, rate-limit capture, and final usage measurements move to the
+Step 1.2 execution preflight and must be reviewed before the first live run.
 
 ## Competition requirement
 
@@ -101,7 +103,7 @@ The public documentation reviewed here does not establish:
 - account-specific CPU, memory, storage, runtime, or operation quotas.
 
 These items require an authenticated console check and a minimal capability
-probe before Gate G1.1.
+probe before Step 1.2 can execute live infrastructure.
 
 ### Tavily
 
@@ -123,9 +125,10 @@ The
 reports key and account usage, limits, plan usage, and pay-as-you-go usage. Each
 search response can also report the credits consumed.
 
-Tavily use is prohibited if pay-as-you-go billing or a paid plan is active for
-the project key. The free Researcher allocation is sufficient for Step 1.1 and
-the planned prototype.
+Tavily application API use is prohibited until the available free allocation,
+paid-overage behavior, and a stop-before-overage control are verified for the
+project key. The planned prototype must stay within the recorded free
+allocation.
 
 ## Local access audit
 
@@ -134,18 +137,49 @@ printing any secret value.
 
 | Check | Result |
 |---|---|
-| `NEBIUS_API_KEY`, `CONTREE_TOKEN`, or related environment name | Not present |
+| `NEBIUS_API_KEY` environment name | Present in ignored local `.env`; value not inspected or printed |
+| `CONTREE_PROJECT` environment name | Present in ignored local `.env`; value not published |
 | `TAVILY_API_KEY` environment name | Not present |
 | Nebius CLI | Not installed |
-| ConTree CLI | Not installed |
-| Saved ConTree profile | Not present |
+| ConTree CLI | Installed, version 0.9.4 |
+| Saved ConTree profile | Present; authenticated health status is `ok` |
 | Saved Nebius CLI profile | Not present |
-| Tavily CLI | Not installed |
+| Tavily CLI | Installed, version 0.1.8; OAuth authenticated |
 | Docker client | Installed |
 | Docker daemon | Unavailable |
 | `curl` and `jq` | Available |
 
-No inference, search, sandbox, or billable request was made.
+No inference or Sandbox operation has been performed. A read-only Token Factory
+model-list request authenticated successfully. Tavily authentication and live
+basic search were verified.
+
+## Account verification evidence
+
+The following account-specific facts were verified on 7 September 2026 without
+publishing credentials or account identifiers:
+
+- hackathon registration is active;
+- the Builder Program application was accepted and the activation flow supplied
+  a Token Factory promotional code;
+- the Token Factory account shows a $25 promotional balance;
+- the account also shows a $1 trial balance with 29 days remaining;
+- the selected account usage mode states that usage stops after the trial;
+- the project-scoped Token Factory key authenticated with HTTP 200 against the
+  read-only model-list endpoint;
+- `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` is available through a public endpoint
+  in `eu-north1`, with tool calling and reasoning support;
+- the displayed price is $0.06 per million input tokens and $0.24 per million
+  output tokens;
+- the Sandbox console states that the beta is free and does not consume credits;
+- Sandbox beta access is active for the project;
+- ConTree CLI 0.9.4 is installed, its project identifier is stored locally, and
+  its authenticated profile health status is `ok`;
+- a read-only ConTree request returned the public Python image catalog;
+- Tavily CLI 0.1.8 is OAuth authenticated and completed a live basic search.
+
+Detailed consumption checks are deferred until immediately before the first
+live infrastructure run. The zero-spend policy and fail-closed controls remain
+the acceptance boundary for that run.
 
 ## Credential handling
 
@@ -175,7 +209,7 @@ The repository ignores `.env` and all `.env.*` variants except
 
 ### Internal caps
 
-| Resource | Step 1.1 cap | Hackathon cap | Required reserve |
+| Resource | First live probe cap | Hackathon cap | Required reserve |
 |---|---:|---:|---:|
 | Token Factory inference | $0.50 | Lower of $10 or 40% of verified promotional balance | At least 60% of verified promotional balance |
 | Tavily | 5 API credits | 250 API credits per calendar month | At least 750 free monthly credits |
@@ -232,33 +266,43 @@ sensitive prompts:
 - Treat missing usage metadata, missing prices, or an unreadable balance as a
   hard stop.
 
-## Account verification checklist
+## G1.1 setup checklist
 
-- [ ] Hackathon registration is active.
-- [ ] Builder Program eligibility is confirmed.
-- [ ] Token Factory promotional balance and expiration are recorded.
-- [ ] A bank card cannot be charged by project usage.
-- [ ] A project-scoped Token Factory key authenticates successfully.
-- [ ] An available NVIDIA Nemotron model accepts promotional credit.
-- [ ] Current Nemotron input and output prices are recorded.
-- [ ] Token Factory rate-limit headers are captured.
-- [ ] Sandbox beta permission is active for the project.
-- [ ] Sandbox price and promotional-credit coverage are recorded.
-- [ ] Sandbox outbound-network and resource limits are recorded.
-- [ ] A development Tavily key authenticates on the free Researcher plan.
-- [ ] Tavily pay-as-you-go usage and limit are both zero.
-- [ ] Tavily `/usage` confirms the free limit and remaining credits.
-- [ ] All test keys are stored outside Git.
+- [x] Hackathon registration is active.
+- [x] Builder Program eligibility is confirmed.
+- [x] Token Factory promotional balance is recorded.
+- [x] The account usage mode is set to stop usage after the trial.
+- [x] A project-scoped Token Factory key authenticates successfully.
+- [x] Current Nemotron input and output prices are recorded.
+- [x] Sandbox beta permission is active for the project.
+- [x] The Sandbox console records beta usage as free and not consuming credits.
+- [x] Tavily CLI OAuth authentication and a live basic search succeed.
+- [x] All configured test keys are stored outside Git.
 
-## Gate G1.1 readiness
+## Step 1.2 execution preflight
 
-**Current disposition:** Not ready
+The following checks remain deliberately incomplete. They must be reviewed
+immediately before the first live inference call or Sandbox operation:
 
-The service documentation and internal controls are sufficient to guide account
-setup, but none of the required authenticated services is currently available
-from this workspace. The Token Factory automatic-charging behavior and unknown
-sandbox pricing are unresolved zero-spend risks.
+- [ ] Record the current Token Factory balance and promotional expiration.
+- [ ] Confirm the selected Nemotron model can use the available balance.
+- [ ] Calculate and approve the first probe's worst-case token cost.
+- [ ] Capture Token Factory rate-limit headers from the first bounded response.
+- [ ] Confirm current Sandbox beta pricing and account coverage.
+- [ ] Record applicable Sandbox outbound-network and resource limits.
+- [ ] Confirm Tavily pay-as-you-go usage and limit are both zero.
+- [ ] Record Tavily usage and remaining credits before and after the probe.
+- [ ] Declare operation, token, credit, CPU-time, and wall-clock limits.
 
-Gate G1.1 may be submitted only after every account-verification item above is
-complete and a minimal authenticated check succeeds for inference, Nemotron,
-Sandboxes, and Tavily without exceeding the Step 1.1 caps.
+No live infrastructure execution is authorized until this preflight is
+reviewed. The probes will then run through the Step 1.2 scaffold so their
+behavior, latency, reliability, and usage become reusable project evidence.
+
+## Gate G1.1 disposition
+
+**Current disposition:** Approved with execution conditions
+
+Access, account controls, credentials, published pricing, Sandbox beta status,
+and measurement rules are sufficient to begin the Step 1.2 scaffold. This
+approval does not authorize an unbounded model request or Sandbox operation.
+The execution preflight above remains a mandatory checkpoint before live use.

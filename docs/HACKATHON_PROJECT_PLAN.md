@@ -1,6 +1,6 @@
 # Safe Incident Reproduction: Hackathon Project Plan
 
-**Status:** Proposed
+**Status:** Active, Phase 1 feasibility
 
 **Date:** 2026-09-04
 
@@ -273,11 +273,13 @@ own hypothesis as proven.
 
 ### Provisional implementation choices
 
-- TypeScript throughout where sponsor SDK support permits;
-- React or Next.js for the web interface;
-- a lightweight API and job coordinator;
+- Python for the Phase 1 feasibility harness because the official ConTree SDK
+  is Python-native;
+- provider boundaries that keep sponsor integrations replaceable and do not
+  constrain the later product stack;
+- web interface, API framework, state store, and streaming choices deferred
+  until the sponsor primitives have been measured;
 - SQLite or file-backed state for the single-user demo;
-- server-sent events or WebSockets for live experiment state;
 - containers locally as a fallback if hosted sandbox access is unavailable;
 - a small, documented JSON schema for incident capsules and result artifacts.
 
@@ -413,17 +415,31 @@ Deliverables:
 
 **Gate G1.1, access and cost review:** Approve only if the required services are
 available, no step requires out-of-pocket spend, and usage can be stopped
-before supplied credits are exhausted.
+before supplied credits are exhausted. Live inference and Sandbox operations
+may be deferred to Step 1.2 when authenticated read-only checks establish
+access and the first execution is protected by an approved preflight budget.
 
 #### Step 1.2: Prove the sponsor primitives independently
 
 Deliverables:
 
+- a minimal reusable Python feasibility scaffold with configuration validation,
+  provider boundaries, measurement records, and offline tests;
 - one Nemotron tool-calling loop with structured output;
 - one Tavily retrieval with source provenance;
 - one sandbox lifecycle covering create, execute, branch or equivalent,
   compare, and discard;
 - latency, reliability, and usage measurements for each primitive.
+
+Before implementation begins, the scaffold specification must pass checkpoint
+G1.2a. Before the first live model call or Sandbox operation, the current
+balance, account stop behavior, applicable limits, and bounded run budget must
+be reviewed. The live probes must be implemented through the project scaffold,
+not as disconnected manual experiments.
+
+**Checkpoint G1.2a, scaffold review:** Approve only if the proposed structure is
+minimal, keeps credentials outside Git, supports offline testing, and avoids
+prematurely selecting the product UI or application framework.
 
 **Gate G1.2, primitive capability review:** Approve only if each sponsor
 technology performs a necessary role with stable enough behavior for the demo.
@@ -465,7 +481,8 @@ test before investing in presentation quality.
 
 Deliverables:
 
-- repository structure and repeatable local development commands;
+- evolve the Phase 1 feasibility scaffold into the product foundation with
+  repeatable local development commands;
 - versioned schemas for capsules, normalized evidence, hypotheses,
   experiments, events, and reproduction results;
 - fixture conventions and a seeded simple incident;
