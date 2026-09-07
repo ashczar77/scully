@@ -34,6 +34,7 @@ class PreflightTests(unittest.TestCase):
         settings = Settings.from_environment(
             {
                 "SCULLY_ENABLE_LIVE": "true",
+                "SCULLY_MAX_OUTPUT_TOKENS": "10000",
                 "SCULLY_MAX_SANDBOX_OPERATIONS": "4",
                 "NEBIUS_API_KEY": "test-key",
                 "NEBIUS_PROJECT_ID": "test-project",
@@ -50,7 +51,52 @@ class PreflightTests(unittest.TestCase):
         self.assertTrue(
             all(item.live_gate_open for item in report.providers.values())
         )
-        self.assertEqual(report.worst_case_model_cost_usd, "0.00073728")
+        self.assertEqual(report.worst_case_model_cost_usd, "0.00289152")
+
+    def test_nemotron_probe_budget_requires_reviewed_output_limit(self) -> None:
+        settings = Settings.from_environment(
+            {
+                "SCULLY_ENABLE_LIVE": "true",
+                "NEBIUS_API_KEY": "test-key",
+            }
+        )
+
+        with patch(
+            "scully.preflight.installed_version",
+            side_effect=lambda package: LOCKED_PROVIDER_VERSIONS[package],
+        ):
+            report = build_preflight_report(settings)
+
+        self.assertEqual(settings.budget.max_output_tokens, 1_024)
+        self.assertFalse(report.providers["nemotron"].budget_valid)
+        self.assertFalse(report.providers["nemotron"].live_gate_open)
+
+    def test_nemotron_probe_budget_rejects_other_reviewed_limit_changes(
+        self,
+    ) -> None:
+        mismatches = {
+            "SCULLY_MAX_MODEL_CALLS": "2",
+            "SCULLY_MAX_INPUT_TOKENS": "8193",
+            "SCULLY_MAX_MODEL_COST_USD": "0.02",
+            "SCULLY_TIMEOUT_SECONDS": "61",
+        }
+        for name, value in mismatches.items():
+            with self.subTest(name=name):
+                environment = {
+                    "SCULLY_ENABLE_LIVE": "true",
+                    "SCULLY_MAX_OUTPUT_TOKENS": "10000",
+                    "NEBIUS_API_KEY": "test-key",
+                    name: value,
+                }
+                settings = Settings.from_environment(environment)
+                with patch(
+                    "scully.preflight.installed_version",
+                    side_effect=lambda package: LOCKED_PROVIDER_VERSIONS[package],
+                ):
+                    report = build_preflight_report(settings)
+
+                self.assertFalse(report.providers["nemotron"].budget_valid)
+                self.assertFalse(report.providers["nemotron"].live_gate_open)
 
     def test_sandbox_budget_is_closed_at_offline_default(self) -> None:
         settings = Settings.from_environment(

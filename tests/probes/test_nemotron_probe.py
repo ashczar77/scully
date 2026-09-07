@@ -72,6 +72,7 @@ def live_settings() -> Settings:
     return Settings.from_environment(
         {
             "SCULLY_ENABLE_LIVE": "true",
+            "SCULLY_MAX_OUTPUT_TOKENS": "10000",
             "NEBIUS_API_KEY": "test-nebius-key",
         }
     )
@@ -104,6 +105,10 @@ class NemotronProbeTests(unittest.TestCase):
         self.assertEqual(record["status"], "succeeded")
         self.assertEqual(record["argument_fields"], list(EXPECTED_ARGUMENT_FIELDS))
         self.assertEqual(len(endpoint.requests), 1)
+        self.assertEqual(endpoint.requests[0]["max_tokens"], 10_000)
+        self.assertEqual(endpoint.requests[0]["temperature"], 0.6)
+        self.assertEqual(endpoint.requests[0]["top_p"], 0.95)
+        self.assertFalse(endpoint.requests[0]["parallel_tool_calls"])
         self.assertTrue(client.closed)
         self.assertIn("x-ratelimit-remaining-requests", encoded)
         self.assertNotIn("untrusted forwarding data", encoded)

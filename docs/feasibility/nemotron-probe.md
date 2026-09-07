@@ -1,6 +1,6 @@
 # Step 1.2 Nemotron Capability Probe
 
-**Status:** Corrective attempt in review at checkpoint G1.2f
+**Status:** Model-specific request correction in review at checkpoint G1.2g
 
 **Attempt date:** 2026-09-07
 
@@ -64,8 +64,7 @@ The runner now:
 - closes the client in every outcome.
 
 Offline tests cover a successful tool call, a closed preflight, a request
-exception, and a contract failure with early usage capture. The full suite now
-passes 52 tests.
+exception, and a contract failure with early usage capture.
 
 ## Conclusion
 
@@ -108,9 +107,9 @@ Attempt 002 consumed the entire 1,024-token output allowance without producing
 the required tool call. The evidence supports output-budget exhaustion during
 reasoning as the cause.
 
-## Proposed correction
+## Implemented correction
 
-For attempt 003:
+The request prepared for attempt 003:
 
 - increase the output limit from 1,024 to 10,000 tokens;
 - set `temperature` to 0.6;
@@ -120,5 +119,10 @@ For attempt 003:
 - retain the $0.01 hard cost ceiling.
 
 At the current published prices and the existing 8,192-token input cap, the
-worst-case calculated cost would be $0.00289152. No third request is authorized
-at checkpoint G1.2f submission.
+worst-case calculated cost is $0.00289152. The execution preflight now requires
+the exact 10,000-token output limit. The ordinary 1,024-token configuration
+therefore cannot open the Nemotron live gate.
+
+Offline tests verify the model-specific sampling values, exact output limit,
+disabled parallel calls, early structural capture, and closed ordinary
+configuration. No third request was made while preparing checkpoint G1.2g.

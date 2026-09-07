@@ -16,7 +16,7 @@ from scully.providers.clients import create_nemotron_client
 from scully.providers.nemotron import NemotronAdapter, ToolDefinition
 
 
-PROBE_ID = "g1.2-nemotron-002"
+PROBE_ID = "g1.2-nemotron-003"
 EXPECTED_ARGUMENT_FIELDS = (
     "confidence",
     "hypothesis",

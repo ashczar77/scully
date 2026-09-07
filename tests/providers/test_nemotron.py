@@ -74,6 +74,8 @@ class NemotronAdapterTests(unittest.TestCase):
         self.assertEqual(request["max_tokens"], 1_024)
         self.assertEqual(request["n"], 1)
         self.assertFalse(request["parallel_tool_calls"])
+        self.assertEqual(request["temperature"], 0.6)
+        self.assertEqual(request["top_p"], 0.95)
         self.assertFalse(request["stream"])
         self.assertFalse(request["store"])
 

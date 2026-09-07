@@ -40,6 +40,8 @@ The contracts were checked against the current official documentation:
 - rejects a worst-case token cost above the declared cap;
 - requests one non-streaming, non-stored completion;
 - sets `service_tier` to `default` and caps output tokens;
+- uses NVIDIA's recommended tool-calling sampling values of
+  `temperature=0.6` and `top_p=0.95`;
 - forces one named tool and accepts exactly one completion choice and tool call;
 - parses tool arguments as JSON and validates required fields, extra fields,
   primitive types, and enums;

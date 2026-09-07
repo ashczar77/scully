@@ -21,6 +21,10 @@ from ._contracts import (
 )
 
 
+NEMOTRON_TOOL_TEMPERATURE = 0.6
+NEMOTRON_TOOL_TOP_P = 0.95
+
+
 class CompletionClient(Protocol):
     """Subset of the OpenAI-compatible chat completions client used here."""
 
@@ -137,6 +141,8 @@ class NemotronAdapter:
             "max_tokens": self._settings.budget.max_output_tokens,
             "n": 1,
             "parallel_tool_calls": False,
+            "temperature": NEMOTRON_TOOL_TEMPERATURE,
+            "top_p": NEMOTRON_TOOL_TOP_P,
             "stream": False,
             "store": False,
             "service_tier": "default",
