@@ -480,6 +480,17 @@ schema-valid tool call within the reviewed token and cost limits, and retains
 only redacted evidence. Approval authorizes implementation and offline review
 of the Tavily probe, not a live Tavily request or Sandbox operation.
 
+**Checkpoint G1.2i, Tavily execution review:** Approve only if the search uses
+basic depth, one credit, a fixed domain filter, no generated answer, no raw page
+content, no images, no automatic parameters, and a 60-second timeout. The
+runner must retain provenance without returned snippets or request identifiers.
+Approval authorizes one Tavily search after its project API key is configured.
+
+**Checkpoint G1.2j, Tavily result review:** Approve only if one search returns
+valid HTTP or HTTPS provenance within the one-credit limit, records zero
+retries, and retains no returned snippets or credentials. Approval authorizes
+implementation and offline review of the Sandbox capability probe.
+
 **Gate G1.2, primitive capability review:** Approve only if each sponsor
 technology performs a necessary role with stable enough behavior for the demo.
 Record any fallback and confirm that it remains competition-compliant.

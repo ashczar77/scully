@@ -112,6 +112,24 @@ class PreflightTests(unittest.TestCase):
         self.assertFalse(report.providers["sandbox"].budget_valid)
         self.assertFalse(report.providers["sandbox"].live_gate_open)
 
+    def test_tavily_budget_requires_reviewed_timeout(self) -> None:
+        settings = Settings.from_environment(
+            {
+                "SCULLY_ENABLE_LIVE": "true",
+                "SCULLY_TIMEOUT_SECONDS": "61",
+                "TAVILY_API_KEY": "test-key",
+            }
+        )
+
+        with patch(
+            "scully.preflight.installed_version",
+            side_effect=lambda package: LOCKED_PROVIDER_VERSIONS[package],
+        ):
+            report = build_preflight_report(settings)
+
+        self.assertFalse(report.providers["tavily"].budget_valid)
+        self.assertFalse(report.providers["tavily"].live_gate_open)
+
     def test_cli_prints_json_without_constructing_a_client(self) -> None:
         output = io.StringIO()
         with (

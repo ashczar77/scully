@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -17,6 +18,10 @@ from ._contracts import require_investigation_id, require_nonnegative_int
 
 
 MAX_RESULT_CONTENT_CHARS = 5_000
+DOMAIN_PATTERN = re.compile(
+    r"(?:\*\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
+    r"[a-z]{2,63}"
+)
 
 
 class TavilyClient(Protocol):
@@ -59,7 +64,13 @@ class TavilyAdapter:
         self._settings = settings
         self._clock = clock or (lambda: datetime.now(UTC))
 
-    def search(self, *, investigation_id: str, query: str) -> SearchOutcome:
+    def search(
+        self,
+        *,
+        investigation_id: str,
+        query: str,
+        include_domains: Sequence[str] = (),
+    ) -> SearchOutcome:
         """Search once and reject missing provenance or usage metadata."""
 
         self._settings.assert_live_ready(Provider.TAVILY)
@@ -69,6 +80,7 @@ class TavilyAdapter:
             raise ValueError("Search query cannot be empty")
         if len(normalized_query) > 400:
             raise ValueError("Search query cannot exceed 400 characters")
+        normalized_domains = _validate_domains(include_domains)
 
         started_at = self._clock()
         response = self._client.search(
@@ -76,6 +88,7 @@ class TavilyAdapter:
             search_depth="basic",
             topic="general",
             max_results=5,
+            include_domains=normalized_domains,
             include_answer=False,
             include_raw_content=False,
             include_images=False,
@@ -91,6 +104,7 @@ class TavilyAdapter:
         if credits > self._settings.budget.max_tavily_credits:
             raise ProviderContractError("Reported Tavily usage exceeds the credit cap")
         sources = _read_sources(response)
+        _require_allowed_source_domains(sources, normalized_domains)
 
         return SearchOutcome(
             query=normalized_query,
@@ -105,6 +119,42 @@ class TavilyAdapter:
                 tavily_credits=credits,
             ),
         )
+
+
+def _validate_domains(domains: Sequence[str]) -> list[str]:
+    if isinstance(domains, (str, bytes)):
+        raise ValueError("Tavily include domains must be a sequence")
+    if len(domains) > 10:
+        raise ValueError("Tavily include domains cannot exceed ten entries")
+    normalized: list[str] = []
+    for domain in domains:
+        if not isinstance(domain, str):
+            raise ValueError("Tavily include domains must be text")
+        value = domain.strip().lower()
+        if (
+            not value
+            or len(value) > 253
+            or DOMAIN_PATTERN.fullmatch(value) is None
+        ):
+            raise ValueError("Tavily include domain is invalid")
+        normalized.append(value)
+    return normalized
+
+
+def _require_allowed_source_domains(
+    sources: Sequence[SearchSource], domains: Sequence[str]
+) -> None:
+    if not domains:
+        return
+    bases = tuple(domain.removeprefix("*.") for domain in domains)
+    for source in sources:
+        hostname = urlparse(source.url).hostname
+        if hostname is None or not any(
+            hostname == base or hostname.endswith(f".{base}") for base in bases
+        ):
+            raise ProviderContractError(
+                "Tavily result URL is outside the requested domains"
+            )
 
 
 def _read_credits(response: Mapping[str, object]) -> int:

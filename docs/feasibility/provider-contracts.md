@@ -55,12 +55,18 @@ The contracts were checked against the current official documentation:
 - requires explicit live enablement and a Tavily key;
 - rejects empty queries and queries above 400 characters before the request;
 - fixes search depth to `basic` and disables automatic parameters;
+- accepts at most ten validated hostnames as an explicit domain allowlist;
 - excludes generated answers, raw page content, and images;
 - requests at most five results and requests usage metadata;
 - accepts only HTTP or HTTPS source URLs with a network location;
+- rejects returned source URLs outside an explicit domain allowlist;
 - validates titles, snippets, and finite relevance scores;
 - fails closed when credit usage is absent or exceeds the declared cap;
 - preserves source URLs while excluding request content from measurements.
+
+The bounded capability runner uses only `expressjs.com`, retains source URLs
+without returned snippets or titles, and records a request identifier only as
+a boolean presence check.
 
 ### Sandboxes
 

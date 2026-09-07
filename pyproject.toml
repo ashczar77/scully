@@ -18,6 +18,7 @@ dependencies = [
 [project.scripts]
 scully-preflight = "scully.preflight:main"
 scully-probe-nemotron = "scully.probes.nemotron:main"
+scully-probe-tavily = "scully.probes.tavily:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

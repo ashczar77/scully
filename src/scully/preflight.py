@@ -15,6 +15,8 @@ NEMOTRON_PROBE_MAX_INPUT_TOKENS = 8_192
 NEMOTRON_PROBE_MAX_OUTPUT_TOKENS = 10_000
 NEMOTRON_PROBE_MAX_COST_USD = Decimal("0.01")
 NEMOTRON_PROBE_TIMEOUT_SECONDS = 60
+TAVILY_PROBE_MAX_CREDITS = 1
+TAVILY_PROBE_TIMEOUT_SECONDS = 60
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,7 +78,10 @@ def build_preflight_report(settings: Settings) -> PreflightReport:
         == NEMOTRON_PROBE_TIMEOUT_SECONDS
         and worst_case_cost <= settings.budget.max_model_cost_usd
     )
-    tavily_budget = settings.budget.max_tavily_credits == 1
+    tavily_budget = (
+        settings.budget.max_tavily_credits == TAVILY_PROBE_MAX_CREDITS
+        and settings.budget.timeout_seconds == TAVILY_PROBE_TIMEOUT_SECONDS
+    )
     sandbox_budget = (
         settings.budget.max_sandbox_operations
         == MINIMUM_SANDBOX_BRANCH_OPERATIONS

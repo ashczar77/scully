@@ -12,10 +12,10 @@ customer data.
 ## Current status
 
 - Phase: Sponsor-stack and architecture feasibility
-- Completed gates: G0.1 through G1.1 and checkpoints G1.2a through G1.2g
+- Completed gates: G0.1 through G1.1 and checkpoints G1.2a through G1.2h
 - Active step: Step 1.2, prove the sponsor primitives independently
-- Next checkpoint: G1.2h, final Nemotron result review
-- Implementation: Nemotron structured tool-call capability proven
+- Next checkpoint: G1.2i, Tavily execution review
+- Implementation: Bounded Tavily probe implemented and tested offline
 - Out-of-pocket cost limit: Zero
 - Submission deadline: 30 October 2026
 
@@ -42,11 +42,13 @@ customer data.
 | [Checkpoint G1.2c review](gates/G1.2c-provider-contract-review.md) | Evidence and decision record for mocked provider contracts | Approved |
 | [Execution preflight](feasibility/execution-preflight.md) | Locked SDKs, inert client construction, and local readiness report | Approved at G1.2d |
 | [Checkpoint G1.2d review](gates/G1.2d-integration-preflight-review.md) | Evidence and decision record for provider integration | Approved |
-| [Nemotron capability probe](feasibility/nemotron-probe.md) | Three bounded attempts and the successful structured tool call | In review at G1.2h |
+| [Nemotron capability probe](feasibility/nemotron-probe.md) | Three bounded attempts and the successful structured tool call | Approved at G1.2h |
 | [Checkpoint G1.2e review](gates/G1.2e-nemotron-probe-review.md) | Evidence and decision record for the first Nemotron attempt | Approved for one corrective attempt |
 | [Checkpoint G1.2f review](gates/G1.2f-corrective-nemotron-review.md) | Evidence and decision record for attempt 002 and its root cause | Approved |
 | [Checkpoint G1.2g review](gates/G1.2g-model-request-review.md) | Evidence and decision record for the model-specific request correction | Approved |
-| [Checkpoint G1.2h review](gates/G1.2h-final-nemotron-review.md) | Evidence and decision record for successful attempt 003 | In review |
+| [Checkpoint G1.2h review](gates/G1.2h-final-nemotron-review.md) | Evidence and decision record for successful attempt 003 | Approved |
+| [Tavily capability probe](feasibility/tavily-probe.md) | One-credit search boundary and redacted evidence contract | In review at G1.2i |
+| [Checkpoint G1.2i review](gates/G1.2i-tavily-execution-review.md) | Offline evidence and execution decision for the Tavily probe | In review |
 | [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol retained for later direct validation | Deferred evidence |
 | [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for later direct validation | Ready for future use |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |
@@ -55,9 +57,9 @@ The Apache License 2.0 in the repository root remains the project license.
 
 ## Immediate decision
 
-The third bounded Nemotron attempt returned a schema-valid structured tool call
-for a calculated cost of $0.00025284. The result is submitted for checkpoint
-G1.2h review. Tavily and Sandbox execution remain blocked pending their own
+Nemotron is approved as a proven primitive. The bounded Tavily probe is
+implemented and tested offline, but its project API key is not yet configured.
+One Tavily search and all Sandbox operations remain blocked pending their own
 reviews.
 
 New documentation should support the active hackathon project.

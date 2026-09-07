@@ -56,6 +56,7 @@ class TavilyAdapterTests(unittest.TestCase):
         outcome = adapter.search(
             investigation_id="provider-contract-001",
             query=" Express trust proxy documentation ",
+            include_domains=("ExpressJS.com",),
         )
 
         self.assertEqual(outcome.query, "Express trust proxy documentation")
@@ -67,6 +68,7 @@ class TavilyAdapterTests(unittest.TestCase):
         query, options = client.requests[0]
         self.assertEqual(query, outcome.query)
         self.assertEqual(options["search_depth"], "basic")
+        self.assertEqual(options["include_domains"], ["expressjs.com"])
         self.assertFalse(options["auto_parameters"])
         self.assertFalse(options["include_answer"])
         self.assertFalse(options["include_raw_content"])
@@ -127,6 +129,34 @@ class TavilyAdapterTests(unittest.TestCase):
                 query="q" * 401,
             )
         self.assertEqual(client.requests, [])
+
+    def test_rejects_invalid_include_domain_before_request(self) -> None:
+        client = FakeTavilyClient(search_response())
+        adapter = TavilyAdapter(client, live_settings(), clock=self.times.__next__)
+
+        with self.assertRaisesRegex(ValueError, "include domain"):
+            adapter.search(
+                investigation_id="provider-contract-001",
+                query="Express proxy documentation",
+                include_domains=("https://expressjs.com",),
+            )
+        self.assertEqual(client.requests, [])
+
+    def test_rejects_result_outside_requested_domains(self) -> None:
+        response = search_response()
+        response["results"][0]["url"] = "https://example.com/proxy"
+        adapter = TavilyAdapter(
+            FakeTavilyClient(response),
+            live_settings(),
+            clock=self.times.__next__,
+        )
+
+        with self.assertRaisesRegex(ProviderContractError, "requested domains"):
+            adapter.search(
+                investigation_id="provider-contract-001",
+                query="Express proxy documentation",
+                include_domains=("expressjs.com",),
+            )
 
     def test_rejects_missing_investigation_id_before_request(self) -> None:
         client = FakeTavilyClient(search_response())
