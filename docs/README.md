@@ -12,10 +12,10 @@ customer data.
 ## Current status
 
 - Phase: Sponsor-stack and architecture feasibility
-- Completed gates: G0.1 through G1.1 and checkpoints G1.2a through G1.2d
+- Completed gates: G0.1 through G1.1 and checkpoints G1.2a through G1.2e
 - Active step: Step 1.2, prove the sponsor primitives independently
-- Next checkpoint: G1.2e, Nemotron probe review
-- Implementation: First bounded Nemotron attempt recorded for review
+- Next checkpoint: G1.2f, corrective Nemotron review
+- Implementation: Nemotron output-budget diagnosis submitted for review
 - Out-of-pocket cost limit: Zero
 - Submission deadline: 30 October 2026
 
@@ -42,8 +42,9 @@ customer data.
 | [Checkpoint G1.2c review](gates/G1.2c-provider-contract-review.md) | Evidence and decision record for mocked provider contracts | Approved |
 | [Execution preflight](feasibility/execution-preflight.md) | Locked SDKs, inert client construction, and local readiness report | Approved at G1.2d |
 | [Checkpoint G1.2d review](gates/G1.2d-integration-preflight-review.md) | Evidence and decision record for provider integration | Approved |
-| [Nemotron capability probe](feasibility/nemotron-probe.md) | First live structured-output attempt and instrumentation correction | In review at G1.2e |
-| [Checkpoint G1.2e review](gates/G1.2e-nemotron-probe-review.md) | Evidence and decision record for the first Nemotron attempt | In review |
+| [Nemotron capability probe](feasibility/nemotron-probe.md) | Two bounded attempts and the model-specific output-budget diagnosis | In review at G1.2f |
+| [Checkpoint G1.2e review](gates/G1.2e-nemotron-probe-review.md) | Evidence and decision record for the first Nemotron attempt | Approved for one corrective attempt |
+| [Checkpoint G1.2f review](gates/G1.2f-corrective-nemotron-review.md) | Evidence and decision record for attempt 002 and its root cause | In review |
 | [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol retained for later direct validation | Deferred evidence |
 | [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for later direct validation | Ready for future use |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |
@@ -52,9 +53,9 @@ The Apache License 2.0 in the repository root remains the project license.
 
 ## Immediate decision
 
-The first bounded Nemotron attempt reached the provider and stopped after its
-response failed contract validation. It did not retry. The corrected runner
-and failure record are submitted at checkpoint G1.2e. A second model request,
-Tavily, and Sandbox execution remain blocked pending review.
+The second bounded Nemotron attempt confirmed that the 1,024-token output cap
+was exhausted before a usable tool call. The model-specific diagnosis and a
+proposed 10,000-token correction are submitted at checkpoint G1.2f. Attempt
+003, Tavily, and Sandbox execution remain blocked pending review.
 
 New documentation should support the active hackathon project.

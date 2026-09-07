@@ -152,6 +152,8 @@ class NemotronProbeTests(unittest.TestCase):
         self.assertEqual(record["status"], "failed")
         self.assertEqual(record["failure_stage"], "contract_validation")
         self.assertEqual(record["contract_failure"], "tool_call_count")
+        self.assertEqual(record["finish_reason"], "tool_calls")
+        self.assertEqual(record["tool_call_count"], 0)
         self.assertTrue(record["usage_observed"])
         self.assertEqual(record["measurement"]["input_tokens"], 180)
         self.assertEqual(record["measurement"]["output_tokens"], 45)

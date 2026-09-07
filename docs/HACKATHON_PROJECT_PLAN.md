@@ -462,6 +462,18 @@ returns a schema-valid tool call, reported usage stays within the fixed token
 and cost caps, retries remain zero, and the saved record contains no generated
 argument values or credentials.
 
+**Checkpoint G1.2f, corrective Nemotron review:** If the first attempt fails,
+approve only if the exact failure is recorded without a retry and the corrected
+runner captures a safe failure category plus usage before validation. The
+corrective attempt must remain a single request with parallel tool calls and
+automatic retries disabled.
+
+**Checkpoint G1.2g, model-specific request review:** Approve only if the
+Nemotron request uses NVIDIA's tool-calling sampling guidance, the larger output
+allowance remains below the hard cost ceiling, structural diagnostics are
+tested offline, and live access remains closed. Approval authorizes one final
+corrective Nemotron attempt.
+
 **Gate G1.2, primitive capability review:** Approve only if each sponsor
 technology performs a necessary role with stable enough behavior for the demo.
 Record any fallback and confirm that it remains competition-compliant.

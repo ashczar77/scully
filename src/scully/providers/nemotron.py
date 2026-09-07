@@ -136,6 +136,7 @@ class NemotronAdapter:
             },
             "max_tokens": self._settings.budget.max_output_tokens,
             "n": 1,
+            "parallel_tool_calls": False,
             "stream": False,
             "store": False,
             "service_tier": "default",

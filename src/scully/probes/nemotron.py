@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
@@ -16,7 +16,7 @@ from scully.providers.clients import create_nemotron_client
 from scully.providers.nemotron import NemotronAdapter, ToolDefinition
 
 
-PROBE_ID = "g1.2-nemotron-001"
+PROBE_ID = "g1.2-nemotron-002"
 EXPECTED_ARGUMENT_FIELDS = (
     "confidence",
     "hypothesis",
@@ -78,7 +78,10 @@ class ParsedCompletionBridge:
     rate_limit_header_names: tuple[str, ...] = ()
     input_tokens: int = 0
     output_tokens: int = 0
+    reasoning_tokens: int | None = None
     usage_observed: bool = False
+    finish_reason: str | None = None
+    tool_call_count: int | None = None
 
     def create(self, **kwargs: object) -> object:
         """Make one request and return its parsed completion object."""
@@ -99,6 +102,18 @@ class ParsedCompletionBridge:
             raise TypeError("Raw completion response is not parseable")
         parsed = parse()
         self.response_received = True
+        choices = _optional_field(parsed, "choices")
+        if isinstance(choices, Sequence) and not isinstance(choices, (str, bytes)):
+            if len(choices) == 1:
+                finish_reason = _optional_field(choices[0], "finish_reason")
+                if isinstance(finish_reason, str):
+                    self.finish_reason = finish_reason
+                message = _optional_field(choices[0], "message")
+                tool_calls = _optional_field(message, "tool_calls")
+                if isinstance(tool_calls, Sequence) and not isinstance(
+                    tool_calls, (str, bytes)
+                ):
+                    self.tool_call_count = len(tool_calls)
         usage = _optional_field(parsed, "usage")
         input_tokens = _optional_nonnegative_int(usage, "prompt_tokens")
         output_tokens = _optional_nonnegative_int(usage, "completion_tokens")
@@ -106,6 +121,11 @@ class ParsedCompletionBridge:
             self.input_tokens = input_tokens
             self.output_tokens = output_tokens
             self.usage_observed = True
+        completion_details = _optional_field(usage, "completion_tokens_details")
+        self.reasoning_tokens = _optional_nonnegative_int(
+            completion_details,
+            "reasoning_tokens",
+        )
         return parsed
 
 
@@ -237,6 +257,9 @@ def _failure_record(
         ),
         "http_status": status_code if isinstance(status_code, int) else None,
         "usage_observed": bridge.usage_observed,
+        "finish_reason": bridge.finish_reason,
+        "tool_call_count": bridge.tool_call_count,
+        "reasoning_tokens": bridge.reasoning_tokens,
         "rate_limit_header_names": list(bridge.rate_limit_header_names),
         "measurement": measurement.to_record(),
     }

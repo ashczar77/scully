@@ -1,6 +1,6 @@
 # Step 1.2 Nemotron Capability Probe
 
-**Status:** In review at checkpoint G1.2e
+**Status:** Corrective attempt in review at checkpoint G1.2f
 
 **Attempt date:** 2026-09-07
 
@@ -73,6 +73,52 @@ The first attempt proves connectivity, authentication, a completed response,
 rate-limit metadata availability, and zero-retry behavior. It does not prove a
 schema-valid Nemotron tool call or a measured cost ceiling.
 
-The next safe action is one second bounded Nemotron attempt through the
-corrected runner. That request remains blocked until checkpoint G1.2e is
-reviewed. Tavily and Sandbox execution remain blocked.
+Checkpoint G1.2e approved one second bounded Nemotron attempt through the
+corrected runner. Attempt 002 also disables parallel tool calls explicitly.
+Tavily and Sandbox execution remain blocked.
+
+## Attempt 002 result
+
+The second request reached Token Factory and returned after 4.016622 seconds.
+The corrected instrumentation identified the local failure as
+`tool_call_count`. The response did not contain one usable tool call.
+
+Measured usage was:
+
+- 474 input tokens;
+- 1,024 output tokens, equal to the configured maximum;
+- $0.0002742 calculated cost;
+- one request;
+- zero retries.
+
+The setup is therefore not the cause. Authentication, endpoint selection,
+model selection, request acceptance, response parsing, and usage reporting all
+worked.
+
+## Root-cause assessment
+
+[NVIDIA's model reference](https://docs.api.nvidia.com/nim/reference/nvidia-nemotron-3-nano-30b-a3b)
+states that thinking is enabled by default and that the model produces a
+reasoning trace before its final response. NVIDIA recommends `temperature=0.6`
+and `top_p=0.95` for tool calling. The
+[NVIDIA model card](https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4)
+also recommends a high `max_tokens` value, with 10,000 as its example.
+
+Attempt 002 consumed the entire 1,024-token output allowance without producing
+the required tool call. The evidence supports output-budget exhaustion during
+reasoning as the cause.
+
+## Proposed correction
+
+For attempt 003:
+
+- increase the output limit from 1,024 to 10,000 tokens;
+- set `temperature` to 0.6;
+- set `top_p` to 0.95;
+- retain one choice, one forced tool, disabled parallel tool calls, disabled
+  retries, a 60-second timeout, and strict local validation;
+- retain the $0.01 hard cost ceiling.
+
+At the current published prices and the existing 8,192-token input cap, the
+worst-case calculated cost would be $0.00289152. No third request is authorized
+at checkpoint G1.2f submission.
