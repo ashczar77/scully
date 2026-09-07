@@ -1,6 +1,6 @@
 # Step 1.2 Provider Contracts
 
-**Status:** In review at checkpoint G1.2c
+**Status:** Approved at checkpoint G1.2c
 
 **Review date:** 2026-09-07
 
@@ -27,7 +27,7 @@ The contracts were checked against the current official documentation:
 - [ConTree branching](https://docs.tokenfactory.nebius.com/sandboxes/sdk/python_sdk/branching)
   defines independent child runs from one common image state;
 - [ConTree client construction](https://docs.tokenfactory.nebius.com/sandboxes/sdk/python_sdk/reference/client)
-  confirms that callers supply the transport, retries, and authentication.
+  defines client configuration, authentication, and operation behavior.
 
 ## Contract boundaries
 
@@ -86,16 +86,17 @@ discard behavior must be verified during the bounded Sandbox probe because the
 documented SDK flow relies on unreferenced image retention rather than an
 explicit image-delete method.
 
-## Dependency boundary
+## Dependency boundary at review
 
 The provider modules use structural protocols and injected clients. They do not
 import or install `openai`, `tavily-python`, `contree-sdk`, or a transport
 package. Mocked tests therefore exercise the call shapes, validation, budgets,
 and normalization without a path to any external service.
 
-Provider dependency versions and real client construction belong to the next
-reviewed increment. Supplying an injected real client will still require
-`SCULLY_ENABLE_LIVE=true` and the appropriate provider credentials.
+Provider dependency versions and real client construction were intentionally
+deferred to the next reviewed increment. Supplying an injected real client
+still requires `SCULLY_ENABLE_LIVE=true` and the appropriate provider
+credentials.
 
 ## Test evidence
 
@@ -118,7 +119,7 @@ The provider-specific tests verify:
 No test imports a provider package, reads a local credential, opens a network
 connection, or creates an infrastructure operation.
 
-## Open risks for the next increment
+## Risks recorded at checkpoint G1.2c
 
 - Tavily documents the `include_usage` option but does not show the usage field
   shape in its search response table. The bridge must capture one bounded
@@ -127,13 +128,13 @@ connection, or creates an infrastructure operation.
   response and are not yet represented by the injected completion interface.
 - ConTree CPU metrics and cleanup behavior require inspection of the first
   bounded operation result.
-- Provider package versions and their Python 3.14 compatibility are not yet
-  locked or tested in this project.
+- Provider package versions and their Python 3.14 compatibility were not yet
+  locked or tested at this checkpoint. The G1.2d submission resolves this item.
 - Failure measurements for SDK exceptions belong in the executable probe runner,
   which is not implemented at this checkpoint.
 
-## Review decision requested
+## Review decision
 
-Approve, revise, reject, or defer the provider contracts. Approval authorizes
-dependency locking, real-client construction, and preparation of the execution
-preflight. It does not authorize a live provider request or Sandbox operation.
+Approved on 2026-09-07. The decision authorized dependency locking, inert
+real-client construction, and preparation of the execution preflight. It did
+not authorize a live provider request or Sandbox operation.

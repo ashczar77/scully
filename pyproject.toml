@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=77.1"]
+requires = ["setuptools==84.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -9,7 +9,14 @@ description = "Safe incident reproduction from sanitized evidence"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
-dependencies = []
+dependencies = [
+    "contree-sdk==0.3.3",
+    "openai==3.8.0",
+    "tavily-python==0.8.1",
+]
+
+[project.scripts]
+scully-preflight = "scully.preflight:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

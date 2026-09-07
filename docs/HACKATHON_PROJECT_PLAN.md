@@ -450,6 +450,13 @@ dependencies, network access, or live infrastructure use.
 that every provider boundary enforces its budget, validates external output,
 preserves required provenance, and matches the documented sponsor interfaces.
 
+**Checkpoint G1.2d, integration and execution-preflight review:** Approve only
+if exact provider dependencies install together, real clients can be
+constructed without requests, the local preflight exposes no credentials, and
+live access remains closed. Approval authorizes only the first bounded
+Nemotron probe. Tavily and Sandbox execution require their own subsequent
+reviews.
+
 **Gate G1.2, primitive capability review:** Approve only if each sponsor
 technology performs a necessary role with stable enough behavior for the demo.
 Record any fallback and confirm that it remains competition-compliant.

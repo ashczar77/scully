@@ -10,11 +10,24 @@ the sponsor stack through a review-gated feasibility scaffold. See the
 
 ## Development
 
-The Phase 1 feasibility scaffold has no runtime dependencies. Run its offline
-tests without loading local credentials:
+Create an isolated environment and install the reviewed dependency lock:
 
 ```shell
-PYTHONPATH=src python3 -m unittest discover -s tests -v
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.lock
+.venv/bin/python -m pip install --no-build-isolation --no-deps -e .
+```
+
+Run the offline tests without loading local credentials:
+
+```shell
+PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
+```
+
+Inspect local execution readiness without contacting a provider:
+
+```shell
+PYTHONPATH=src .venv/bin/python -m scully.preflight
 ```
 
 Live provider access is disabled by default and remains subject to the review
