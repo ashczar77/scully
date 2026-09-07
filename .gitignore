@@ -7,6 +7,15 @@
 /validation/**/.venv/
 /validation/**/target/
 
+# Python build and test artifacts
+__pycache__/
+*.py[cod]
+/.venv/
+/build/
+/dist/
+/*.egg-info/
+/src/*.egg-info/
+
 # Local credentials and environment
 .env
 .env.*

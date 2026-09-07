@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=77.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scully"
+version = "0.1.0"
+description = "Safe incident reproduction from sanitized evidence"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]

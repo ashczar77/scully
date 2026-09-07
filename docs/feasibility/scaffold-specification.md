@@ -1,6 +1,6 @@
 # Phase 1 Feasibility Scaffold Specification
 
-**Status:** Proposed for checkpoint G1.2a
+**Status:** Approved at checkpoint G1.2a
 
 **Review date:** 2026-09-07
 
@@ -149,6 +149,6 @@ authorized by approval of an earlier step.
 
 ## Review decision requested
 
-Approve, revise, reject, or defer this scaffold specification. Approval
-authorizes only implementation sequence item 1. It does not authorize provider
-implementation or live infrastructure use.
+Checkpoint G1.2a approved this scaffold specification on 7 September 2026 and
+authorized implementation sequence item 1. Provider implementation and live
+infrastructure use remain unauthorized pending their later reviews.

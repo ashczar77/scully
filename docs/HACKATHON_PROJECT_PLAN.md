@@ -437,9 +437,14 @@ balance, account stop behavior, applicable limits, and bounded run budget must
 be reviewed. The live probes must be implemented through the project scaffold,
 not as disconnected manual experiments.
 
-**Checkpoint G1.2a, scaffold review:** Approve only if the proposed structure is
-minimal, keeps credentials outside Git, supports offline testing, and avoids
-prematurely selecting the product UI or application framework.
+**Checkpoint G1.2a, scaffold specification review:** Approve only if the
+proposed structure is minimal, keeps credentials outside Git, supports offline
+testing, and avoids prematurely selecting the product UI or application
+framework.
+
+**Checkpoint G1.2b, offline scaffold review:** Approve only if a clean checkout
+can run the configuration and measurement tests without credentials, provider
+dependencies, network access, or live infrastructure use.
 
 **Gate G1.2, primitive capability review:** Approve only if each sponsor
 technology performs a necessary role with stable enough behavior for the demo.
