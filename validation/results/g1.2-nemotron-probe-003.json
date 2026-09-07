@@ -1,0 +1,45 @@
+{
+  "argument_fields": [
+    "confidence",
+    "hypothesis",
+    "mechanism",
+    "next_check"
+  ],
+  "finish_reason": "stop",
+  "measurement": {
+    "duration_seconds": 3.830568,
+    "ended_at": "2026-09-07T18:02:35.251960+00:00",
+    "input_tokens": 474,
+    "investigation_id": "g1.2-nemotron-003",
+    "model_cost_usd": "0.00025284",
+    "operation": "tool_call",
+    "output_tokens": 935,
+    "provider": "nemotron",
+    "rate_limit_count": 0,
+    "request_count": 1,
+    "retries": 0,
+    "sandbox_cpu_seconds": 0.0,
+    "sandbox_operations": 0,
+    "started_at": "2026-09-07T18:02:31.421392+00:00",
+    "status": "succeeded",
+    "tavily_credits": 0
+  },
+  "model": "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B",
+  "probe_id": "g1.2-nemotron-003",
+  "provider": "nemotron",
+  "rate_limit_header_names": [
+    "x-ratelimit-dynamic-period-remaining",
+    "x-ratelimit-dynamic-period-usage-requests",
+    "x-ratelimit-dynamic-period-usage-tokens",
+    "x-ratelimit-dynamic-scale-requests",
+    "x-ratelimit-dynamic-scale-tokens",
+    "x-ratelimit-limit-requests",
+    "x-ratelimit-limit-tokens",
+    "x-ratelimit-remaining-requests",
+    "x-ratelimit-remaining-tokens",
+    "x-ratelimit-reset-requests",
+    "x-ratelimit-reset-tokens"
+  ],
+  "status": "succeeded",
+  "tool_name": "record_incident_hypothesis"
+}

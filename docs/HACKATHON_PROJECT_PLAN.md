@@ -474,6 +474,12 @@ allowance remains below the hard cost ceiling, structural diagnostics are
 tested offline, and live access remains closed. Approval authorizes one final
 corrective Nemotron attempt.
 
+**Checkpoint G1.2h, final Nemotron result review:** Approve only if the final
+corrective attempt sends exactly one request with zero retries, returns a
+schema-valid tool call within the reviewed token and cost limits, and retains
+only redacted evidence. Approval authorizes implementation and offline review
+of the Tavily probe, not a live Tavily request or Sandbox operation.
+
 **Gate G1.2, primitive capability review:** Approve only if each sponsor
 technology performs a necessary role with stable enough behavior for the demo.
 Record any fallback and confirm that it remains competition-compliant.

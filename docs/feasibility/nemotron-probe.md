@@ -1,6 +1,6 @@
 # Step 1.2 Nemotron Capability Probe
 
-**Status:** Model-specific request correction in review at checkpoint G1.2g
+**Status:** Final corrective result in review at checkpoint G1.2h
 
 **Attempt date:** 2026-09-07
 
@@ -126,3 +126,31 @@ therefore cannot open the Nemotron live gate.
 Offline tests verify the model-specific sampling values, exact output limit,
 disabled parallel calls, early structural capture, and closed ordinary
 configuration. No third request was made while preparing checkpoint G1.2g.
+
+## Attempt 003 result
+
+Checkpoint G1.2g approved exactly one final corrective request. Attempt 003
+reached Token Factory and returned a schema-valid call to
+`record_incident_hypothesis` after 3.830568 seconds.
+
+The redacted result records:
+
+- one request and zero retries;
+- 474 input tokens and 935 output tokens;
+- $0.00025284 calculated model cost;
+- all four required argument field names;
+- no generated argument values, prompt content, credential, or provider error
+  message;
+- no Tavily credit and no Sandbox operation.
+
+The request used less than one tenth of its 10,000-token output allowance and
+less than three percent of its $0.01 hard cost ceiling. The durable record is
+`validation/results/g1.2-nemotron-probe-003.json`.
+
+## Capability conclusion
+
+Nemotron has now demonstrated the required structured tool-call behavior over
+the project adapter. The two earlier failures establish why model-specific
+reasoning allowance matters. The final corrective attempt establishes that the
+reviewed configuration resolves that limitation within the safety and cost
+boundaries.
