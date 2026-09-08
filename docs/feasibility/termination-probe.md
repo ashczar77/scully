@@ -1,6 +1,6 @@
 # Step 1.3 Termination Probe
 
-**Status:** First live result in review at checkpoint G1.3d
+**Status:** Corrective live proposal in review at checkpoint G1.3e
 
 **Review date:** 2026-09-08
 
@@ -46,9 +46,10 @@ Platform references:
 
 ## Fixed live paths
 
-Both paths use the fixed `python:3.12-slim` image, direct executable mode,
-`/usr/bin/sleep`, no shell, no package installation, no file upload, no
-command output, and a 1,024-byte stream cap. Both operations are disposable.
+Both paths use the fixed direct API image source
+`tag:python:3.12-slim`, direct executable mode, `/usr/bin/sleep`, no shell, no
+package installation, no file upload, no command output, and a 1,024-byte
+stream cap. Both operations are disposable.
 
 ### Timeout path
 
@@ -138,7 +139,7 @@ image identifiers.
 
 ## Offline verification
 
-The full suite contains 104 passing tests. The termination tests cover:
+The full suite contains 108 passing tests. The termination tests cover:
 
 - fixed commands, timeouts, disposable mode, and output caps;
 - timeout confirmation and exact-ID cancellation;
@@ -151,6 +152,9 @@ The full suite contains 104 passing tests. The termination tests cover:
 - failure records that exclude provider details and operation identifiers;
 - both termination states remaining evaluator-inconclusive;
 - closed preflight for a wrong dependency version or budget;
+- acceptance of direct API tags and canonical image UUIDs;
+- rejection of unprefixed tags and noncanonical UUIDs before a client call;
+- separate spawn-call and confirmed-operation-ID accounting;
 - inert construction of the one-attempt direct client.
 
 No provider endpoint method or network request was used by these tests.
@@ -200,10 +204,27 @@ identifier, so no status or cleanup request could safely be made.
 The failure is in the local request adapter, not evidence that remote timeout
 or cancellation is broken. Neither termination behavior was tested.
 
+## Corrective offline implementation
+
+Checkpoint G1.3d accepted the failure record and authorized offline
+preparation of a correction. The corrected runner now:
+
+- uses the new probe ID `g1.3-termination-002`;
+- passes `tag:python:3.12-slim` to the direct API;
+- accepts only a schema-shaped `tag:` source or canonical hyphenated UUID;
+- rejects an unprefixed image tag before constructing a provider request;
+- records `spawn_calls_attempted` separately from
+  `operation_ids_confirmed`;
+- counts only confirmed operation IDs as Sandbox operations in measurements;
+- preserves every previously reviewed timeout, status, cancellation, cleanup,
+  retry, duration, and evidence limit.
+
+The failed result for attempt 001 remains unchanged. No corrective provider
+request or Sandbox operation occurred during this implementation.
+
 ## Decision requested
 
-Accept the failed attempt as correctly stopped and redacted. Authorize offline
-preparation of a corrective checkpoint that adds the required `tag:` prefix,
-distinguishes attempted spawn calls from confirmed operation identifiers, and
-tests the direct API image-source contract. Do not authorize a second live
-attempt yet.
+Approve exactly one execution of `g1.3-termination-002` within the existing
+reviewed bounds. Approval does not authorize another attempt, a Nemotron
+request, or a Tavily search. Submit the redacted result at checkpoint G1.3f
+before deciding Gate G1.3.

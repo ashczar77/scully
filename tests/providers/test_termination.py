@@ -13,6 +13,7 @@ from scully.providers.termination import (
     TIMEOUT_COMMAND_SECONDS,
     TerminationAdapter,
     TerminationTracker,
+    require_image_source,
 )
 
 
@@ -58,9 +59,11 @@ class FakeClient:
         statuses: dict[str, list[object]],
         *,
         cancel_error: Exception | None = None,
+        spawn_error: Exception | None = None,
     ) -> None:
         self.statuses = statuses
         self.cancel_error = cancel_error
+        self.spawn_error = spawn_error
         self.spawn_ids = iter(statuses)
         self.spawn_calls: list[tuple[str, str, dict[str, object]]] = []
         self.status_calls: list[tuple[str, bool]] = []
@@ -70,8 +73,10 @@ class FakeClient:
     def spawn_instance(
         self, command: str, image: str, **kwargs: object
     ) -> object:
-        operation_id = next(self.spawn_ids)
         self.spawn_calls.append((command, image, kwargs))
+        if self.spawn_error is not None:
+            raise self.spawn_error
+        operation_id = next(self.spawn_ids)
         return SimpleNamespace(uuid=operation_id)
 
     def get_operation_status(
@@ -140,18 +145,23 @@ class TerminationAdapterTests(unittest.TestCase):
             tracker=tracker,
             monotonic=fake_time.monotonic,
             sleeper=fake_time.sleep,
-        ).run(base_image="python:3.12-slim")
+        ).run(base_image="tag:python:3.12-slim")
 
         self.assertEqual(outcome.timeout.terminal_status, "SUCCESS")
         self.assertTrue(outcome.timeout.timed_out)
         self.assertEqual(outcome.cancellation.terminal_status, "CANCELLED")
         self.assertEqual(client.cancel_calls, ["sensitive-cancel-id"])
-        self.assertEqual(tracker.operations_spawned, 2)
+        self.assertEqual(tracker.spawn_calls_attempted, 2)
+        self.assertEqual(tracker.operation_ids_confirmed, 2)
         self.assertEqual(tracker.status_reads, 4)
         self.assertEqual(tracker.primary_cancel_requests, 1)
         self.assertEqual(tracker.cleanup_cancel_requests, 0)
         self.assertEqual(tracker.request_count, 7)
         self.assertTrue(all(call[2]["disposable"] for call in client.spawn_calls))
+        self.assertEqual(
+            [call[1] for call in client.spawn_calls],
+            ["tag:python:3.12-slim", "tag:python:3.12-slim"],
+        )
         self.assertTrue(all(not call[2]["shell"] for call in client.spawn_calls))
         self.assertTrue(
             all(
@@ -183,9 +193,10 @@ class TerminationAdapterTests(unittest.TestCase):
         )
 
         with self.assertRaises(TimeoutError):
-            adapter.run(base_image="python:3.12-slim")
+            adapter.run(base_image="tag:python:3.12-slim")
 
-        self.assertEqual(tracker.operations_spawned, 1)
+        self.assertEqual(tracker.spawn_calls_attempted, 1)
+        self.assertEqual(tracker.operation_ids_confirmed, 1)
         self.assertEqual(tracker.status_reads, MAX_STATUS_READS_PER_PATH)
         self.assertEqual(tracker.cleanup_cancel_requests, 1)
         self.assertEqual(client.cancel_calls, [operation_id])
@@ -204,7 +215,7 @@ class TerminationAdapterTests(unittest.TestCase):
         )
 
         with self.assertRaises(RuntimeError):
-            adapter.run(base_image="python:3.12-slim")
+            adapter.run(base_image="tag:python:3.12-slim")
 
         self.assertEqual(tracker.primary_cancel_requests, 1)
         self.assertEqual(tracker.cleanup_cancel_requests, 1)
@@ -238,9 +249,10 @@ class TerminationAdapterTests(unittest.TestCase):
         )
 
         with self.assertRaises(TimeoutError):
-            adapter.run(base_image="python:3.12-slim")
+            adapter.run(base_image="tag:python:3.12-slim")
 
-        self.assertEqual(tracker.operations_spawned, 2)
+        self.assertEqual(tracker.spawn_calls_attempted, 2)
+        self.assertEqual(tracker.operation_ids_confirmed, 2)
         self.assertEqual(
             tracker.status_reads,
             1 + MAX_STATUS_READS_PER_PATH,
@@ -263,7 +275,7 @@ class TerminationAdapterTests(unittest.TestCase):
                 live_settings(),
                 monotonic=fake_time.monotonic,
                 sleeper=fake_time.sleep,
-            ).run(base_image="python:3.12-slim")
+            ).run(base_image="tag:python:3.12-slim")
         self.assertEqual(client.cancel_calls, ["expected-id"])
 
     def test_rejects_retained_timeout_state(self) -> None:
@@ -293,7 +305,7 @@ class TerminationAdapterTests(unittest.TestCase):
                         live_settings(),
                         monotonic=fake_time.monotonic,
                         sleeper=fake_time.sleep,
-                    ).run(base_image="python:3.12-slim")
+                    ).run(base_image="tag:python:3.12-slim")
                 self.assertEqual(len(client.spawn_calls), 1)
                 self.assertEqual(client.cancel_calls, [])
 
@@ -324,15 +336,45 @@ class TerminationAdapterTests(unittest.TestCase):
                 live_settings(),
                 monotonic=fake_time.monotonic,
                 sleeper=fake_time.sleep,
-            ).run(base_image="python:3.12-slim")
+            ).run(base_image="tag:python:3.12-slim")
         self.assertEqual(client.cancel_calls, ["cancel-id"])
 
     def test_requires_exact_reviewed_operation_budget(self) -> None:
         client = successful_client()
         with self.assertRaisesRegex(ConfigurationError, "exactly two"):
             TerminationAdapter(client, live_settings(max_operations=3)).run(
+                base_image="tag:python:3.12-slim"
+            )
+        self.assertEqual(client.spawn_calls, [])
+
+    def test_accepts_direct_api_tag_and_canonical_uuid(self) -> None:
+        self.assertEqual(
+            require_image_source("tag:python:3.12-slim"),
+            "tag:python:3.12-slim",
+        )
+        self.assertEqual(
+            require_image_source("12345678-9abc-baba-deda-0123456789ab"),
+            "12345678-9abc-baba-deda-0123456789ab",
+        )
+
+    def test_rejects_unprefixed_tag_before_spawn(self) -> None:
+        client = successful_client()
+
+        with self.assertRaisesRegex(ValueError, "tag: prefix"):
+            TerminationAdapter(client, live_settings()).run(
                 base_image="python:3.12-slim"
             )
+
+        self.assertEqual(client.spawn_calls, [])
+
+    def test_rejects_noncanonical_uuid_before_spawn(self) -> None:
+        client = successful_client()
+
+        with self.assertRaisesRegex(ValueError, "canonical"):
+            TerminationAdapter(client, live_settings()).run(
+                base_image="123456789abcbabadeda0123456789ab"
+            )
+
         self.assertEqual(client.spawn_calls, [])
 
 

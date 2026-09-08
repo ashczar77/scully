@@ -44,12 +44,16 @@ class TerminationProbeTests(unittest.TestCase):
         encoded = json.dumps(record)
 
         self.assertEqual(record["status"], "succeeded")
+        self.assertEqual(record["probe_id"], "g1.3-termination-002")
+        self.assertEqual(record["base_image"], "tag:python:3.12-slim")
         self.assertEqual(record["timeout"]["evaluation_verdict"], "inconclusive")
         self.assertEqual(
             record["cancellation"]["evaluation_verdict"],
             "inconclusive",
         )
         self.assertEqual(record["measurement"]["sandbox_operations"], 2)
+        self.assertEqual(record["spawn_calls_attempted"], 2)
+        self.assertEqual(record["operation_ids_confirmed"], 2)
         self.assertEqual(record["measurement"]["request_count"], 7)
         self.assertEqual(record["measurement"]["retries"], 0)
         self.assertFalse(record["provider_reported_cost_available"])
@@ -78,10 +82,30 @@ class TerminationProbeTests(unittest.TestCase):
 
         self.assertEqual(record["status"], "timed_out")
         self.assertEqual(record["failure_path"], "timeout")
-        self.assertEqual(record["operations_spawned"], 1)
+        self.assertEqual(record["spawn_calls_attempted"], 1)
+        self.assertEqual(record["operation_ids_confirmed"], 1)
         self.assertFalse(record["provider_reported_cost_available"])
         self.assertNotIn("sandbox_reported_cost", record["measurement"])
         self.assertNotIn(operation_id, json.dumps(record))
+        self.assertTrue(client.closed)
+
+    def test_rejected_spawn_is_attempted_but_not_confirmed(self) -> None:
+        client = FakeClient(
+            {"unused-id": [response("unused-id", "EXECUTING")]},
+            spawn_error=RuntimeError("sensitive provider message"),
+        )
+        record = run_probe(
+            live_settings(),
+            client_factory=lambda settings: client,
+            version_lookup=exact_version,
+            clock=clock(),
+        )
+
+        self.assertEqual(record["status"], "failed")
+        self.assertEqual(record["spawn_calls_attempted"], 1)
+        self.assertEqual(record["operation_ids_confirmed"], 0)
+        self.assertEqual(record["measurement"]["sandbox_operations"], 0)
+        self.assertNotIn("sensitive provider message", json.dumps(record))
         self.assertTrue(client.closed)
 
     def test_preflight_is_closed_for_wrong_package_or_budget(self) -> None:

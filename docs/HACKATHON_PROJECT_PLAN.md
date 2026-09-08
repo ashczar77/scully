@@ -540,6 +540,20 @@ cancellation reach the expected terminal states, cannot produce a reproduction
 verdict, and leave no unexplained running operation. Approval authorizes the
 Gate G1.3 execution integrity review.
 
+If G1.3d records a request-contract failure before termination behavior is
+tested, approval may instead authorize offline correction only.
+
+**Checkpoint G1.3e, corrective termination review:** Approve only if the
+corrected request contract passes offline validation, failed evidence remains
+immutable, attempt and confirmed-operation accounting are distinct, and all
+previous execution bounds remain unchanged. Approval authorizes one corrected
+termination attempt.
+
+**Checkpoint G1.3f, corrective termination result review:** Approve only if the
+corrected timeout and cancellation paths reach their expected remote terminal
+states, remain evaluator-inconclusive, retain no result image, and leave no
+unexplained active operation. Approval authorizes the Gate G1.3 review.
+
 **Gate G1.3, execution integrity review:** Approve only if experiment isolation
 is demonstrated and only deterministic code, not the language model, can mark
 a reproduction as successful.

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from math import isfinite
 from types import EllipsisType
 from typing import Protocol
+from uuid import UUID
 
 from scully.config import ConfigurationError, Provider, Settings
 
@@ -26,6 +28,9 @@ MAX_OUTPUT_BYTES = 1_024
 REQUIRED_SANDBOX_OPERATIONS = 2
 ACTIVE_STATUSES = frozenset({"PENDING", "ASSIGNED", "EXECUTING"})
 TERMINAL_STATUSES = frozenset({"SUCCESS", "FAILED", "CANCELLED"})
+IMAGE_TAG_PATTERN = re.compile(
+    r"tag:[A-Za-z0-9][A-Za-z0-9_-]*(?:[:/.][A-Za-z0-9_-]+)*"
+)
 
 
 class TerminationClient(Protocol):
@@ -61,7 +66,8 @@ class TerminationTracker:
     """Application-level call counts that survive a failed probe."""
 
     current_path: str = "preflight"
-    operations_spawned: int = 0
+    spawn_calls_attempted: int = 0
+    operation_ids_confirmed: int = 0
     status_reads: int = 0
     primary_cancel_requests: int = 0
     cleanup_cancel_requests: int = 0
@@ -71,7 +77,7 @@ class TerminationTracker:
         """Return the total number of direct application client calls."""
 
         return (
-            self.operations_spawned
+            self.spawn_calls_attempted
             + self.status_reads
             + self.primary_cancel_requests
             + self.cleanup_cancel_requests
@@ -127,11 +133,10 @@ class TerminationAdapter:
             raise ConfigurationError(
                 "Termination probe requires exactly two Sandbox operations"
             )
-        if not base_image.strip():
-            raise ValueError("Base image cannot be empty")
+        image_source = require_image_source(base_image)
 
-        timeout = self._run_timeout(base_image)
-        cancellation = self._run_cancellation(base_image)
+        timeout = self._run_timeout(image_source)
+        cancellation = self._run_cancellation(image_source)
         return TerminationOutcome(timeout=timeout, cancellation=cancellation)
 
     def _run_timeout(self, base_image: str) -> TerminationObservation:
@@ -224,9 +229,9 @@ class TerminationAdapter:
         sleep_seconds: int,
         command_timeout: int,
     ) -> str:
-        if self.tracker.operations_spawned >= REQUIRED_SANDBOX_OPERATIONS:
+        if self.tracker.spawn_calls_attempted >= REQUIRED_SANDBOX_OPERATIONS:
             raise ConfigurationError("Termination operation cap reached")
-        self.tracker.operations_spawned += 1
+        self.tracker.spawn_calls_attempted += 1
         response = self._client.spawn_instance(
             "/usr/bin/sleep",
             base_image,
@@ -239,6 +244,7 @@ class TerminationAdapter:
         operation_id = read_field(response, "uuid")
         if not isinstance(operation_id, str) or not operation_id.strip():
             raise ProviderContractError("Spawn response has no operation identifier")
+        self.tracker.operation_ids_confirmed += 1
         return operation_id
 
     def _poll_terminal(
@@ -342,6 +348,24 @@ def _operation_status(response: object, operation_id: str) -> str:
     if not isinstance(normalized, str):
         raise ProviderContractError("Operation status must be text")
     return normalized.upper()
+
+
+def require_image_source(value: str) -> str:
+    """Require a direct API image UUID or a tag with the required prefix."""
+
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise ValueError("Image source must be non-empty text without outer space")
+    if IMAGE_TAG_PATTERN.fullmatch(value):
+        return value
+    try:
+        parsed = UUID(value)
+    except (ValueError, AttributeError) as error:
+        raise ValueError(
+            "Image source must be a UUID or start with the tag: prefix"
+        ) from error
+    if str(parsed) != value.lower():
+        raise ValueError("Image UUID must use canonical hyphenated form")
+    return str(parsed)
 
 
 def _timed_out(response: object) -> bool:

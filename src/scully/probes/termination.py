@@ -30,8 +30,8 @@ from scully.providers.termination import (
 )
 
 
-PROBE_ID = "g1.3-termination-001"
-PROBE_IMAGE = "python:3.12-slim"
+PROBE_ID = "g1.3-termination-002"
+PROBE_IMAGE = "tag:python:3.12-slim"
 REQUIRED_BUDGET_TIMEOUT_SECONDS = 15
 CLIENT_PACKAGE = "contree-client"
 
@@ -181,7 +181,7 @@ def _success_record(
         started_at=started_at,
         ended_at=ended_at,
         request_count=tracker.request_count,
-        sandbox_operations=tracker.operations_spawned,
+        sandbox_operations=tracker.operation_ids_confirmed,
         sandbox_elapsed_seconds=(
             outcome.timeout.duration_seconds
             + outcome.cancellation.duration_seconds
@@ -198,6 +198,8 @@ def _success_record(
         "max_stale_connection_resends_per_idempotent_call": 1,
         "request_count_unit": "application_client_calls",
         "provider_reported_cost_available": False,
+        "spawn_calls_attempted": tracker.spawn_calls_attempted,
+        "operation_ids_confirmed": tracker.operation_ids_confirmed,
         "timeout": {
             "terminal_status": outcome.timeout.terminal_status,
             "timed_out": outcome.timeout.timed_out,
@@ -244,7 +246,7 @@ def _failure_record(
         started_at=started_at,
         ended_at=ended_at,
         request_count=tracker.request_count,
-        sandbox_operations=tracker.operations_spawned,
+        sandbox_operations=tracker.operation_ids_confirmed,
         retries=0,
     )
     return {
@@ -253,7 +255,8 @@ def _failure_record(
         "status": status.value,
         "failure_path": tracker.current_path,
         "error_type": type(error).__name__,
-        "operations_spawned": tracker.operations_spawned,
+        "spawn_calls_attempted": tracker.spawn_calls_attempted,
+        "operation_ids_confirmed": tracker.operation_ids_confirmed,
         "status_reads": tracker.status_reads,
         "primary_cancel_requests": tracker.primary_cancel_requests,
         "cleanup_cancel_requests": tracker.cleanup_cancel_requests,
