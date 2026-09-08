@@ -12,9 +12,9 @@ customer data.
 ## Current status
 
 - Phase: Sponsor-stack and architecture feasibility
-- Completed gates: G0.1 through G1.1 and checkpoints G1.2a through G1.2l
-- Active step: Gate G1.2, primitive capability review
-- Next checkpoint: Gate G1.2 decision
+- Completed gates: G0.1 through G1.2 and checkpoints G1.2a through G1.2l
+- Active step: Step 1.3, isolation and deterministic evaluation
+- Next checkpoint: G1.3a, execution-integrity test review
 - Implementation: All three sponsor primitives proven independently
 - Out-of-pocket cost limit: Zero
 - Submission deadline: 30 October 2026
@@ -53,8 +53,8 @@ customer data.
 | [Sandbox capability probe](feasibility/sandbox-probe.md) | Four-operation branch lifecycle and successful branching result | Approved at G1.2l |
 | [Checkpoint G1.2k review](gates/G1.2k-sandbox-execution-review.md) | Offline evidence and execution decision for the Sandbox probe | Approved |
 | [Checkpoint G1.2l review](gates/G1.2l-sandbox-result-review.md) | Evidence and decision record for the successful Sandbox lifecycle | Approved |
-| [Primitive capability summary](feasibility/primitive-capability-summary.md) | Combined roles, measurements, limitations, fallbacks, and competition alignment | In review at G1.2 |
-| [Gate G1.2 review](gates/G1.2-primitive-capability-review.md) | Combined sponsor-primitive decision record | In review |
+| [Primitive capability summary](feasibility/primitive-capability-summary.md) | Combined roles, measurements, limitations, fallbacks, and competition alignment | Approved at G1.2 |
+| [Gate G1.2 review](gates/G1.2-primitive-capability-review.md) | Combined sponsor-primitive decision record | Approved |
 | [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol retained for later direct validation | Deferred evidence |
 | [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for later direct validation | Ready for future use |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |
@@ -64,7 +64,8 @@ The Apache License 2.0 in the repository root remains the project license.
 ## Immediate decision
 
 Nemotron, Tavily, and ConTree branching are approved as independently proven
-primitives. Their combined capability review is submitted at Gate G1.2. All
-further live provider work remains blocked.
+primitives. Gate G1.2 authorizes Step 1.3 offline implementation and mocked
+tests only. All further live provider work remains blocked until the exact
+execution-integrity proposal passes checkpoint G1.3a.
 
 New documentation should support the active hackathon project.

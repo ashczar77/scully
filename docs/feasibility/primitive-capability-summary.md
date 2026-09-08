@@ -1,6 +1,6 @@
 # Step 1.2 Primitive Capability Summary
 
-**Status:** In review at Gate G1.2
+**Status:** Approved at Gate G1.2
 
 ## Decision question
 
