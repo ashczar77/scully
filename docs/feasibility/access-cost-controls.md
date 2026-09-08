@@ -1,6 +1,6 @@
 # Step 1.1 Access, Limits, and Cost Controls
 
-**Status:** Approved at G1.1, execution checks deferred to Step 1.2
+**Status:** Approved at G1.1, bounded capability probes completed in Step 1.2
 
 **Review date:** 2026-09-07
 
@@ -130,7 +130,7 @@ paid-overage behavior, and a stop-before-overage control are verified for the
 project key. The planned prototype must stay within the recorded free
 allocation.
 
-## Local access audit
+## Local access audit at G1.1
 
 The audit inspected credential names and tool presence without reading or
 printing any secret value.
@@ -149,9 +149,9 @@ printing any secret value.
 | Docker daemon | Unavailable |
 | `curl` and `jq` | Available |
 
-No inference or Sandbox operation has been performed. A read-only Token Factory
-model-list request authenticated successfully. Tavily authentication and live
-basic search were verified.
+At the G1.1 audit, no inference or Sandbox operation had been performed. A
+read-only Token Factory model-list request authenticated successfully. Tavily
+authentication and a live basic CLI search were verified.
 
 ## Account verification evidence
 
@@ -177,9 +177,10 @@ publishing credentials or account identifiers:
 - a read-only ConTree request returned the public Python image catalog;
 - Tavily CLI 0.1.8 is OAuth authenticated and completed a live basic search.
 
-Detailed consumption checks are deferred until immediately before the first
-live infrastructure run. The zero-spend policy and fail-closed controls remain
-the acceptance boundary for that run.
+The Step 1.2 reviews later approved bounded Nemotron, Tavily, and Sandbox
+probes. Their redacted results are summarized in
+`docs/feasibility/primitive-capability-summary.md`. The zero-spend policy and
+fail-closed controls remain the acceptance boundary for future runs.
 
 ## Credential handling
 
@@ -213,10 +214,10 @@ The repository ignores `.env` and all `.env.*` variants except
 |---|---:|---:|---:|
 | Token Factory inference | $0.50 | Lower of $10 or 40% of verified promotional balance | At least 60% of verified promotional balance |
 | Tavily | 5 API credits | 250 API credits per calendar month | At least 750 free monthly credits |
-| Sandboxes | 2 minimal operations | 100 operations, subject to verified pricing | At least 80% of any metered free allowance |
+| Sandboxes | 4 counted operations | 100 operations, subject to verified pricing | At least 80% of any metered free allowance |
 
-The sandbox operation caps do not authorize execution while pricing and credit
-coverage remain unknown.
+Sandbox execution remains gated even when the console describes the beta as
+free. Every run still requires an exact operation budget and review.
 
 ## Per-investigation budget
 
@@ -229,7 +230,7 @@ Each development investigation must declare its budget before execution:
 | Total model output tokens | 32,000 |
 | Tavily credits | 10 |
 | Sandbox operations | 12 |
-| Sandbox aggregate CPU time | 20 minutes |
+| Sandbox aggregate public command time | 20 minutes |
 | Wall-clock duration | 30 minutes |
 
 The monetary model cap is calculated from the current model card before the
@@ -248,7 +249,8 @@ sensitive prompts:
 - calculated model cost and relevant rate-limit headers;
 - Tavily endpoint, search or extraction depth, response credit usage, and
   usage-endpoint totals;
-- sandbox operation IDs, terminal state, CPU time, memory, I/O, and wall time;
+- sandbox operation count, identifier presence and distinctness, terminal
+  state, public elapsed time, reported cost, and wall time;
 - cancellation, retry, 429, timeout, and failed-operation counts;
 - final remaining budget and the reason for any early stop.
 
@@ -279,24 +281,25 @@ sensitive prompts:
 - [x] Tavily CLI OAuth authentication and a live basic search succeed.
 - [x] All configured test keys are stored outside Git.
 
-## Step 1.2 execution preflight
+## Step 1.2 execution preflight disposition
 
-The following checks remain deliberately incomplete. They must be reviewed
-immediately before the first live inference call or Sandbox operation:
+The bounded probes resolved the checks needed for Step 1.2 as follows:
 
-- [ ] Record the current Token Factory balance and promotional expiration.
-- [ ] Confirm the selected Nemotron model can use the available balance.
-- [ ] Calculate and approve the first probe's worst-case token cost.
-- [ ] Capture Token Factory rate-limit headers from the first bounded response.
-- [ ] Confirm current Sandbox beta pricing and account coverage.
+- [x] Record the current Token Factory balance and trial expiration.
+- [x] Confirm the selected Nemotron model can use the available balance.
+- [x] Calculate and approve the first probe's worst-case token cost.
+- [x] Capture Token Factory rate-limit header names from the bounded response.
+- [x] Confirm the Sandbox console describes beta access as free for the project.
 - [ ] Record applicable Sandbox outbound-network and resource limits.
-- [ ] Confirm Tavily pay-as-you-go usage and limit are both zero.
-- [ ] Record Tavily usage and remaining credits before and after the probe.
-- [ ] Declare operation, token, credit, CPU-time, and wall-clock limits.
+- [ ] Confirm Tavily paid-overage usage and limit are both zero.
+- [ ] Record Tavily remaining allowance before and after expanded use. The
+  bounded probe recorded its one-credit response usage only.
+- [x] Declare operation, token, credit, elapsed-time, and wall-clock limits.
 
-No live infrastructure execution is authorized until this preflight is
-reviewed. The probes will then run through the Step 1.2 scaffold so their
-behavior, latency, reliability, and usage become reusable project evidence.
+The remaining Sandbox limit item does not block the fixed probe because it made
+no outbound request, used no uploaded file, and ran within explicit command and
+transport timeouts. It must be resolved before a general experiment scheduler
+can receive approval.
 
 ## Gate G1.1 disposition
 

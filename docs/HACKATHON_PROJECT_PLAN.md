@@ -518,6 +518,12 @@ Deliverables:
 - a deterministic failure-signature evaluator;
 - timeout, cancellation, and failed-experiment behavior.
 
+**Checkpoint G1.3a, execution-integrity test review:** Approve only if the
+deterministic evaluator and failure-state handling pass offline tests, the live
+test uses fixed synthetic inputs, and every proposed Sandbox operation,
+timeout, cancellation condition, retained field, and residual state is bounded
+in advance. Approval authorizes only the reviewed live integrity test.
+
 **Gate G1.3, execution integrity review:** Approve only if experiment isolation
 is demonstrated and only deterministic code, not the language model, can mark
 a reproduction as successful.
