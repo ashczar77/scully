@@ -12,9 +12,9 @@ customer data.
 ## Current status
 
 - Phase: Sponsor-stack and architecture feasibility
-- Completed gates: G0.1 through G1.2 and checkpoints G1.2a through G1.3a
-- Active step: Checkpoint G1.3b, execution-integrity result review
-- Next checkpoint: Gate G1.3b decision
+- Completed gates: G0.1 through G1.2 and checkpoints G1.2a through G1.3b
+- Active step: Checkpoint G1.3c, termination test review
+- Next checkpoint: Gate G1.3c decision
 - Implementation: Deterministic evaluator proven in one Sandbox lifecycle
 - Out-of-pocket cost limit: Zero
 - Submission deadline: 30 October 2026
@@ -57,7 +57,7 @@ customer data.
 | [Gate G1.2 review](gates/G1.2-primitive-capability-review.md) | Combined sponsor-primitive decision record | Approved |
 | [Execution integrity](feasibility/execution-integrity.md) | Deterministic evaluator, experiment lifecycle, isolation checks, and bounded live proposal | Approved for one attempt at G1.3a |
 | [Checkpoint G1.3a review](gates/G1.3a-execution-integrity-test-review.md) | Offline evidence and execution decision for the first integrity probe | Approved |
-| [Checkpoint G1.3b review](gates/G1.3b-execution-integrity-result-review.md) | Evidence and decision record for the successful integrity probe | In review |
+| [Checkpoint G1.3b review](gates/G1.3b-execution-integrity-result-review.md) | Evidence and decision record for the successful integrity probe | Approved |
 | [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol retained for later direct validation | Deferred evidence |
 | [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for later direct validation | Ready for future use |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |
@@ -67,8 +67,7 @@ The Apache License 2.0 in the repository root remains the project license.
 ## Immediate decision
 
 The first and only execution-integrity attempt passed with four operations and
-zero retries. Checkpoint G1.3b requests approval to prepare, but not execute,
-the separate timeout and cancellation proposal. All live provider work remains
-blocked pending that decision.
+zero retries. Checkpoint G1.3b authorizes offline preparation of the separate
+timeout and cancellation proposal. No live termination test is authorized.
 
 New documentation should support the active hackathon project.
