@@ -12,10 +12,10 @@ customer data.
 ## Current status
 
 - Phase: Sponsor-stack and architecture feasibility
-- Completed gates: G0.1 through G1.1 and checkpoints G1.2a through G1.2j
+- Completed gates: G0.1 through G1.1 and checkpoints G1.2a through G1.2k
 - Active step: Step 1.2, prove the sponsor primitives independently
-- Next checkpoint: G1.2k, Sandbox execution review
-- Implementation: Sandbox branching probe implemented and tested offline
+- Next checkpoint: G1.2l, Sandbox result review
+- Implementation: One bounded Sandbox branching lifecycle succeeded
 - Out-of-pocket cost limit: Zero
 - Submission deadline: 30 October 2026
 
@@ -50,8 +50,9 @@ customer data.
 | [Tavily capability probe](feasibility/tavily-probe.md) | One-credit search boundary and successful source-discovery result | Approved at G1.2j |
 | [Checkpoint G1.2i review](gates/G1.2i-tavily-execution-review.md) | Offline evidence and execution decision for the Tavily probe | Approved |
 | [Checkpoint G1.2j review](gates/G1.2j-tavily-result-review.md) | Evidence and decision record for the successful Tavily search | Approved |
-| [Sandbox capability probe](feasibility/sandbox-probe.md) | Four-operation branch lifecycle and redacted result contract | In review at G1.2k |
-| [Checkpoint G1.2k review](gates/G1.2k-sandbox-execution-review.md) | Offline evidence and execution decision for the Sandbox probe | In review |
+| [Sandbox capability probe](feasibility/sandbox-probe.md) | Four-operation branch lifecycle and successful branching result | In review at G1.2l |
+| [Checkpoint G1.2k review](gates/G1.2k-sandbox-execution-review.md) | Offline evidence and execution decision for the Sandbox probe | Approved |
+| [Checkpoint G1.2l review](gates/G1.2l-sandbox-result-review.md) | Evidence and decision record for the successful Sandbox lifecycle | In review |
 | [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol retained for later direct validation | Deferred evidence |
 | [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for later direct validation | Ready for future use |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |
@@ -61,7 +62,7 @@ The Apache License 2.0 in the repository root remains the project license.
 ## Immediate decision
 
 Nemotron and Tavily are approved as proven primitives. The bounded Sandbox
-branching probe is implemented and submitted for checkpoint G1.2k review. All
-Sandbox operations remain blocked pending that review.
+lifecycle succeeded and is submitted for checkpoint G1.2l review. All further
+live provider work remains blocked.
 
 New documentation should support the active hackathon project.

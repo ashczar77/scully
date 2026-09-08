@@ -1,6 +1,6 @@
 # Step 1.2 Sandbox Capability Probe
 
-**Status:** Offline implementation in review at checkpoint G1.2k
+**Status:** Live result in review at checkpoint G1.2l
 
 ## Objective
 
@@ -110,3 +110,37 @@ The redacted preflight must show only the Sandbox live gate open. Approval
 would authorize attempt `g1.2-sandbox-001` once. The runner must stop after the
 first lifecycle result, whether it succeeds or fails, and submit the redacted
 record at checkpoint G1.2l.
+
+## Live result
+
+Checkpoint G1.2k approved exactly one lifecycle. The redacted preflight showed
+Sandbox as the only open live gate, then attempt `g1.2-sandbox-001` succeeded
+without an application retry.
+
+The result records:
+
+- four counted operations and zero retries;
+- successful parent output validation;
+- two child exit codes of zero and empty standard error;
+- successful output validation for both children;
+- three observed, distinct, and untagged resulting image states;
+- 7.325823 seconds of local wall time;
+- 0.126113 seconds of aggregate public command elapsed time;
+- a provider-reported cost value of 0.00144547 without assigning a unit;
+- no Nemotron request or Tavily credit.
+
+The second branch's fixed command would have failed if the first branch's file
+had leaked into it. Its successful output therefore demonstrates shared-parent
+inheritance and sibling separation for this lifecycle.
+
+The durable record is
+`validation/results/g1.2-sandbox-probe-001.json`. It contains no command source,
+command output, image UUID value, provider message, project ID, or credential.
+
+## Capability conclusion
+
+ConTree demonstrated strict image resolution, persisted parent execution, and
+independent child branches through the project adapter within the reviewed
+limits. The three untagged synthetic states remain the known cleanup
+limitation. Formal timeout, cancellation, and evaluator-integrity work remains
+in Step 1.3.
