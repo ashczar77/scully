@@ -1,6 +1,6 @@
 # Step 1.2 Integration and Execution Preflight
 
-**Status:** Approved at checkpoint G1.2d
+**Status:** Approved at checkpoint G1.2d, dependency list updated for G1.3c
 
 **Review date:** 2026-09-07
 
@@ -18,21 +18,25 @@ The direct runtime dependencies are:
 |---|---:|---|
 | `openai` | 3.8.0 | OpenAI-compatible Token Factory client |
 | `tavily-python` | 0.8.1 | Tavily search client |
+| `contree-client` | 0.4.0 | Direct Token Factory Sandbox termination client |
 | `contree-sdk` | 0.3.3 | Token Factory Sandbox client |
 
 The direct constraints and build backend are exact in `pyproject.toml`.
 `requirements.lock` records the complete environment resolved on Python
-3.14.6. Package versions were checked against their current PyPI releases on
-2026-09-07:
+3.14.6. The initial package set was checked against current PyPI releases on
+2026-09-07. The exact `contree-client==0.4.0` artifact was installed and
+inspected locally on 2026-09-08:
 
 - [OpenAI Python package](https://pypi.org/project/openai/)
 - [Tavily Python package](https://pypi.org/project/tavily-python/)
+- [ConTree direct client package](https://pypi.org/project/contree-client/)
 - [ConTree SDK package](https://pypi.org/project/contree-sdk/)
 - [Setuptools build backend](https://pypi.org/project/setuptools/)
 
-The separate `contree-client` package is not a runtime dependency. ConTree SDK
-0.3.3 supplies its own transport and accepts explicit `IAMAuth` and
-`ContreeConfig` values.
+ConTree SDK 0.3.3 remains the branching client. Checkpoint G1.3c adds the
+official direct client because it exposes the exact-operation cancellation
+method required by the bounded termination test. Its standard-library HTTP
+backend adds no transitive package dependency.
 
 ## Client construction
 
@@ -43,7 +47,9 @@ the provider-specific live gate and exact package-version check pass:
   automatic retries;
 - Tavily receives its key and optional project identifier explicitly;
 - ConTree receives its key, project identifier, transport timeout, and
-  operation timeouts explicitly.
+  operation timeouts explicitly;
+- the direct termination client receives the same local credentials, a
+  five-second transport timeout, and a one-attempt retry policy.
 
 No client is created during module import. The constructors do not invoke a
 model, search endpoint, image operation, identity endpoint, or other provider

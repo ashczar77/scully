@@ -5,10 +5,12 @@ from unittest.mock import patch
 
 from scully.config import ConfigurationError, Settings
 from scully.providers.clients import (
+    TERMINATION_TRANSPORT_TIMEOUT_SECONDS,
     TOKEN_FACTORY_BASE_URL,
     create_nemotron_client,
     create_sandbox_client,
     create_tavily_client,
+    create_termination_client,
 )
 
 
@@ -62,6 +64,16 @@ class ProviderClientTests(unittest.TestCase):
         self.assertEqual(client.config.transport_timeout, 60.0)
         self.assertEqual(client.config.operation_timeout, 60.0)
         self.assertEqual(type(client.config.auth).__name__, "IAMAuth")
+
+    def test_constructs_nonretrying_termination_client_without_request(self) -> None:
+        client = create_termination_client(settings_for_clients("sandbox"))
+        self.addCleanup(client.close)
+
+        self.assertEqual(client.timeout, TERMINATION_TRANSPORT_TIMEOUT_SECONDS)
+        self.assertEqual(client.retry.max_attempts, 1)
+        self.assertFalse(client.retry.retry_unsafe)
+        self.assertFalse(client.retry.server_errors)
+        self.assertEqual(client.retry.statuses, ())
 
 
 if __name__ == "__main__":

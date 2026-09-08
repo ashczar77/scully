@@ -8,6 +8,7 @@ from scully.config import ConfigurationError
 
 
 LOCKED_PROVIDER_VERSIONS = {
+    "contree-client": "0.4.0",
     "contree-sdk": "0.3.3",
     "openai": "3.8.0",
     "tavily-python": "0.8.1",

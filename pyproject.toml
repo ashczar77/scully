@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
 dependencies = [
+    "contree-client==0.4.0",
     "contree-sdk==0.3.3",
     "openai==3.8.0",
     "tavily-python==0.8.1",
@@ -21,6 +22,7 @@ scully-probe-nemotron = "scully.probes.nemotron:main"
 scully-probe-tavily = "scully.probes.tavily:main"
 scully-probe-sandbox = "scully.probes.sandbox:main"
 scully-probe-integrity = "scully.probes.integrity:main"
+scully-probe-termination = "scully.probes.termination:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

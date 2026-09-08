@@ -15,7 +15,7 @@ customer data.
 - Completed gates: G0.1 through G1.2 and checkpoints G1.2a through G1.3b
 - Active step: Checkpoint G1.3c, termination test review
 - Next checkpoint: Gate G1.3c decision
-- Implementation: Deterministic evaluator proven in one Sandbox lifecycle
+- Implementation: Termination probe prepared offline with bounded cleanup
 - Out-of-pocket cost limit: Zero
 - Submission deadline: 30 October 2026
 
@@ -58,6 +58,8 @@ customer data.
 | [Execution integrity](feasibility/execution-integrity.md) | Deterministic evaluator, experiment lifecycle, isolation checks, and bounded live proposal | Approved for one attempt at G1.3a |
 | [Checkpoint G1.3a review](gates/G1.3a-execution-integrity-test-review.md) | Offline evidence and execution decision for the first integrity probe | Approved |
 | [Checkpoint G1.3b review](gates/G1.3b-execution-integrity-result-review.md) | Evidence and decision record for the successful integrity probe | Approved |
+| [Termination probe](feasibility/termination-probe.md) | Bounded timeout, exact-ID cancellation, status verification, cleanup, and evidence design | In review at G1.3c |
+| [Checkpoint G1.3c review](gates/G1.3c-termination-test-review.md) | Offline evidence and execution decision for the termination probe | In review |
 | [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol retained for later direct validation | Deferred evidence |
 | [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for later direct validation | Ready for future use |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |
@@ -66,8 +68,9 @@ The Apache License 2.0 in the repository root remains the project license.
 
 ## Immediate decision
 
-The first and only execution-integrity attempt passed with four operations and
-zero retries. Checkpoint G1.3b authorizes offline preparation of the separate
-timeout and cancellation proposal. No live termination test is authorized.
+The timeout and cancellation runner now passes offline tests with fixed
+commands, two disposable operations, bounded status reads, exact-ID cleanup,
+and redacted evidence. Checkpoint G1.3c asks whether to authorize its first and
+only live execution. No live termination test is authorized yet.
 
 New documentation should support the active hackathon project.

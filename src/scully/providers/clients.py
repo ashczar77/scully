@@ -8,12 +8,14 @@ from scully.config import Provider, Settings
 from scully.dependencies import assert_locked_provider
 
 if TYPE_CHECKING:
+    from contree_client.http import ContreeClient
     from contree_sdk import ContreeSync
     from openai import OpenAI
     from tavily import TavilyClient
 
 
 TOKEN_FACTORY_BASE_URL = "https://api.tokenfactory.nebius.com/v1/"
+TERMINATION_TRANSPORT_TIMEOUT_SECONDS = 5.0
 
 
 def create_nemotron_client(settings: Settings) -> OpenAI:
@@ -75,3 +77,28 @@ def create_sandbox_client(settings: Settings) -> ContreeSync:
         operation_timeout=timeout,
     )
     return ContreeSync(config=config)
+
+
+def create_termination_client(settings: Settings) -> ContreeClient:
+    """Construct the direct Sandbox client with one attempt per request."""
+
+    settings.assert_live_ready(Provider.SANDBOX)
+    assert_locked_provider("contree-client")
+    from contree_client import RetryPolicy
+    from contree_client.http import ContreeClient
+
+    assert settings.nebius_api_key is not None
+    assert settings.nebius_project_id is not None
+    return ContreeClient(
+        settings.nebius_api_key.reveal(),
+        project=settings.nebius_project_id.reveal(),
+        timeout=TERMINATION_TRANSPORT_TIMEOUT_SECONDS,
+        retry=RetryPolicy(
+            statuses=(),
+            server_errors=False,
+            max_attempts=1,
+            retry_unsafe=False,
+        ),
+        identity="scully/0.1.0",
+        http_max_connections=1,
+    )

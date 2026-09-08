@@ -1,6 +1,6 @@
 # Step 1.3 Execution Integrity
 
-**Status:** Live result in review at checkpoint G1.3b
+**Status:** Integrity result approved at checkpoint G1.3b
 
 **Review date:** 2026-09-08
 
@@ -166,9 +166,8 @@ The durable record is
 command source, command output, raw observation, image identifier, provider
 message, credential, or project identifier.
 
-## Decision requested
+## Decision
 
-Approve the successful integrity result and authorize preparation of the
-bounded timeout and cancellation proposal at checkpoint G1.3c. Do not
-authorize a Nemotron request, Tavily search, timeout test, cancellation test,
-second integrity attempt, or any other Sandbox operation.
+Checkpoint G1.3b approved the successful integrity result and authorized
+offline preparation of the separate termination test. The bounded proposal is
+now documented in `termination-probe.md` and awaits checkpoint G1.3c review.
