@@ -1,6 +1,6 @@
 # Step 1.3 Termination Probe
 
-**Status:** Offline implementation in review at checkpoint G1.3c
+**Status:** First live result in review at checkpoint G1.3d
 
 **Review date:** 2026-09-08
 
@@ -165,9 +165,45 @@ hold.
 Any mismatch stops the probe. A timeout-path failure prevents the cancellation
 operation from being created. There is no automatic second probe attempt.
 
+## First live result
+
+Checkpoint G1.3c approved one execution of `g1.3-termination-001`. Its local
+preflight passed with the exact package, credentials, provider target, and
+reviewed budget. The first and only attempt then stopped on the first spawn
+call with `BadRequestError`.
+
+The redacted result records:
+
+- one attempted spawn call;
+- no returned operation identifier;
+- zero status reads;
+- zero primary or cleanup cancellation requests;
+- no cancellation-path spawn call;
+- zero retries;
+- 1.078011 seconds of local wall time;
+- no provider-reported cost.
+
+The durable record is
+`validation/results/g1.3-termination-probe-001.json`. The fields
+`operations_spawned` and `sandbox_operations` currently count attempted spawn
+calls, not confirmed remote operation creation. That accounting name is a
+corrective item.
+
+## Root cause
+
+The direct API schema requires `image` to be either an image UUID or a tag
+prefixed with `tag:`. The probe passed the SDK-style value
+`python:3.12-slim`, while the direct request required
+`tag:python:3.12-slim`. The HTTP 400 response contained no operation
+identifier, so no status or cleanup request could safely be made.
+
+The failure is in the local request adapter, not evidence that remote timeout
+or cancellation is broken. Neither termination behavior was tested.
+
 ## Decision requested
 
-Approve one execution of `g1.3-termination-001` within these exact bounds.
-Approval does not authorize a second termination attempt, another Sandbox
-operation, a Nemotron request, or a Tavily search. The redacted result must be
-submitted at checkpoint G1.3d before Gate G1.3 can be decided.
+Accept the failed attempt as correctly stopped and redacted. Authorize offline
+preparation of a corrective checkpoint that adds the required `tag:` prefix,
+distinguishes attempted spawn calls from confirmed operation identifiers, and
+tests the direct API image-source contract. Do not authorize a second live
+attempt yet.
