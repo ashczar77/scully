@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from math import isfinite
 from typing import Protocol
 
@@ -34,6 +34,8 @@ class RunnableImage(Protocol):
         *,
         args: Sequence[str],
         disposable: bool,
+        timeout: int,
+        truncate_output_at: int,
     ) -> PendingRun:
         """Start a command from this image state."""
 
@@ -75,19 +77,27 @@ class BranchResult:
 
     label: str
     image_id: str
+    tagged: bool
     stdout: str
     stderr: str
     exit_code: int
-    cpu_seconds: float
+    elapsed_seconds: float
+    reported_cost: float
 
 
 @dataclass(frozen=True, slots=True)
 class SandboxOutcome:
     """One prepared parent, independent child results, and measurement."""
 
-    parent_image_id: str
+    parent: BranchResult
     branches: tuple[BranchResult, ...]
     measurement: Measurement
+
+    @property
+    def parent_image_id(self) -> str:
+        """Return the prepared parent identifier."""
+
+        return self.parent.image_id
 
 
 class SandboxAdapter:
@@ -137,6 +147,8 @@ class SandboxAdapter:
             prepare.executable,
             args=prepare.args,
             disposable=False,
+            timeout=self._settings.budget.timeout_seconds,
+            truncate_output_at=MAX_OUTPUT_CHARS,
         ).wait()
         parent_result = _read_result("prepare", parent)
         if parent_result.exit_code != 0:
@@ -151,15 +163,20 @@ class SandboxAdapter:
                 command.executable,
                 args=command.args,
                 disposable=False,
+                timeout=self._settings.budget.timeout_seconds,
+                truncate_output_at=MAX_OUTPUT_CHARS,
             )
             results.append(_read_result(command.label, pending.wait()))
         ended_at = self._clock()
-        cpu_seconds = parent_result.cpu_seconds + sum(
-            result.cpu_seconds for result in results
+        elapsed_seconds = parent_result.elapsed_seconds + sum(
+            result.elapsed_seconds for result in results
+        )
+        reported_cost = parent_result.reported_cost + sum(
+            result.reported_cost for result in results
         )
 
         return SandboxOutcome(
-            parent_image_id=parent_result.image_id,
+            parent=parent_result,
             branches=tuple(results),
             measurement=Measurement(
                 investigation_id=investigation_id,
@@ -170,35 +187,60 @@ class SandboxAdapter:
                 ended_at=ended_at,
                 request_count=operation_count,
                 sandbox_operations=operation_count,
-                sandbox_cpu_seconds=cpu_seconds,
+                sandbox_elapsed_seconds=elapsed_seconds,
+                sandbox_reported_cost=reported_cost,
             ),
         )
 
 
 def _read_result(label: str, result: object) -> BranchResult:
     image_id = read_field(result, "uuid")
-    stdout = read_field(result, "stdout")
-    stderr = read_field(result, "stderr")
-    exit_code = read_field(result, "exit_code")
-    cpu_seconds = read_optional(result, "cpu_seconds", 0.0)
-    if not isinstance(image_id, str) or not image_id:
+    tag = read_optional(result, "tag", None)
+    execution = read_field(result, "result")
+    stdout = read_field(execution, "stdout")
+    stderr = read_field(execution, "stderr")
+    exit_code = read_field(execution, "exit_code")
+    elapsed = read_field(execution, "elapsed_time")
+    reported_cost = read_optional(execution, "cost", 0.0)
+    if image_id is None:
         raise ProviderContractError("Sandbox result UUID cannot be empty")
+    normalized_image_id = str(image_id)
+    if not normalized_image_id:
+        raise ProviderContractError("Sandbox result UUID cannot be empty")
+    if tag is not None and (not isinstance(tag, str) or not tag.strip()):
+        raise ProviderContractError("Sandbox result tag must be non-empty text")
     if not isinstance(stdout, str) or not isinstance(stderr, str):
         raise ProviderContractError("Sandbox output must be text")
     if len(stdout) > MAX_OUTPUT_CHARS or len(stderr) > MAX_OUTPUT_CHARS:
         raise ProviderContractError("Sandbox output exceeds the size cap")
     if isinstance(exit_code, bool) or not isinstance(exit_code, int):
         raise ProviderContractError("Sandbox exit code must be an integer")
-    if isinstance(cpu_seconds, bool) or not isinstance(cpu_seconds, (int, float)):
-        raise ProviderContractError("Sandbox CPU time must be numeric")
-    normalized_cpu_seconds = float(cpu_seconds)
-    if not isfinite(normalized_cpu_seconds) or normalized_cpu_seconds < 0:
-        raise ProviderContractError("Sandbox CPU time must be finite and non-negative")
+    if isinstance(elapsed, timedelta):
+        elapsed_seconds = elapsed.total_seconds()
+    elif isinstance(elapsed, (int, float)) and not isinstance(elapsed, bool):
+        elapsed_seconds = float(elapsed)
+    else:
+        raise ProviderContractError("Sandbox elapsed time must be numeric")
+    if not isfinite(elapsed_seconds) or elapsed_seconds < 0:
+        raise ProviderContractError(
+            "Sandbox elapsed time must be finite and non-negative"
+        )
+    if isinstance(reported_cost, bool) or not isinstance(
+        reported_cost, (int, float)
+    ):
+        raise ProviderContractError("Sandbox reported cost must be numeric")
+    normalized_cost = float(reported_cost)
+    if not isfinite(normalized_cost) or normalized_cost < 0:
+        raise ProviderContractError(
+            "Sandbox reported cost must be finite and non-negative"
+        )
     return BranchResult(
         label=label,
-        image_id=image_id,
+        image_id=normalized_image_id,
+        tagged=tag is not None,
         stdout=stdout,
         stderr=stderr,
         exit_code=exit_code,
-        cpu_seconds=normalized_cpu_seconds,
+        elapsed_seconds=elapsed_seconds,
+        reported_cost=normalized_cost,
     )

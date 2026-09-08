@@ -11,6 +11,7 @@ class SettingsTests(unittest.TestCase):
         settings = Settings.from_environment({})
 
         self.assertFalse(settings.live_enabled)
+        self.assertIsNone(settings.live_provider)
         self.assertEqual(settings.budget.max_model_calls, 1)
         self.assertEqual(settings.budget.max_model_cost_usd, Decimal("0.01"))
         self.assertEqual(settings.budget.max_tavily_credits, 1)
@@ -42,19 +43,31 @@ class SettingsTests(unittest.TestCase):
         with self.assertRaisesRegex(ConfigurationError, "SCULLY_ENABLE_LIVE"):
             settings.assert_live_ready(Provider.NEMOTRON)
 
-    def test_live_provider_requires_only_its_own_credentials(self) -> None:
-        settings = Settings.from_environment(
-            {"SCULLY_ENABLE_LIVE": "true", "NEBIUS_API_KEY": "test-value"}
+    def test_live_provider_requires_its_own_credentials(self) -> None:
+        nemotron_settings = Settings.from_environment(
+            {
+                "SCULLY_ENABLE_LIVE": "true",
+                "SCULLY_LIVE_PROVIDER": "nemotron",
+                "NEBIUS_API_KEY": "test-value",
+            }
+        )
+        tavily_settings = Settings.from_environment(
+            {
+                "SCULLY_ENABLE_LIVE": "true",
+                "SCULLY_LIVE_PROVIDER": "tavily",
+                "NEBIUS_API_KEY": "test-value",
+            }
         )
 
-        settings.assert_live_ready(Provider.NEMOTRON)
+        nemotron_settings.assert_live_ready(Provider.NEMOTRON)
         with self.assertRaisesRegex(ConfigurationError, "TAVILY_API_KEY"):
-            settings.assert_live_ready(Provider.TAVILY)
+            tavily_settings.assert_live_ready(Provider.TAVILY)
 
     def test_sandbox_accepts_legacy_project_environment_name(self) -> None:
         settings = Settings.from_environment(
             {
                 "SCULLY_ENABLE_LIVE": "true",
+                "SCULLY_LIVE_PROVIDER": "sandbox",
                 "NEBIUS_API_KEY": "test-value",
                 "CONTREE_PROJECT": "test-project",
             }
@@ -66,6 +79,7 @@ class SettingsTests(unittest.TestCase):
         settings = Settings.from_environment(
             {
                 "SCULLY_ENABLE_LIVE": "true",
+                "SCULLY_LIVE_PROVIDER": "sandbox",
                 "NEBIUS_API_KEY": "test-value",
                 "NEBIUS_PROJECT_ID": "   ",
                 "CONTREE_PROJECT": "test-project",
@@ -86,6 +100,30 @@ class SettingsTests(unittest.TestCase):
     def test_invalid_boolean_fails_closed(self) -> None:
         with self.assertRaisesRegex(ConfigurationError, "true or false"):
             Settings.from_environment({"SCULLY_ENABLE_LIVE": "sometimes"})
+
+    def test_live_provider_target_is_required(self) -> None:
+        settings = Settings.from_environment(
+            {"SCULLY_ENABLE_LIVE": "true", "NEBIUS_API_KEY": "test-value"}
+        )
+
+        with self.assertRaisesRegex(ConfigurationError, "Live provider target"):
+            settings.assert_live_ready(Provider.NEMOTRON)
+
+    def test_other_live_provider_target_fails_closed(self) -> None:
+        settings = Settings.from_environment(
+            {
+                "SCULLY_ENABLE_LIVE": "true",
+                "SCULLY_LIVE_PROVIDER": "tavily",
+                "NEBIUS_API_KEY": "test-value",
+            }
+        )
+
+        with self.assertRaisesRegex(ConfigurationError, "not nemotron"):
+            settings.assert_live_ready(Provider.NEMOTRON)
+
+    def test_invalid_live_provider_target_fails_closed(self) -> None:
+        with self.assertRaisesRegex(ConfigurationError, "must be one of"):
+            Settings.from_environment({"SCULLY_LIVE_PROVIDER": "unknown"})
 
     def test_non_positive_budget_fails_closed(self) -> None:
         with self.assertRaisesRegex(ConfigurationError, "greater than zero"):

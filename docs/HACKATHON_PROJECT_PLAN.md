@@ -491,6 +491,20 @@ valid HTTP or HTTPS provenance within the one-credit limit, records zero
 retries, and retains no returned snippets or credentials. Approval authorizes
 implementation and offline review of the Sandbox capability probe.
 
+**Checkpoint G1.2k, Sandbox execution review:** Approve only if the proposed
+lifecycle uses fixed synthetic inputs, direct command execution, one strict
+image resolution, one persisted parent, exactly two child branches, four
+counted operations, explicit time and output limits, and a Sandbox-only live
+target. The review must disclose SDK-managed polling and rate-limit retry
+behavior plus any untagged image state that cannot be explicitly deleted.
+Approval authorizes one lifecycle and no other provider call.
+
+**Checkpoint G1.2l, Sandbox result review:** Approve only if one lifecycle
+shows that both branches inherited the parent state, the second branch did not
+inherit the first branch's change, all command results match the fixed
+contract, and the redacted record stays within the reviewed operation and
+evidence limits. Approval authorizes the G1.2 primitive capability review.
+
 **Gate G1.2, primitive capability review:** Approve only if each sponsor
 technology performs a necessary role with stable enough behavior for the demo.
 Record any fallback and confirm that it remains competition-compliant.

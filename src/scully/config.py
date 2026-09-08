@@ -110,6 +110,7 @@ class Settings:
     """Runtime settings with live access disabled unless explicitly enabled."""
 
     live_enabled: bool
+    live_provider: Provider | None
     budget: RunBudget
     nemotron_pricing: ModelPricing
     nebius_api_key: SecretValue | None = field(default=None, repr=False)
@@ -131,6 +132,9 @@ class Settings:
             live_enabled=_parse_bool(
                 source.get("SCULLY_ENABLE_LIVE", "false"),
                 "SCULLY_ENABLE_LIVE",
+            ),
+            live_provider=_parse_optional_provider(
+                source.get("SCULLY_LIVE_PROVIDER", "")
             ),
             budget=RunBudget(
                 max_model_calls=_parse_positive_int(
@@ -193,6 +197,13 @@ class Settings:
                 "only after the execution preflight is approved"
             )
 
+        if self.live_provider is not provider:
+            raise ConfigurationError(
+                f"Live provider target is not {provider.value}; set "
+                f"SCULLY_LIVE_PROVIDER={provider.value} only for the approved "
+                "execution"
+            )
+
         missing: list[str] = []
         if provider in {Provider.NEMOTRON, Provider.SANDBOX}:
             if self.nebius_api_key is None:
@@ -216,6 +227,19 @@ def _optional_secret(value: str | None) -> SecretValue | None:
     if value is None or not value.strip():
         return None
     return SecretValue(value)
+
+
+def _parse_optional_provider(value: str) -> Provider | None:
+    normalized = value.strip().lower()
+    if not normalized:
+        return None
+    try:
+        return Provider(normalized)
+    except ValueError as error:
+        allowed = ", ".join(provider.value for provider in Provider)
+        raise ConfigurationError(
+            f"SCULLY_LIVE_PROVIDER must be one of: {allowed}"
+        ) from error
 
 
 def _resolve_project_id(environ: Mapping[str, str]) -> str | None:

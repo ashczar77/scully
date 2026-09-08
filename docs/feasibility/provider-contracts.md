@@ -80,14 +80,22 @@ a boolean presence check.
 - rejects a lifecycle that exceeds the operation cap before selecting an image;
 - persists one prepared parent and runs at least two children from that same
   parent;
-- records branch image identifiers, text output, exit codes, available CPU time,
-  operation count, and wall time;
+- reads the SDK's completed-image shape, including the image UUID and nested
+  public result object;
+- records branch image identifiers, text output, exit codes, public elapsed
+  time, provider-reported cost, operation count, and wall time;
 - stops before child execution if parent preparation fails.
 
 Sandbox operation accounting conservatively includes image selection,
 preparation, and every branch. Each captured standard-output or standard-error
 value is limited to 20,000 characters. Tavily snippets are limited to 5,000
 characters per result.
+
+The adapter sends the configured timeout and output limit to every command.
+The capability runner retains only match booleans and aggregate measurements,
+not image UUIDs or command output. The installed SDK does not expose CPU time
+through its public result object, so the contract records public elapsed time
+and its reported cost instead.
 
 The current contract leaves all resulting states untagged. Exact cleanup and
 discard behavior must be verified during the bounded Sandbox probe because the
@@ -134,8 +142,8 @@ connection, or creates an infrastructure operation.
   response and either confirm or revise the accepted normalization shape.
 - Token Factory rate-limit headers require access to the underlying HTTP
   response and are not yet represented by the injected completion interface.
-- ConTree CPU metrics and cleanup behavior require inspection of the first
-  bounded operation result.
+- ConTree cleanup behavior and the meaning of the public reported-cost field
+  require inspection of the first bounded operation result.
 - Provider package versions and their Python 3.14 compatibility were not yet
   locked or tested at this checkpoint. The G1.2d submission resolves this item.
 - Failure measurements for SDK exceptions belong in the executable probe runner,

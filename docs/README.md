@@ -12,10 +12,10 @@ customer data.
 ## Current status
 
 - Phase: Sponsor-stack and architecture feasibility
-- Completed gates: G0.1 through G1.1 and checkpoints G1.2a through G1.2i
+- Completed gates: G0.1 through G1.1 and checkpoints G1.2a through G1.2j
 - Active step: Step 1.2, prove the sponsor primitives independently
-- Next checkpoint: G1.2j, Tavily result review
-- Implementation: One-credit Tavily source-discovery capability proven
+- Next checkpoint: G1.2k, Sandbox execution review
+- Implementation: Sandbox branching probe implemented and tested offline
 - Out-of-pocket cost limit: Zero
 - Submission deadline: 30 October 2026
 
@@ -47,9 +47,11 @@ customer data.
 | [Checkpoint G1.2f review](gates/G1.2f-corrective-nemotron-review.md) | Evidence and decision record for attempt 002 and its root cause | Approved |
 | [Checkpoint G1.2g review](gates/G1.2g-model-request-review.md) | Evidence and decision record for the model-specific request correction | Approved |
 | [Checkpoint G1.2h review](gates/G1.2h-final-nemotron-review.md) | Evidence and decision record for successful attempt 003 | Approved |
-| [Tavily capability probe](feasibility/tavily-probe.md) | One-credit search boundary and successful source-discovery result | In review at G1.2j |
+| [Tavily capability probe](feasibility/tavily-probe.md) | One-credit search boundary and successful source-discovery result | Approved at G1.2j |
 | [Checkpoint G1.2i review](gates/G1.2i-tavily-execution-review.md) | Offline evidence and execution decision for the Tavily probe | Approved |
-| [Checkpoint G1.2j review](gates/G1.2j-tavily-result-review.md) | Evidence and decision record for the successful Tavily search | In review |
+| [Checkpoint G1.2j review](gates/G1.2j-tavily-result-review.md) | Evidence and decision record for the successful Tavily search | Approved |
+| [Sandbox capability probe](feasibility/sandbox-probe.md) | Four-operation branch lifecycle and redacted result contract | In review at G1.2k |
+| [Checkpoint G1.2k review](gates/G1.2k-sandbox-execution-review.md) | Offline evidence and execution decision for the Sandbox probe | In review |
 | [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol retained for later direct validation | Deferred evidence |
 | [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for later direct validation | Ready for future use |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |
@@ -58,8 +60,8 @@ The Apache License 2.0 in the repository root remains the project license.
 
 ## Immediate decision
 
-Nemotron is approved as a proven primitive. The one-credit Tavily probe
-returned five validated Express source URLs and is submitted for checkpoint
-G1.2j review. All Sandbox operations remain blocked pending their own review.
+Nemotron and Tavily are approved as proven primitives. The bounded Sandbox
+branching probe is implemented and submitted for checkpoint G1.2k review. All
+Sandbox operations remain blocked pending that review.
 
 New documentation should support the active hackathon project.

@@ -39,6 +39,7 @@ def live_settings() -> Settings:
     return Settings.from_environment(
         {
             "SCULLY_ENABLE_LIVE": "true",
+            "SCULLY_LIVE_PROVIDER": "tavily",
             "TAVILY_API_KEY": "fake-tavily-key",
         }
     )

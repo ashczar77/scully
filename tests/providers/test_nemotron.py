@@ -44,6 +44,7 @@ def completion(arguments: str = '{"query":"proxy trust setting"}') -> object:
 def live_settings(**overrides: str) -> Settings:
     values = {
         "SCULLY_ENABLE_LIVE": "true",
+        "SCULLY_LIVE_PROVIDER": "nemotron",
         "NEBIUS_API_KEY": "fake-nebius-key",
     }
     values.update(overrides)

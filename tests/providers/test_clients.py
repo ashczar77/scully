@@ -12,10 +12,11 @@ from scully.providers.clients import (
 )
 
 
-def settings_for_clients() -> Settings:
+def settings_for_clients(provider: str = "nemotron") -> Settings:
     return Settings.from_environment(
         {
             "SCULLY_ENABLE_LIVE": "true",
+            "SCULLY_LIVE_PROVIDER": provider,
             "NEBIUS_API_KEY": "test-nebius-key",
             "NEBIUS_PROJECT_ID": "test-nebius-project",
             "TAVILY_API_KEY": "test-tavily-key",
@@ -39,24 +40,24 @@ class ProviderClientTests(unittest.TestCase):
             ),
             self.assertRaisesRegex(ConfigurationError, "reviewed version"),
         ):
-            create_nemotron_client(settings_for_clients())
+            create_nemotron_client(settings_for_clients("nemotron"))
 
     def test_constructs_nemotron_client_without_request(self) -> None:
-        client = create_nemotron_client(settings_for_clients())
+        client = create_nemotron_client(settings_for_clients("nemotron"))
         self.addCleanup(client.close)
 
         self.assertEqual(str(client.base_url), TOKEN_FACTORY_BASE_URL)
         self.assertEqual(client.max_retries, 0)
 
     def test_constructs_tavily_client_without_request(self) -> None:
-        client = create_tavily_client(settings_for_clients())
+        client = create_tavily_client(settings_for_clients("tavily"))
 
         self.assertEqual(client.base_url, "https://api.tavily.com")
         self.assertIn("X-Project-ID", client.headers)
         self.assertEqual(client.headers["X-Client-Source"], "scully")
 
     def test_constructs_sandbox_client_without_request(self) -> None:
-        client = create_sandbox_client(settings_for_clients())
+        client = create_sandbox_client(settings_for_clients("sandbox"))
 
         self.assertEqual(client.config.transport_timeout, 60.0)
         self.assertEqual(client.config.operation_timeout, 60.0)

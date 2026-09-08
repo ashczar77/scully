@@ -30,10 +30,11 @@ class PreflightTests(unittest.TestCase):
         self.assertNotIn(secret, encoded)
         self.assertFalse(report["providers"]["nemotron"]["live_gate_open"])
 
-    def test_ready_configuration_reports_each_open_gate(self) -> None:
+    def test_ready_configuration_opens_only_targeted_gate(self) -> None:
         settings = Settings.from_environment(
             {
                 "SCULLY_ENABLE_LIVE": "true",
+                "SCULLY_LIVE_PROVIDER": "sandbox",
                 "SCULLY_MAX_OUTPUT_TOKENS": "10000",
                 "SCULLY_MAX_SANDBOX_OPERATIONS": "4",
                 "NEBIUS_API_KEY": "test-key",
@@ -48,15 +49,17 @@ class PreflightTests(unittest.TestCase):
         ):
             report = build_preflight_report(settings)
 
-        self.assertTrue(
-            all(item.live_gate_open for item in report.providers.values())
-        )
+        self.assertEqual(report.live_provider, "sandbox")
+        self.assertFalse(report.providers["nemotron"].live_gate_open)
+        self.assertFalse(report.providers["tavily"].live_gate_open)
+        self.assertTrue(report.providers["sandbox"].live_gate_open)
         self.assertEqual(report.worst_case_model_cost_usd, "0.00289152")
 
     def test_nemotron_probe_budget_requires_reviewed_output_limit(self) -> None:
         settings = Settings.from_environment(
             {
                 "SCULLY_ENABLE_LIVE": "true",
+                "SCULLY_LIVE_PROVIDER": "nemotron",
                 "NEBIUS_API_KEY": "test-key",
             }
         )
@@ -84,6 +87,7 @@ class PreflightTests(unittest.TestCase):
             with self.subTest(name=name):
                 environment = {
                     "SCULLY_ENABLE_LIVE": "true",
+                    "SCULLY_LIVE_PROVIDER": "nemotron",
                     "SCULLY_MAX_OUTPUT_TOKENS": "10000",
                     "NEBIUS_API_KEY": "test-key",
                     name: value,
@@ -102,6 +106,7 @@ class PreflightTests(unittest.TestCase):
         settings = Settings.from_environment(
             {
                 "SCULLY_ENABLE_LIVE": "true",
+                "SCULLY_LIVE_PROVIDER": "sandbox",
                 "NEBIUS_API_KEY": "test-key",
                 "NEBIUS_PROJECT_ID": "test-project",
             }
@@ -116,6 +121,7 @@ class PreflightTests(unittest.TestCase):
         settings = Settings.from_environment(
             {
                 "SCULLY_ENABLE_LIVE": "true",
+                "SCULLY_LIVE_PROVIDER": "tavily",
                 "SCULLY_TIMEOUT_SECONDS": "61",
                 "TAVILY_API_KEY": "test-key",
             }

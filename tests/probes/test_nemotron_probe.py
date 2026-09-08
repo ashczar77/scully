@@ -72,6 +72,7 @@ def live_settings() -> Settings:
     return Settings.from_environment(
         {
             "SCULLY_ENABLE_LIVE": "true",
+            "SCULLY_LIVE_PROVIDER": "nemotron",
             "SCULLY_MAX_OUTPUT_TOKENS": "10000",
             "NEBIUS_API_KEY": "test-nebius-key",
         }

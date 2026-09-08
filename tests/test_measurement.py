@@ -71,7 +71,18 @@ class MeasurementTests(unittest.TestCase):
                 input_tokens=-1,
             )
 
-    def test_non_finite_cpu_measurement_is_rejected(self) -> None:
+    def test_non_finite_sandbox_measurement_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must be finite"):
+            Measurement(
+                investigation_id="probe-001",
+                provider=Provider.SANDBOX,
+                operation="execute",
+                status=OperationStatus.FAILED,
+                started_at=self.started_at,
+                ended_at=self.ended_at,
+                sandbox_elapsed_seconds=float("nan"),
+            )
+
         with self.assertRaisesRegex(ValueError, "must be finite"):
             Measurement(
                 investigation_id="probe-001",

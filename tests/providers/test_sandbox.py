@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 from scully.config import ConfigurationError, Settings
 from scully.providers import ProviderContractError
@@ -24,16 +25,23 @@ class FakeResult:
         stdout: str = "",
         stderr: str = "",
         exit_code: int = 0,
-        cpu_seconds: float = 0.1,
+        elapsed_seconds: float = 0.1,
+        reported_cost: float = 0.01,
         children: list[FakeResult] | None = None,
     ) -> None:
         self.uuid = uuid
-        self.stdout = stdout
-        self.stderr = stderr
-        self.exit_code = exit_code
-        self.cpu_seconds = cpu_seconds
+        self.tag = None
+        self.result = SimpleNamespace(
+            stdout=stdout,
+            stderr=stderr,
+            exit_code=exit_code,
+            elapsed_time=timedelta(seconds=elapsed_seconds),
+            cost=reported_cost,
+        )
         self.children = children or []
-        self.calls: list[tuple[str, tuple[str, ...], bool]] = []
+        self.calls: list[
+            tuple[str, tuple[str, ...], bool, int, int]
+        ] = []
 
     def run(
         self,
@@ -41,8 +49,12 @@ class FakeResult:
         *,
         args: tuple[str, ...],
         disposable: bool,
+        timeout: int,
+        truncate_output_at: int,
     ) -> FakePending:
-        self.calls.append((command, args, disposable))
+        self.calls.append(
+            (command, args, disposable, timeout, truncate_output_at)
+        )
         if not self.children:
             raise AssertionError("No fake child result remains")
         return FakePending(self.children.pop(0))
@@ -67,6 +79,7 @@ def live_settings(max_operations: int = 4) -> Settings:
     return Settings.from_environment(
         {
             "SCULLY_ENABLE_LIVE": "true",
+            "SCULLY_LIVE_PROVIDER": "sandbox",
             "NEBIUS_API_KEY": "fake-nebius-key",
             "NEBIUS_PROJECT_ID": "fake-project-id",
             "SCULLY_MAX_SANDBOX_OPERATIONS": str(max_operations),
@@ -76,8 +89,8 @@ def live_settings(max_operations: int = 4) -> Settings:
 
 def fake_client(parent_exit_code: int = 0) -> tuple[FakeSandboxClient, FakeResult]:
     branches = [
-        FakeResult("branch-a", stdout="A\n", cpu_seconds=0.2),
-        FakeResult("branch-b", stdout="B\n", cpu_seconds=0.3),
+        FakeResult("branch-a", stdout="A\n", elapsed_seconds=0.2),
+        FakeResult("branch-b", stdout="B\n", elapsed_seconds=0.3),
     ]
     parent = FakeResult("parent", exit_code=parent_exit_code, children=branches)
     base = FakeResult("base", children=[parent])
@@ -118,8 +131,11 @@ class SandboxAdapterTests(unittest.TestCase):
         self.assertEqual([result.label for result in outcome.branches], ["branch-a", "branch-b"])
         self.assertEqual(len(parent.calls), 2)
         self.assertTrue(all(call[2] is False for call in parent.calls))
+        self.assertTrue(all(call[3] == 60 for call in parent.calls))
+        self.assertTrue(all(call[4] == 20_000 for call in parent.calls))
         self.assertEqual(outcome.measurement.sandbox_operations, 4)
-        self.assertAlmostEqual(outcome.measurement.sandbox_cpu_seconds, 0.6)
+        self.assertAlmostEqual(outcome.measurement.sandbox_elapsed_seconds, 0.6)
+        self.assertAlmostEqual(outcome.measurement.sandbox_reported_cost, 0.03)
 
     def test_blocks_lifecycle_that_exceeds_operation_cap(self) -> None:
         client, _ = fake_client()
@@ -178,7 +194,7 @@ class SandboxAdapterTests(unittest.TestCase):
 
     def test_rejects_oversized_command_output(self) -> None:
         client, parent = fake_client()
-        parent.children[0].stdout = "x" * 20_001
+        parent.children[0].result.stdout = "x" * 20_001
         adapter = SandboxAdapter(
             client,
             live_settings(),

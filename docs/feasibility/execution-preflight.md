@@ -55,6 +55,7 @@ method.
 package metadata. It reports:
 
 - whether live mode is enabled;
+- which single provider is targeted by `SCULLY_LIVE_PROVIDER`;
 - whether each credential is configured, never its value;
 - whether each exact direct dependency is installed;
 - whether the per-provider budget matches the reviewed probe shape;
@@ -70,6 +71,11 @@ Sandbox budget is intentionally invalid for the branch proof because the
 default permits one operation while the minimum reviewed lifecycle requires
 four. That value must be changed to exactly four only when the Sandbox probe is
 separately reviewed.
+
+Live execution now requires both the global switch and an exact provider
+target. Selecting `sandbox`, for example, leaves the Nemotron and Tavily gates
+closed even when their credentials and budgets are otherwise valid. This
+prevents one approval from enabling an unrelated provider.
 
 ## Verification evidence
 

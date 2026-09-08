@@ -45,6 +45,7 @@ def search_response() -> dict[str, object]:
 def live_settings(**overrides: str) -> Settings:
     values = {
         "SCULLY_ENABLE_LIVE": "true",
+        "SCULLY_LIVE_PROVIDER": "tavily",
         "TAVILY_API_KEY": "test-tavily-key",
     }
     values.update(overrides)

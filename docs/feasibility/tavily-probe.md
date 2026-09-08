@@ -1,6 +1,6 @@
 # Step 1.2 Tavily Capability Probe
 
-**Status:** Live result in review at checkpoint G1.2j
+**Status:** Approved at checkpoint G1.2j
 
 ## Objective
 

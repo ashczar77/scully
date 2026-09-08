@@ -38,6 +38,8 @@ class Measurement:
     tavily_credits: int = 0
     sandbox_operations: int = 0
     sandbox_cpu_seconds: float = 0.0
+    sandbox_elapsed_seconds: float = 0.0
+    sandbox_reported_cost: float = 0.0
     retries: int = 0
     rate_limit_count: int = 0
 
@@ -58,6 +60,8 @@ class Measurement:
             "tavily_credits": self.tavily_credits,
             "sandbox_operations": self.sandbox_operations,
             "sandbox_cpu_seconds": self.sandbox_cpu_seconds,
+            "sandbox_elapsed_seconds": self.sandbox_elapsed_seconds,
+            "sandbox_reported_cost": self.sandbox_reported_cost,
             "retries": self.retries,
             "rate_limit_count": self.rate_limit_count,
         }
@@ -67,6 +71,10 @@ class Measurement:
 
         if not isfinite(self.sandbox_cpu_seconds):
             raise ValueError("sandbox_cpu_seconds must be finite")
+        if not isfinite(self.sandbox_elapsed_seconds):
+            raise ValueError("sandbox_elapsed_seconds must be finite")
+        if not isfinite(self.sandbox_reported_cost):
+            raise ValueError("sandbox_reported_cost must be finite")
 
         if not self.model_cost_usd.is_finite() or self.model_cost_usd < 0:
             raise ValueError("model_cost_usd must be finite and non-negative")
@@ -95,6 +103,8 @@ class Measurement:
             "tavily_credits": self.tavily_credits,
             "sandbox_operations": self.sandbox_operations,
             "sandbox_cpu_seconds": self.sandbox_cpu_seconds,
+            "sandbox_elapsed_seconds": self.sandbox_elapsed_seconds,
+            "sandbox_reported_cost": self.sandbox_reported_cost,
             "retries": self.retries,
             "rate_limit_count": self.rate_limit_count,
         }

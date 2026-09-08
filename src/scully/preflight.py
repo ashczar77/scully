@@ -6,7 +6,7 @@ import json
 from dataclasses import asdict, dataclass
 from decimal import Decimal
 
-from scully.config import Settings
+from scully.config import Provider, Settings
 from scully.dependencies import LOCKED_PROVIDER_VERSIONS, installed_version
 
 
@@ -38,6 +38,7 @@ class PreflightReport:
     performs_provider_calls: bool
     review_required: bool
     live_enabled: bool
+    live_provider: str | None
     worst_case_model_cost_usd: str
     providers: dict[str, ProviderPreflight]
 
@@ -94,6 +95,7 @@ def build_preflight_report(settings: Settings) -> PreflightReport:
             nemotron_credentials,
             nemotron_budget,
             settings.live_enabled,
+            settings.live_provider is Provider.NEMOTRON,
         ),
         "tavily": _provider_preflight(
             "tavily-python",
@@ -101,6 +103,7 @@ def build_preflight_report(settings: Settings) -> PreflightReport:
             tavily_credentials,
             tavily_budget,
             settings.live_enabled,
+            settings.live_provider is Provider.TAVILY,
         ),
         "sandbox": _provider_preflight(
             "contree-sdk",
@@ -108,12 +111,18 @@ def build_preflight_report(settings: Settings) -> PreflightReport:
             sandbox_credentials,
             sandbox_budget,
             settings.live_enabled,
+            settings.live_provider is Provider.SANDBOX,
         ),
     }
     return PreflightReport(
         performs_provider_calls=False,
         review_required=True,
         live_enabled=settings.live_enabled,
+        live_provider=(
+            settings.live_provider.value
+            if settings.live_provider is not None
+            else None
+        ),
         worst_case_model_cost_usd=_decimal_text(worst_case_cost),
         providers=providers,
     )
@@ -133,6 +142,7 @@ def _provider_preflight(
     credentials_configured: bool,
     budget_valid: bool,
     live_enabled: bool,
+    provider_targeted: bool,
 ) -> ProviderPreflight:
     installed = installed_versions[package]
     package_matches = installed == LOCKED_PROVIDER_VERSIONS[package]
@@ -144,6 +154,7 @@ def _provider_preflight(
         budget_valid=budget_valid,
         live_gate_open=(
             live_enabled
+            and provider_targeted
             and package_matches
             and credentials_configured
             and budget_valid

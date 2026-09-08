@@ -31,7 +31,8 @@ PYTHONPATH=src .venv/bin/python -m scully.preflight
 ```
 
 Live provider access is disabled by default and remains subject to the review
-gates in the project plan.
+gates in the project plan. A reviewed execution must also target exactly one
+provider with `SCULLY_LIVE_PROVIDER`.
 
 ## License
 
