@@ -1,6 +1,6 @@
 # Step 1.2 Tavily Capability Probe
 
-**Status:** Execution request in review at checkpoint G1.2i
+**Status:** Live result in review at checkpoint G1.2j
 
 ## Objective
 
@@ -85,3 +85,31 @@ therefore remains closed.
 Before execution, the project owner must copy a Tavily project API key into the
 local `TAVILY_API_KEY` value. The key must not be shown in chat, committed, or
 added to `.env.example`.
+
+## Live result
+
+Checkpoint G1.2i approved exactly one search after local credential setup. The
+redacted preflight confirmed that Tavily was the only open live gate, then
+attempt `g1.2-tavily-001` succeeded.
+
+The result records:
+
+- one request and zero retries;
+- one Tavily credit;
+- five HTTP or HTTPS source URLs, all on `expressjs.com`;
+- 3.553558 seconds of local wall time;
+- 2.76 seconds of provider-reported response time;
+- presence of a provider request identifier without retaining its value;
+- no Nemotron request and no Sandbox operation.
+
+The durable record is
+`validation/results/g1.2-tavily-probe-001.json`. It contains no returned title,
+snippet, query text, request identifier, provider message, or credential.
+
+## Capability conclusion
+
+Tavily has demonstrated bounded source discovery through the project adapter
+with attributable public URLs and measured one-credit usage. The five results
+include localized and protocol variants of the same Express guide. That does
+not affect the capability proof, but production evidence handling should
+canonicalize and deduplicate URLs before presenting sources.

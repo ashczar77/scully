@@ -1,0 +1,33 @@
+{
+  "measurement": {
+    "duration_seconds": 3.553558,
+    "ended_at": "2026-09-08T08:33:41.820398+00:00",
+    "input_tokens": 0,
+    "investigation_id": "g1.2-tavily-001",
+    "model_cost_usd": "0",
+    "operation": "search",
+    "output_tokens": 0,
+    "provider": "tavily",
+    "rate_limit_count": 0,
+    "request_count": 1,
+    "retries": 0,
+    "sandbox_cpu_seconds": 0.0,
+    "sandbox_operations": 0,
+    "started_at": "2026-09-08T08:33:38.266840+00:00",
+    "status": "succeeded",
+    "tavily_credits": 1
+  },
+  "probe_id": "g1.2-tavily-001",
+  "provider": "tavily",
+  "provider_response_time_seconds": 2.76,
+  "request_id_observed": true,
+  "source_count": 5,
+  "source_urls": [
+    "https://expressjs.com/zh-tw/guide/behind-proxies.html",
+    "http://expressjs.com/en/guide/behind-proxies.html",
+    "http://expressjs.com/zh-tw/guide/behind-proxies.html",
+    "https://expressjs.com/es/guide/behind-proxies.html",
+    "https://expressjs.com/pt-br/guide/behind-proxies.html"
+  ],
+  "status": "succeeded"
+}
