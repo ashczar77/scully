@@ -12,9 +12,9 @@ customer data.
 ## Current status
 
 - Phase: Sponsor-stack and architecture feasibility
-- Completed gates: G0.1 through G1.2 and checkpoints G1.2a through G1.3c
-- Active step: Checkpoint G1.3d, termination result review
-- Next checkpoint: Gate G1.3d decision
+- Completed gates: G0.1 through G1.2 and checkpoints G1.2a through G1.3d
+- Active step: Checkpoint G1.3e, corrective termination review
+- Next checkpoint: Gate G1.3e decision
 - Implementation: First termination attempt stopped on a rejected image source
 - Out-of-pocket cost limit: Zero
 - Submission deadline: 30 October 2026
@@ -60,7 +60,7 @@ customer data.
 | [Checkpoint G1.3b review](gates/G1.3b-execution-integrity-result-review.md) | Evidence and decision record for the successful integrity probe | Approved |
 | [Termination probe](feasibility/termination-probe.md) | Bounded timeout, exact-ID cancellation, status verification, cleanup, and evidence design | Approved for one attempt at G1.3c |
 | [Checkpoint G1.3c review](gates/G1.3c-termination-test-review.md) | Offline evidence and execution decision for the termination probe | Approved |
-| [Checkpoint G1.3d review](gates/G1.3d-termination-result-review.md) | Failure evidence, root cause, and corrective preparation decision | In review |
+| [Checkpoint G1.3d review](gates/G1.3d-termination-result-review.md) | Failure evidence, root cause, and corrective preparation decision | Approved |
 | [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol retained for later direct validation | Deferred evidence |
 | [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for later direct validation | Ready for future use |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |
@@ -72,7 +72,7 @@ The Apache License 2.0 in the repository root remains the project license.
 The first and only `g1.3-termination-001` attempt stopped on the first request
 with `BadRequestError`. The direct API requires the `tag:` prefix that the
 request omitted. No operation ID, status read, cancellation, cleanup, or retry
-occurred. Checkpoint G1.3d asks only to prepare a correction offline. A second
-live attempt is not authorized.
+occurred. Checkpoint G1.3d authorizes offline correction and review at G1.3e.
+A second live attempt is not authorized.
 
 New documentation should support the active hackathon project.
