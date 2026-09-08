@@ -14,7 +14,7 @@ customer data.
 - Phase: Sponsor-stack and architecture feasibility
 - Completed gates: G0.1 through G1.2 and checkpoints G1.2a through G1.2l
 - Active step: Step 1.3, isolation and deterministic evaluation
-- Next checkpoint: G1.3a, execution-integrity test review
+- Next checkpoint: G1.3b, execution-integrity result review
 - Implementation: All three sponsor primitives proven independently
 - Out-of-pocket cost limit: Zero
 - Submission deadline: 30 October 2026
@@ -55,8 +55,8 @@ customer data.
 | [Checkpoint G1.2l review](gates/G1.2l-sandbox-result-review.md) | Evidence and decision record for the successful Sandbox lifecycle | Approved |
 | [Primitive capability summary](feasibility/primitive-capability-summary.md) | Combined roles, measurements, limitations, fallbacks, and competition alignment | Approved at G1.2 |
 | [Gate G1.2 review](gates/G1.2-primitive-capability-review.md) | Combined sponsor-primitive decision record | Approved |
-| [Execution integrity](feasibility/execution-integrity.md) | Deterministic evaluator, experiment lifecycle, isolation checks, and bounded live proposal | In review at G1.3a |
-| [Checkpoint G1.3a review](gates/G1.3a-execution-integrity-test-review.md) | Offline evidence and execution decision for the first integrity probe | In review |
+| [Execution integrity](feasibility/execution-integrity.md) | Deterministic evaluator, experiment lifecycle, isolation checks, and bounded live proposal | Approved for one attempt at G1.3a |
+| [Checkpoint G1.3a review](gates/G1.3a-execution-integrity-test-review.md) | Offline evidence and execution decision for the first integrity probe | Approved |
 | [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol retained for later direct validation | Deferred evidence |
 | [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for later direct validation | Ready for future use |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |
@@ -66,7 +66,7 @@ The Apache License 2.0 in the repository root remains the project license.
 ## Immediate decision
 
 Step 1.3 offline implementation is complete with 91 passing tests. Checkpoint
-G1.3a requests approval for one exact four-operation Sandbox integrity probe.
-All live provider work remains blocked pending that decision.
+G1.3a authorizes one exact four-operation Sandbox integrity probe. No timeout,
+cancellation, Nemotron, Tavily, or second integrity attempt is authorized.
 
 New documentation should support the active hackathon project.

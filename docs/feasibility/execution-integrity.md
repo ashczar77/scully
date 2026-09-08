@@ -1,6 +1,6 @@
 # Step 1.3 Execution Integrity
 
-**Status:** In review at checkpoint G1.3a
+**Status:** Approved for one attempt at checkpoint G1.3a
 
 **Review date:** 2026-09-08
 
