@@ -1,0 +1,33 @@
+{
+  "base_image": "python:3.12-slim",
+  "common_checkpoint": true,
+  "incident_matcher_count": 5,
+  "incident_verdict": "matched",
+  "isolation_passed": true,
+  "known_good_failed_matcher_count": 3,
+  "known_good_verdict": "not_matched",
+  "measurement": {
+    "duration_seconds": 8.758663,
+    "ended_at": "2026-09-08T14:47:52.051837+00:00",
+    "input_tokens": 0,
+    "investigation_id": "g1.3-execution-integrity-001",
+    "model_cost_usd": "0",
+    "operation": "branch_lifecycle",
+    "output_tokens": 0,
+    "provider": "sandbox",
+    "rate_limit_count": 0,
+    "request_count": 4,
+    "retries": 0,
+    "sandbox_cpu_seconds": 0.0,
+    "sandbox_elapsed_seconds": 0.13022,
+    "sandbox_operations": 4,
+    "sandbox_reported_cost": 0.00148712,
+    "started_at": "2026-09-08T14:47:43.293174+00:00",
+    "status": "succeeded",
+    "tavily_credits": 0
+  },
+  "probe_id": "g1.3-execution-integrity-001",
+  "provider": "sandbox",
+  "status": "succeeded",
+  "untagged_resulting_images": 3
+}

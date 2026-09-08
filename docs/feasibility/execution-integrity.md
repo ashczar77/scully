@@ -1,6 +1,6 @@
 # Step 1.3 Execution Integrity
 
-**Status:** Approved for one attempt at checkpoint G1.3a
+**Status:** Live result in review at checkpoint G1.3b
 
 **Review date:** 2026-09-08
 
@@ -141,8 +141,34 @@ bound one timeout and one explicit cancellation test, including how operation
 identifiers are captured, how terminal status is verified, and how residual
 state is handled.
 
+## Live result
+
+Checkpoint G1.3a approved one execution of
+`g1.3-execution-integrity-001`. The redacted preflight showed Sandbox as the
+only open provider gate. The first and only attempt then succeeded.
+
+The result records:
+
+- exactly four counted operations and zero retries;
+- one common parent checkpoint;
+- successful baseline inheritance and sibling separation;
+- all five required incident matchers passing;
+- three required incident matchers failing for the known-good branch;
+- an incident verdict of `matched` and known-good verdict of `not_matched`;
+- 8.758663 seconds of local wall time;
+- 0.13022 seconds of aggregate public command elapsed time;
+- provider-reported cost `0.00148712` without assigning it a unit;
+- three untagged resulting image states;
+- zero model tokens and zero Tavily credits.
+
+The durable record is
+`validation/results/g1.3-execution-integrity-probe-001.json`. It retains no
+command source, command output, raw observation, image identifier, provider
+message, credential, or project identifier.
+
 ## Decision requested
 
-Approve exactly one run of `g1.3-execution-integrity-001`. Do not authorize a
-Nemotron request, Tavily search, timeout test, cancellation test, second
-integrity attempt, or any other Sandbox operation.
+Approve the successful integrity result and authorize preparation of the
+bounded timeout and cancellation proposal at checkpoint G1.3c. Do not
+authorize a Nemotron request, Tavily search, timeout test, cancellation test,
+second integrity attempt, or any other Sandbox operation.
