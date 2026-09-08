@@ -3,8 +3,9 @@
 Scully turns sanitized production-incident evidence into a minimal executable
 reproduction without giving AI unrestricted production access.
 
-The project has completed problem and boundary validation and is now proving
-the sponsor stack through a review-gated feasibility scaffold. See the
+The project has completed problem, boundary, and primitive feasibility gates.
+It is now proving deterministic evaluation and execution integrity through a
+review-gated feasibility scaffold. See the
 [hackathon project plan](docs/HACKATHON_PROJECT_PLAN.md) and
 [project documentation](docs/README.md) for its status and roadmap.
 

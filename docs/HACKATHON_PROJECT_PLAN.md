@@ -524,6 +524,22 @@ test uses fixed synthetic inputs, and every proposed Sandbox operation,
 timeout, cancellation condition, retained field, and residual state is bounded
 in advance. Approval authorizes only the reviewed live integrity test.
 
+**Checkpoint G1.3b, execution-integrity result review:** Approve only if two
+experiments from one parent show baseline inheritance, own-branch mutation,
+sibling separation, an incident match, and a known-good non-match. Approval
+authorizes preparation of a bounded timeout and cancellation proposal, not its
+execution.
+
+**Checkpoint G1.3c, termination test review:** Approve only if one timeout and
+one explicit cancellation path identify exact commands, duration, operation
+count, status checks, cancellation mechanism, retained fields, and cleanup.
+Approval authorizes only those termination tests.
+
+**Checkpoint G1.3d, termination result review:** Approve only if timeout and
+cancellation reach the expected terminal states, cannot produce a reproduction
+verdict, and leave no unexplained running operation. Approval authorizes the
+Gate G1.3 execution integrity review.
+
 **Gate G1.3, execution integrity review:** Approve only if experiment isolation
 is demonstrated and only deterministic code, not the language model, can mark
 a reproduction as successful.

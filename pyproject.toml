@@ -20,6 +20,7 @@ scully-preflight = "scully.preflight:main"
 scully-probe-nemotron = "scully.probes.nemotron:main"
 scully-probe-tavily = "scully.probes.tavily:main"
 scully-probe-sandbox = "scully.probes.sandbox:main"
+scully-probe-integrity = "scully.probes.integrity:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

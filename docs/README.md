@@ -55,6 +55,8 @@ customer data.
 | [Checkpoint G1.2l review](gates/G1.2l-sandbox-result-review.md) | Evidence and decision record for the successful Sandbox lifecycle | Approved |
 | [Primitive capability summary](feasibility/primitive-capability-summary.md) | Combined roles, measurements, limitations, fallbacks, and competition alignment | Approved at G1.2 |
 | [Gate G1.2 review](gates/G1.2-primitive-capability-review.md) | Combined sponsor-primitive decision record | Approved |
+| [Execution integrity](feasibility/execution-integrity.md) | Deterministic evaluator, experiment lifecycle, isolation checks, and bounded live proposal | In review at G1.3a |
+| [Checkpoint G1.3a review](gates/G1.3a-execution-integrity-test-review.md) | Offline evidence and execution decision for the first integrity probe | In review |
 | [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol retained for later direct validation | Deferred evidence |
 | [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for later direct validation | Ready for future use |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |
@@ -63,9 +65,8 @@ The Apache License 2.0 in the repository root remains the project license.
 
 ## Immediate decision
 
-Nemotron, Tavily, and ConTree branching are approved as independently proven
-primitives. Gate G1.2 authorizes Step 1.3 offline implementation and mocked
-tests only. All further live provider work remains blocked until the exact
-execution-integrity proposal passes checkpoint G1.3a.
+Step 1.3 offline implementation is complete with 91 passing tests. Checkpoint
+G1.3a requests approval for one exact four-operation Sandbox integrity probe.
+All live provider work remains blocked pending that decision.
 
 New documentation should support the active hackathon project.
