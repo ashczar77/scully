@@ -78,6 +78,8 @@ customer data.
 | [Gate G2.4 review](gates/G2.4-execution-review.md) | Evidence and decision record for deterministic branch execution | Approved |
 | [First end-to-end proof](product/end-to-end-proof.md) | Progressive execution, runnable reproduction, clean setup, measurements, and limitations | Implemented for G2.5 review |
 | [Gate G2.5 review](gates/G2.5-phase-2-exit-review.md) | Evidence and decision record for the Phase 2 vertical proof | Approved |
+| [Interaction and visual foundations](product/experience-foundations.md) | Five-screen architecture, state system, flows, tokens, responsiveness, and accessibility | Defined for G3.1 review |
+| [Gate G3.1 review](gates/G3.1-experience-foundation-review.md) | Evidence and decision record for the trust-experience foundation | In review |
 | [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol retained for later direct validation | Deferred evidence |
 | [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for later direct validation | Ready for future use |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |
