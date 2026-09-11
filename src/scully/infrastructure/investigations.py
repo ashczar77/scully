@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from scully.domain.contracts import (
+    ExecutionReport,
     ExperimentPlan,
     Hypothesis,
     InvestigationDetail,
@@ -14,6 +15,10 @@ from scully.infrastructure.database import Database
 
 class InvestigationConflictError(ValueError):
     """Raised when an investigation identifier is already present."""
+
+
+class InvestigationStateError(ValueError):
+    """Raised when persisted state cannot accept an execution result."""
 
 
 class InvestigationRepository:
@@ -152,6 +157,10 @@ class InvestigationRepository:
                 """,
                 (investigation_id,),
             ).fetchall()
+            result_row = connection.execute(
+                "SELECT payload_json FROM results WHERE investigation_id = ?",
+                (investigation_id,),
+            ).fetchone()
 
         return InvestigationDetail(
             investigation_id=str(row["investigation_id"]),
@@ -171,4 +180,118 @@ class InvestigationRepository:
                 InvestigationEvent.model_validate_json(str(item["payload_json"]))
                 for item in event_rows
             ),
+            execution=(
+                ExecutionReport.model_validate_json(str(result_row["payload_json"]))
+                if result_row is not None
+                else None
+            ),
         )
+
+    def complete_execution(
+        self,
+        report: ExecutionReport,
+        events: tuple[InvestigationEvent, ...],
+    ) -> InvestigationDetail:
+        """Persist terminal experiment results and ordered events atomically."""
+
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT status FROM investigations WHERE investigation_id = ?
+                """,
+                (report.investigation_id,),
+            ).fetchone()
+            if row is None:
+                raise InvestigationStateError("Investigation does not exist")
+            if str(row["status"]) != InvestigationStatus.READY.value:
+                raise InvestigationStateError("Investigation is not ready for execution")
+            existing_result = connection.execute(
+                "SELECT 1 FROM results WHERE investigation_id = ?",
+                (report.investigation_id,),
+            ).fetchone()
+            if existing_result is not None:
+                raise InvestigationStateError("Investigation already has a result")
+            maximum = connection.execute(
+                "SELECT MAX(sequence) AS value FROM events WHERE investigation_id = ?",
+                (report.investigation_id,),
+            ).fetchone()
+            next_sequence = int(maximum["value"] or 0) + 1
+            if [event.sequence for event in events] != list(
+                range(next_sequence, next_sequence + len(events))
+            ):
+                raise InvestigationStateError("Execution event sequence is not contiguous")
+
+            experiment_rows = connection.execute(
+                """
+                SELECT experiment_id FROM experiments WHERE investigation_id = ?
+                """,
+                (report.investigation_id,),
+            ).fetchall()
+            if {str(item["experiment_id"]) for item in experiment_rows} != {
+                item.experiment_id for item in report.outcomes
+            }:
+                raise InvestigationStateError("Execution outcomes do not cover the plan")
+
+            completed_at = events[-1].occurred_at.isoformat()
+            connection.execute(
+                """
+                UPDATE investigations
+                SET status = ?, updated_at = ?
+                WHERE investigation_id = ?
+                """,
+                (report.status.value, completed_at, report.investigation_id),
+            )
+            connection.executemany(
+                """
+                UPDATE experiments SET status = ? WHERE experiment_id = ?
+                """,
+                [
+                    (outcome.status.value, outcome.experiment_id)
+                    for outcome in report.outcomes
+                ],
+            )
+            connection.executemany(
+                """
+                INSERT INTO events(
+                    investigation_id,
+                    sequence,
+                    event_type,
+                    schema_version,
+                    occurred_at,
+                    payload_json
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        event.investigation_id,
+                        event.sequence,
+                        event.event_type,
+                        event.schema_version,
+                        event.occurred_at.isoformat(),
+                        event.model_dump_json(),
+                    )
+                    for event in events
+                ],
+            )
+            connection.execute(
+                """
+                INSERT INTO results(
+                    investigation_id,
+                    verdict,
+                    signature_id,
+                    completed_at,
+                    payload_json
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    report.investigation_id,
+                    "supported" if report.supported_hypothesis_id else "inconclusive",
+                    report.signature_id,
+                    completed_at,
+                    report.model_dump_json(),
+                ),
+            )
+        completed = self.get(report.investigation_id)
+        if completed is None:
+            raise InvestigationStateError("Completed investigation could not be loaded")
+        return completed

@@ -55,6 +55,28 @@ class InvestigationEndpointTests(unittest.TestCase):
         self.assertEqual(loaded.status_code, 200)
         self.assertEqual(loaded.json(), payload)
 
+        executed = self.client.post(
+            f"/api/investigations/{payload['investigation_id']}/execute"
+        )
+        self.assertEqual(executed.status_code, 200)
+        completed = executed.json()
+        self.assertEqual(completed["status"], "completed")
+        self.assertTrue(completed["execution"]["isolation_verified"])
+        self.assertEqual(completed["execution"]["operation_count"], 3)
+        self.assertEqual(completed["execution"]["retry_count"], 0)
+        self.assertEqual(
+            completed["execution"]["supported_hypothesis_id"],
+            f"{payload['investigation_id']}-h1",
+        )
+
+        replay = self.client.get(
+            f"/api/investigations/{payload['investigation_id']}/events"
+        )
+        self.assertEqual(replay.status_code, 200)
+        self.assertIn("text/event-stream", replay.headers["content-type"])
+        self.assertIn("event: experiment.operation", replay.text)
+        self.assertIn("event: investigation.completed", replay.text)
+
     def test_missing_capsule_and_investigation_return_reason_codes(self) -> None:
         missing_capsule = self.client.post(
             "/api/investigations",

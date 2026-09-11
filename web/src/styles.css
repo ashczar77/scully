@@ -481,6 +481,15 @@ h2 {
   background: rgba(12, 25, 20, 0.74);
 }
 
+.hypothesis-supported {
+  border-color: rgba(119, 242, 191, 0.48);
+  box-shadow: inset 0 3px 0 rgba(119, 242, 191, 0.76);
+}
+
+.hypothesis-eliminated {
+  border-color: rgba(231, 194, 106, 0.2);
+}
+
 .hypothesis-topline {
   display: flex;
   align-items: center;
@@ -589,6 +598,29 @@ h2 {
   font-size: 0.64rem;
 }
 
+.outcome-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-top: 13px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(231, 194, 106, 0.16);
+}
+
+.outcome-row strong {
+  margin: 0;
+  color: #dce6e0;
+  font-size: 0.72rem;
+}
+
+.outcome-row span {
+  color: #8f9d95;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.62rem;
+  text-transform: capitalize;
+}
+
 .planning-footer {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr);
@@ -621,26 +653,63 @@ h2 {
   font-size: 0.63rem;
 }
 
-.execution-lock {
+.execution-lock,
+.execution-result {
   display: flex;
   gap: 14px;
   align-items: center;
 }
 
-.execution-lock > span {
+.execution-lock > span,
+.execution-result > span {
   color: #e7c26a;
   font-size: 1.6rem;
 }
 
-.execution-lock strong {
+.execution-result > span {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  place-items: center;
+  border-radius: 999px;
+  color: #07100d;
+  background: #77f2bf;
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.execution-lock strong,
+.execution-result strong {
   font-size: 0.9rem;
 }
 
-.execution-lock p {
+.execution-lock p,
+.execution-result p {
   margin: 5px 0 0;
   color: #85928a;
   font-size: 0.78rem;
   line-height: 1.4;
+}
+
+.execution-result p {
+  color: #dce6e0;
+  font-weight: 680;
+}
+
+.execution-result small {
+  display: block;
+  margin-top: 7px;
+  color: #77f2bf;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.63rem;
+}
+
+.execution-action {
+  margin-top: 14px;
+  padding: 10px 12px;
+  gap: 18px;
+  font-size: 0.76rem;
 }
 
 @media (max-width: 760px) {

@@ -15,8 +15,8 @@ customer data.
 - Completed gates: G0.1 through G2.3 and checkpoints G1.2a through G1.3f
 - Active step: Step 2.4, branched execution and signature matching
 - Next checkpoint: Gate G2.4, execution review
-- Implementation: Safe capsule import plus an offline investigation path with
-  three evidence-linked hypotheses and bounded experiment plans
+- Implementation: Working offline path from safe capsule import through three
+  isolated branches and deterministic cause selection
 - Out-of-pocket cost limit: Zero
 - Submission deadline: 30 October 2026
 
@@ -74,6 +74,8 @@ customer data.
 | [Gate G2.2 review](gates/G2.2-ingestion-safety-review.md) | Evidence and decision record for capsule ingestion safety | Approved |
 | [Hypothesis planning](product/hypothesis-planning.md) | Planning contracts, evidence links, experiment allowlist, persistence, UI, and limitations | Implemented for G2.3 review |
 | [Gate G2.3 review](gates/G2.3-planning-review.md) | Evidence and decision record for bounded hypothesis planning | Approved |
+| [Branched execution](product/branched-execution.md) | Local branch isolation, signature evaluation, limits, event replay, UI, and Sandbox boundary | Implemented for G2.4 review |
+| [Gate G2.4 review](gates/G2.4-execution-review.md) | Evidence and decision record for deterministic branch execution | In review |
 | [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol retained for later direct validation | Deferred evidence |
 | [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for later direct validation | Ready for future use |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |
@@ -90,5 +92,7 @@ path and authorized Step 2.3 investigation and hypothesis planning only.
 Gate G2.3 approved the planning path and authorized Step 2.4 local branched
 execution and deterministic signature matching only. Live Sandbox use remains
 separately gated.
+
+Step 2.4 is now implemented and awaiting Gate G2.4 review.
 
 New documentation should support the active hackathon project.

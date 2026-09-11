@@ -68,6 +68,14 @@ class ReproductionVerdict(str, Enum):
     INCONCLUSIVE = "inconclusive"
 
 
+class HypothesisDisposition(str, Enum):
+    """Evidence state assigned after testing one hypothesis prediction."""
+
+    SUPPORTED = "supported"
+    ELIMINATED = "eliminated"
+    INCONCLUSIVE = "inconclusive"
+
+
 class EvidenceReference(ContractModel):
     """Sanitized evidence metadata without file contents."""
 
@@ -149,6 +157,69 @@ class ReproductionResult(ContractModel):
     limitations: tuple[Annotated[str, Field(max_length=500)], ...] = ()
 
 
+class SignatureMatchResult(ContractModel):
+    """One bounded deterministic matcher result."""
+
+    matcher_id: Identifier
+    required: bool
+    passed: bool
+    reason: Annotated[str, Field(min_length=1, max_length=96)]
+
+
+class ExperimentOutcome(ContractModel):
+    """Terminal outcome for one isolated experiment branch."""
+
+    schema_version: SchemaVersion = "1.0"
+    experiment_id: Identifier
+    hypothesis_id: Identifier
+    status: ExperimentStatus
+    verdict: ReproductionVerdict
+    hypothesis_disposition: HypothesisDisposition
+    observation_digest: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+    matcher_results: tuple[SignatureMatchResult, ...] = ()
+    elimination_reasons: tuple[
+        Annotated[str, Field(min_length=1, max_length=160)], ...
+    ] = ()
+    duration_ms: Annotated[float, Field(ge=0, allow_inf_nan=False)]
+
+
+class ExecutionReport(ContractModel):
+    """Deterministic aggregate result for all planned branches."""
+
+    schema_version: SchemaVersion = "1.0"
+    investigation_id: Identifier
+    checkpoint_id: Identifier
+    status: InvestigationStatus
+    signature_id: Identifier
+    evaluator_version: Identifier
+    execution_source: Literal["local", "sandbox"]
+    isolation_verified: bool
+    operation_count: Annotated[int, Field(ge=0, le=16)]
+    retry_count: Annotated[int, Field(ge=0, le=1)]
+    supported_hypothesis_id: Identifier | None = None
+    outcomes: Annotated[
+        tuple[ExperimentOutcome, ...],
+        Field(min_length=1, max_length=8),
+    ]
+    limitations: tuple[Annotated[str, Field(max_length=500)], ...] = ()
+
+    @model_validator(mode="after")
+    def validate_execution_links(self) -> ExecutionReport:
+        experiment_ids = [item.experiment_id for item in self.outcomes]
+        if len(experiment_ids) != len(set(experiment_ids)):
+            raise ValueError("Execution outcome IDs must be unique")
+        supported = [
+            item.hypothesis_id
+            for item in self.outcomes
+            if item.hypothesis_disposition is HypothesisDisposition.SUPPORTED
+        ]
+        if len(supported) == 1 and self.supported_hypothesis_id != supported[0]:
+            raise ValueError("Single supported outcome requires its aggregate ID")
+        if len(supported) != 1 and self.supported_hypothesis_id is not None:
+            raise ValueError("Aggregate hypothesis requires exactly one supported outcome")
+        return self
+
+
 class InvestigationDetail(ContractModel):
     """Current persisted investigation planning state."""
 
@@ -161,6 +232,7 @@ class InvestigationDetail(ContractModel):
     hypotheses: Annotated[tuple[Hypothesis, ...], Field(min_length=1, max_length=8)]
     experiments: Annotated[tuple[ExperimentPlan, ...], Field(min_length=1, max_length=8)]
     events: Annotated[tuple[InvestigationEvent, ...], Field(min_length=1, max_length=64)]
+    execution: ExecutionReport | None = None
 
     @field_validator("created_at")
     @classmethod
@@ -185,4 +257,11 @@ class InvestigationDetail(ContractModel):
             raise ValueError("Every event must belong to the investigation")
         if [event.sequence for event in self.events] != list(range(1, len(self.events) + 1)):
             raise ValueError("Investigation event sequence must be contiguous")
+        if self.execution is not None:
+            if self.execution.investigation_id != self.investigation_id:
+                raise ValueError("Execution report must belong to the investigation")
+            if {item.experiment_id for item in self.execution.outcomes} != {
+                item.experiment_id for item in self.experiments
+            }:
+                raise ValueError("Execution outcomes must cover every experiment")
         return self

@@ -106,7 +106,8 @@ describe("App", () => {
     fetchMock
       .mockResolvedValueOnce(response(healthPayload()))
       .mockResolvedValueOnce(response(capsulePayload()))
-      .mockResolvedValueOnce(response(investigationPayload()));
+      .mockResolvedValueOnce(response(investigationPayload()))
+      .mockResolvedValueOnce(response(executedInvestigationPayload()));
     render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: /load seed capsule/i }));
@@ -120,12 +121,23 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "Proxy trust is disabled" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Forwarded chain is overwritten" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Limiter key is global" })).toBeTruthy();
-    expect(screen.getByText("Execution remains locked")).toBeTruthy();
+    expect(screen.getByText("Local execution ready")).toBeTruthy();
     expect(fetchMock).toHaveBeenLastCalledWith("/api/investigations", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ capsule_id: "proxy-identity-collapse-v1" }),
     });
+
+    fireEvent.click(screen.getByRole("button", { name: /run 3 branches/i }));
+
+    expect(await screen.findByText("Supported cause")).toBeTruthy();
+    expect(screen.getByText(/Isolation verified/)).toBeTruthy();
+    expect(screen.getByText("Supports hypothesis")).toBeTruthy();
+    expect(screen.getAllByText("Hypothesis eliminated")).toHaveLength(2);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/investigations/inv-test/execute",
+      { method: "POST" },
+    );
   });
 });
 
@@ -205,6 +217,43 @@ function investigationPayload() {
       { sequence: 1, event_type: "investigation.created" },
       { sequence: 2, event_type: "planning.completed" },
     ],
+    execution: null,
+  };
+}
+
+function executedInvestigationPayload() {
+  const planned = investigationPayload();
+  return {
+    ...planned,
+    status: "completed",
+    events: [
+      ...planned.events,
+      { sequence: 3, event_type: "execution.started" },
+      { sequence: 4, event_type: "investigation.completed" },
+    ],
+    execution: {
+      status: "completed",
+      signature_id: "proxy-identity-collapse-v1",
+      evaluator_version: "1",
+      execution_source: "local",
+      isolation_verified: true,
+      operation_count: 3,
+      retry_count: 0,
+      supported_hypothesis_id: "inv-test-h1",
+      outcomes: planned.hypotheses.map((hypothesis, index) => ({
+        experiment_id: `inv-test-e${index + 1}`,
+        hypothesis_id: hypothesis.hypothesis_id,
+        status: index === 0 ? "eliminated" : "reproduced",
+        verdict: index === 0 ? "not_reproduced" : "reproduced",
+        hypothesis_disposition: index === 0 ? "supported" : "eliminated",
+        observation_digest: "b".repeat(64),
+        matcher_results: [],
+        elimination_reasons:
+          index === 0 ? [] : ["failure_signature_still_reproduced"],
+        duration_ms: 1,
+      })),
+      limitations: [],
+    },
   };
 }
 

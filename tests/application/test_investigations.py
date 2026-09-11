@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from scully.application.capsule_import import CapsuleImporter
+from scully.application.execution import LocalExecutionAdapter
 from scully.application.investigations import InvestigationError, InvestigationService
 from scully.application.planning import LocalPlanningAdapter
 from scully.infrastructure.capsules import CapsuleRepository
@@ -25,12 +26,14 @@ class InvestigationServiceTests(unittest.TestCase):
         database = Database(root / "scully.db")
         database.initialize()
         capsules = CapsuleRepository(database)
-        CapsuleImporter(root / "artifacts", capsules).import_path(SEED_CAPSULE)
+        artifact_dir = root / "artifacts"
+        CapsuleImporter(artifact_dir, capsules).import_path(SEED_CAPSULE)
         self.repository = InvestigationRepository(database)
         self.service = InvestigationService(
             capsules,
             self.repository,
             LocalPlanningAdapter(),
+            LocalExecutionAdapter(artifact_dir),
             clock=lambda: FIXED_TIME,
             id_factory=lambda: "inv-fixed",
         )
@@ -60,6 +63,25 @@ class InvestigationServiceTests(unittest.TestCase):
             self.service.create("proxy-identity-collapse-v1")
         self.assertEqual(conflict.exception.code, "investigation_conflict")
         self.assertEqual(conflict.exception.status_code, 409)
+
+    def test_execute_persists_results_and_terminal_events_once(self) -> None:
+        planned = self.service.create("proxy-identity-collapse-v1")
+        completed = self.service.execute(planned.investigation_id)
+
+        self.assertEqual(completed.status.value, "completed")
+        self.assertIsNotNone(completed.execution)
+        assert completed.execution is not None
+        self.assertEqual(
+            completed.execution.supported_hypothesis_id,
+            "inv-fixed-h1",
+        )
+        self.assertEqual(len(completed.events), 22)
+        self.assertEqual(completed.events[-1].event_type, "investigation.completed")
+        self.assertEqual(self.repository.get("inv-fixed"), completed)
+
+        with self.assertRaises(InvestigationError) as repeated:
+            self.service.execute(planned.investigation_id)
+        self.assertEqual(repeated.exception.code, "investigation_not_ready")
 
 
 if __name__ == "__main__":

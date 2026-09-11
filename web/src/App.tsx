@@ -54,6 +54,36 @@ type InvestigationEvent = {
   event_type: string;
 };
 
+type ExperimentOutcome = {
+  experiment_id: string;
+  hypothesis_id: string;
+  status: string;
+  verdict: string;
+  hypothesis_disposition: "supported" | "eliminated" | "inconclusive";
+  observation_digest: string;
+  matcher_results: Array<{
+    matcher_id: string;
+    required: boolean;
+    passed: boolean;
+    reason: string;
+  }>;
+  elimination_reasons: string[];
+  duration_ms: number;
+};
+
+type ExecutionReport = {
+  status: string;
+  signature_id: string;
+  evaluator_version: string;
+  execution_source: "local" | "sandbox";
+  isolation_verified: boolean;
+  operation_count: number;
+  retry_count: number;
+  supported_hypothesis_id: string | null;
+  outcomes: ExperimentOutcome[];
+  limitations: string[];
+};
+
 type InvestigationDetail = {
   investigation_id: string;
   capsule_id: string;
@@ -62,11 +92,13 @@ type InvestigationDetail = {
   hypotheses: Hypothesis[];
   experiments: ExperimentPlan[];
   events: InvestigationEvent[];
+  execution: ExecutionReport | null;
 };
 
 type ConnectionState = "checking" | "ready" | "offline";
 type ImportState = "idle" | "importing" | "accepted" | "rejected";
 type PlanningState = "idle" | "planning" | "ready" | "rejected";
+type ExecutionState = "idle" | "running" | "complete" | "rejected";
 
 export function App() {
   const [connection, setConnection] = useState<ConnectionState>("checking");
@@ -77,6 +109,8 @@ export function App() {
   const [planningState, setPlanningState] = useState<PlanningState>("idle");
   const [investigation, setInvestigation] = useState<InvestigationDetail | null>(null);
   const [planningError, setPlanningError] = useState<string | null>(null);
+  const [executionState, setExecutionState] = useState<ExecutionState>("idle");
+  const [executionError, setExecutionError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -119,6 +153,8 @@ export function App() {
       setInvestigation(null);
       setPlanningState("idle");
       setPlanningError(null);
+      setExecutionState("idle");
+      setExecutionError(null);
     } catch (error) {
       setCapsule(null);
       setRejection(error instanceof Error ? error.message : "Capsule was rejected");
@@ -151,12 +187,38 @@ export function App() {
       }
       setInvestigation(payload as InvestigationDetail);
       setPlanningState("ready");
+      setExecutionState("idle");
     } catch (error) {
       setInvestigation(null);
       setPlanningError(
         error instanceof Error ? error.message : "Investigation planning failed",
       );
       setPlanningState("rejected");
+    }
+  }
+
+  async function executeInvestigation(investigationId: string) {
+    setExecutionState("running");
+    setExecutionError(null);
+    try {
+      const response = await fetch(
+        `/api/investigations/${investigationId}/execute`,
+        { method: "POST" },
+      );
+      const payload = (await response.json()) as
+        | InvestigationDetail
+        | ImportErrorResponse;
+      if (!response.ok) {
+        const detail = "detail" in payload ? payload.detail : null;
+        throw new Error(detail?.message ?? "Branch execution failed");
+      }
+      setInvestigation(payload as InvestigationDetail);
+      setExecutionState("complete");
+    } catch (error) {
+      setExecutionError(
+        error instanceof Error ? error.message : "Branch execution failed",
+      );
+      setExecutionState("rejected");
     }
   }
 
@@ -282,7 +344,22 @@ export function App() {
             </div>
           )}
 
-          {investigation && <InvestigationPlan investigation={investigation} />}
+          {executionError && (
+            <div className="rejection" role="alert">
+              <strong>Execution stopped</strong>
+              <span>{executionError}</span>
+            </div>
+          )}
+
+          {investigation && (
+            <InvestigationPlan
+              investigation={investigation}
+              executionState={executionState}
+              onExecute={() =>
+                void executeInvestigation(investigation.investigation_id)
+              }
+            />
+          )}
 
           <div className="foundation-status">
             <div>
@@ -373,9 +450,17 @@ function CapsuleDetails({
 
 function InvestigationPlan({
   investigation,
+  executionState,
+  onExecute,
 }: {
   investigation: InvestigationDetail;
+  executionState: ExecutionState;
+  onExecute: () => void;
 }) {
+  const execution = investigation.execution;
+  const supportedHypothesis = investigation.hypotheses.find(
+    (item) => item.hypothesis_id === execution?.supported_hypothesis_id,
+  );
   return (
     <section className="investigation" aria-labelledby="investigation-title">
       <div className="investigation-heading">
@@ -398,8 +483,16 @@ function InvestigationPlan({
           const experiment = investigation.experiments.find(
             (item) => item.hypothesis_id === hypothesis.hypothesis_id,
           );
+          const outcome = execution?.outcomes.find(
+            (item) => item.hypothesis_id === hypothesis.hypothesis_id,
+          );
           return (
-            <article className="hypothesis-card" key={hypothesis.hypothesis_id}>
+            <article
+              className={`hypothesis-card ${
+                outcome ? `hypothesis-${outcome.hypothesis_disposition}` : ""
+              }`}
+              key={hypothesis.hypothesis_id}
+            >
               <div className="hypothesis-topline">
                 <span>H{index + 1}</span>
                 <strong>{Math.round(hypothesis.confidence * 100)}%</strong>
@@ -424,11 +517,19 @@ function InvestigationPlan({
               </div>
               {experiment && (
                 <div className="experiment-plan">
-                  <span>Queued experiment</span>
+                  <span>{outcome ? "Branch result" : "Queued experiment"}</span>
                   <strong>{formatVariant(experiment.variant)}</strong>
                   <small>
-                    {experiment.operation_limit} operations · {experiment.timeout_seconds}s
+                    limit: {experiment.operation_limit} operations · {experiment.timeout_seconds}s
                   </small>
+                  {outcome && (
+                    <div className="outcome-row">
+                      <strong>
+                        {formatDisposition(outcome.hypothesis_disposition)}
+                      </strong>
+                      <span>{formatVariant(outcome.verdict)}</span>
+                    </div>
+                  )}
                 </div>
               )}
             </article>
@@ -445,13 +546,37 @@ function InvestigationPlan({
             ))}
           </ol>
         </div>
-        <div className="execution-lock">
-          <span aria-hidden="true">◇</span>
-          <div>
-            <strong>Execution remains locked</strong>
-            <p>Experiments become runnable only after the next review gate.</p>
+        {execution ? (
+          <div className="execution-result">
+            <span aria-hidden="true">✓</span>
+            <div>
+              <strong>Supported cause</strong>
+              <p>{supportedHypothesis?.title ?? "No single supported cause"}</p>
+              <small>
+                {execution.isolation_verified ? "Isolation verified" : "Isolation unverified"}
+                {" · "}{execution.operation_count} operations{" · "}
+                {execution.retry_count} retries
+              </small>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="execution-lock">
+            <span aria-hidden="true">◇</span>
+            <div>
+              <strong>Local execution ready</strong>
+              <p>Run all three allowlisted branches from one clean checkpoint.</p>
+              <button
+                className="primary-action execution-action"
+                type="button"
+                disabled={executionState === "running"}
+                onClick={onExecute}
+              >
+                {executionState === "running" ? "Running branches" : "Run 3 branches"}
+                <span aria-hidden="true">→</span>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </section>
   );
@@ -462,5 +587,11 @@ function formatBytes(bytes: number) {
 }
 
 function formatVariant(variant: string) {
-  return variant.replaceAll("-", " ");
+  return variant.replaceAll("-", " ").replaceAll("_", " ");
+}
+
+function formatDisposition(disposition: ExperimentOutcome["hypothesis_disposition"]) {
+  if (disposition === "supported") return "Supports hypothesis";
+  if (disposition === "eliminated") return "Hypothesis eliminated";
+  return "Inconclusive";
 }

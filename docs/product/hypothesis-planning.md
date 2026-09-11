@@ -1,6 +1,6 @@
 # Evidence-Linked Hypothesis Planning
 
-**Status:** Implemented for Gate G2.3 review
+**Status:** Approved at Gate G2.3
 
 **Implementation date:** 2026-09-11
 
@@ -132,8 +132,9 @@ Tests cover:
 3. The three hypotheses are constrained as primary-cause alternatives, but
    semantic exclusivity still depends on the planner and later experiment
    results.
-4. Planning does not yet execute branches or evaluate the failure signature.
-5. Streaming, retries, local execution deadlines, and terminal-state behavior
-   begin in Step 2.4.
+4. Planning itself does not execute branches or determine the final verdict.
+   The Step 2.4 executor now consumes its app-owned plans.
+5. Progressive event delivery remains deferred even though Step 2.4 exposes a
+   replayable persisted event stream.
 6. Explicit provider cancellation remains known technical debt. No further
    termination probe is approved.

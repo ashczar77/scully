@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
@@ -16,6 +18,7 @@ from scully.application.capsule_import import (
     CapsuleImporter,
     CapsuleImportError,
 )
+from scully.application.execution import LocalExecutionAdapter
 from scully.application.investigations import InvestigationError, InvestigationService
 from scully.application.planning import LocalPlanningAdapter
 from scully.application.settings import ProductSettings
@@ -61,6 +64,7 @@ def create_app(settings: ProductSettings | None = None) -> FastAPI:
         capsules,
         investigations,
         LocalPlanningAdapter(),
+        LocalExecutionAdapter(product_settings.artifact_dir),
     )
 
     @asynccontextmanager
@@ -183,6 +187,29 @@ def create_app(settings: ProductSettings | None = None) -> FastAPI:
     )
     def get_investigation(investigation_id: str) -> InvestigationDetail:
         return investigation_service.get(investigation_id)
+
+    @router.post(
+        "/investigations/{investigation_id}/execute",
+        response_model=InvestigationDetail,
+    )
+    def execute_investigation(investigation_id: str) -> InvestigationDetail:
+        return investigation_service.execute(investigation_id)
+
+    @router.get("/investigations/{investigation_id}/events")
+    def investigation_events(investigation_id: str) -> StreamingResponse:
+        detail = investigation_service.get(investigation_id)
+
+        def replay() -> Iterator[str]:
+            for event in detail.events:
+                payload = json.dumps(
+                    event.model_dump(mode="json"),
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+                yield f"id: {event.sequence}\nevent: {event.event_type}\ndata: {payload}\n\n"
+
+        return StreamingResponse(replay(), media_type="text/event-stream")
 
     application.include_router(router)
     application.state.product_settings = product_settings

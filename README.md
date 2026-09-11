@@ -49,8 +49,9 @@ Open `http://127.0.0.1:8000`, then select **Load seed capsule**. Scully validate
 the capsule before storing its evidence and displays the accepted provenance,
 redaction status, and deterministic signature ID. Select **Create
 investigation** to persist and display three evidence-linked causal
-alternatives with bounded experiment plans. Execution remains locked pending
-its review gate.
+alternatives with bounded experiment plans. Select **Run 3 branches** to test
+all three from one clean checkpoint and display the deterministically supported
+cause.
 
 The public capsule contract is
 [`schemas/capsule-v1.0.schema.json`](schemas/capsule-v1.0.schema.json). The
