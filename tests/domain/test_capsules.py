@@ -56,6 +56,21 @@ class CapsuleContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "declared evidence"):
             CapsuleManifest.model_validate(payload)
 
+    def test_summary_exposes_only_sanitized_overview_metadata(self) -> None:
+        payload = json.loads(MANIFEST_PATH.read_text())
+        payload["environment"][0]["known_good_value"] = None
+        manifest = CapsuleManifest.model_validate(payload)
+
+        summary = manifest.to_summary()
+
+        self.assertEqual(summary.signature_matcher_count, 5)
+        self.assertEqual(len(summary.environment), 4)
+        self.assertFalse(summary.execution_boundary.network_access)
+        self.assertEqual(
+            summary.missing_evidence,
+            ("No known-good comparison is declared for runtime",),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

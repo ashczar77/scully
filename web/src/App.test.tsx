@@ -30,45 +30,36 @@ describe("App", () => {
 
     expect(
       screen.getByRole("heading", {
-        name: "Turn evidence into a testable failure.",
+        name: "What evidence will enter, and is it safe?",
       }),
     ).toBeTruthy();
     expect(await screen.findByText("Local runtime ready")).toBeTruthy();
     expect(screen.getByText("SQLite ready")).toBeTruthy();
     expect(screen.getByText("Disabled by default")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "No production connection" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Skip to investigation" })).toBeTruthy();
   });
 
   it("loads the seed capsule and displays accepted evidence lineage", async () => {
     const fetchMock = vi.mocked(fetch);
     fetchMock
       .mockResolvedValueOnce(response(healthPayload()))
-      .mockResolvedValueOnce(
-        response({
-          schema_version: "1.0",
-          capsule_id: "proxy-identity-collapse-v1",
-          title: "Proxy identity collapse",
-          observed_summary: "Two clients collapse to one identity.",
-          signature_id: "proxy-identity-collapse-v1",
-          evidence: [
-            {
-              evidence_id: "requests",
-              relative_path: "evidence/requests.json",
-              sha256: "a".repeat(64),
-              byte_size: 236,
-              media_type: "application/json",
-              provenance: "Project-created synthetic request sequence",
-              redaction_status: "clean",
-            },
-          ],
-        }),
-      );
+      .mockResolvedValueOnce(response(capsulePayload()));
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /load seed capsule/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /load safe seed/i }));
 
-    expect(await screen.findByText("Accepted capsule")).toBeTruthy();
+    const overviewHeading = await screen.findByRole("heading", {
+      name: "What do we know happened?",
+    });
+    expect(overviewHeading).toBeTruthy();
+    expect(document.activeElement).toBe(overviewHeading);
     expect(screen.getByRole("heading", { name: "Proxy identity collapse" })).toBeTruthy();
-    expect(screen.getByText("Project-created synthetic request sequence")).toBeTruthy();
+    expect(screen.getByText("Project-created synthetic environment facts")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "What changed?" })).toBeTruthy();
+    expect(screen.getByText("Safety review passed")).toBeTruthy();
+    expect(screen.getByText("No production credentials or provider keys")).toBeTruthy();
+    expect(screen.getByText("No required comparison gaps detected.")).toBeTruthy();
     expect(fetchMock).toHaveBeenLastCalledWith(
       "/api/capsules/import?seed=proxy-identity-collapse",
       { method: "POST" },
@@ -92,13 +83,14 @@ describe("App", () => {
       );
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /load seed capsule/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /load safe seed/i }));
 
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("Capsule rejected");
     expect(alert.textContent).toContain(
       "Evidence failed the credential and local-path scan",
     );
+    expect(document.activeElement).toBe(alert);
   });
 
   it("creates and displays three bounded investigation alternatives", async () => {
@@ -116,7 +108,7 @@ describe("App", () => {
       );
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: /load seed capsule/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /load safe seed/i }));
     fireEvent.click(
       await screen.findByRole("button", { name: /create investigation/i }),
     );
@@ -169,6 +161,21 @@ function capsulePayload() {
     title: "Proxy identity collapse",
     observed_summary: "Two clients collapse to one identity.",
     signature_id: "proxy-identity-collapse-v1",
+    signature_matcher_count: 5,
+    known_good_summary:
+      "Trust only the controlled loopback proxy and both requests return HTTP 200.",
+    environment: [
+      {
+        name: "runtime",
+        incident_value: "Node.js 22.22.2",
+        known_good_value: "Node.js 22.22.2",
+      },
+      {
+        name: "trust-proxy",
+        incident_value: "false",
+        known_good_value: "loopback",
+      },
+    ],
     evidence: [
       {
         evidence_id: "environment",
@@ -180,6 +187,17 @@ function capsulePayload() {
         redaction_status: "clean",
       },
     ],
+    exclusions: [
+      "No production credentials or provider keys",
+      "No customer or employee data",
+    ],
+    execution_boundary: {
+      runtime: "nodejs",
+      runtime_version: "22.22.2",
+      network_access: false,
+      max_duration_seconds: 60,
+    },
+    missing_evidence: [],
   };
 }
 

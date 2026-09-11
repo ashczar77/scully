@@ -64,9 +64,11 @@ identifiers and paths to their capsule. The migration preserves evidence from
 the earlier foundation schema. Version `4` also adds the investigation
 planning source without changing capsule storage.
 
-The public read model includes only capsule metadata and evidence lineage. It
-does not return evidence contents, environment values, matcher expectations,
-or unrestricted provider data.
+The public read model includes capsule metadata, evidence lineage, sanitized
+environment comparisons, explicit exclusions, runtime boundaries, the
+known-good description, and the signature matcher count. It does not return
+evidence contents, matcher paths or expectations, commands, credentials, or
+unrestricted provider data.
 
 ## Seeded incident
 
@@ -90,9 +92,14 @@ the pre-import safety explanation with:
 
 - the observed summary;
 - schema and signature versions;
+- sanitized incident and known-good environment values;
+- explicit exclusions and runtime boundaries;
 - the evidence count;
 - every evidence identifier, provenance statement, byte size, and redaction
   status.
+
+The Step 3.2 overview presents those values without broadening the ingestion
+or evidence-content boundary.
 
 A rejected capsule displays only the fixed rejection reason. Providers remain
 disabled throughout ingestion.

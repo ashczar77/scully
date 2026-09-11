@@ -15,7 +15,13 @@ from pydantic import (
     model_validator,
 )
 
-from scully.domain.contracts import CapsuleSummary, EvidenceReference, RedactionStatus
+from scully.domain.contracts import (
+    CapsuleSummary,
+    EnvironmentComparison,
+    EvidenceReference,
+    ExecutionBoundary,
+    RedactionStatus,
+)
 
 
 CapsuleIdentifier = Annotated[
@@ -159,11 +165,34 @@ class CapsuleManifest(CapsuleModel):
     def to_summary(self) -> CapsuleSummary:
         """Return the bounded read model exposed by the API."""
 
+        missing_evidence = tuple(
+            f"No known-good comparison is declared for {item.name}"
+            for item in self.environment
+            if item.known_good_value is None
+        )
         return CapsuleSummary(
             schema_version=self.schema_version,
             capsule_id=self.capsule_id,
             title=self.title,
             observed_summary=self.observed_summary,
             signature_id=self.failure_signature.signature_id,
+            signature_matcher_count=len(self.failure_signature.matchers),
+            known_good_summary=self.known_good.description,
+            environment=tuple(
+                EnvironmentComparison(
+                    name=item.name,
+                    incident_value=item.incident_value,
+                    known_good_value=item.known_good_value,
+                )
+                for item in self.environment
+            ),
             evidence=tuple(item.to_reference() for item in self.evidence),
+            exclusions=self.exclusions,
+            execution_boundary=ExecutionBoundary(
+                runtime=self.execution_requirements.runtime,
+                runtime_version=self.execution_requirements.runtime_version,
+                network_access=self.execution_requirements.network_access,
+                max_duration_seconds=self.execution_requirements.max_duration_seconds,
+            ),
+            missing_evidence=missing_evidence,
         )

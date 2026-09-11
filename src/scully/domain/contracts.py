@@ -88,6 +88,23 @@ class EvidenceReference(ContractModel):
     redaction_status: RedactionStatus
 
 
+class EnvironmentComparison(ContractModel):
+    """Sanitized incident and known-good environment values."""
+
+    name: Identifier
+    incident_value: Annotated[str, Field(min_length=1, max_length=256)]
+    known_good_value: Annotated[str, Field(min_length=1, max_length=256)] | None = None
+
+
+class ExecutionBoundary(ContractModel):
+    """Non-secret runtime limits declared by an accepted capsule."""
+
+    runtime: Identifier
+    runtime_version: Annotated[str, Field(min_length=1, max_length=64)]
+    network_access: Literal[False]
+    max_duration_seconds: Annotated[int, Field(ge=1, le=300)]
+
+
 class CapsuleSummary(ContractModel):
     """Normalized capsule metadata used by investigations."""
 
@@ -96,7 +113,13 @@ class CapsuleSummary(ContractModel):
     title: Annotated[str, Field(min_length=1, max_length=160)]
     observed_summary: Annotated[str, Field(min_length=1, max_length=2_000)]
     signature_id: Identifier
+    signature_matcher_count: Annotated[int, Field(ge=1, le=32)]
+    known_good_summary: Annotated[str, Field(min_length=1, max_length=1_000)]
+    environment: Annotated[tuple[EnvironmentComparison, ...], Field(min_length=1, max_length=32)]
     evidence: tuple[EvidenceReference, ...]
+    exclusions: Annotated[tuple[str, ...], Field(min_length=1, max_length=32)]
+    execution_boundary: ExecutionBoundary
+    missing_evidence: tuple[Annotated[str, Field(min_length=1, max_length=320)], ...] = ()
 
 
 class Hypothesis(ContractModel):

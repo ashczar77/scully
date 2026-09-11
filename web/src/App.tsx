@@ -24,7 +24,22 @@ type CapsuleSummary = {
   title: string;
   observed_summary: string;
   signature_id: string;
+  signature_matcher_count: number;
+  known_good_summary: string;
+  environment: Array<{
+    name: string;
+    incident_value: string;
+    known_good_value: string | null;
+  }>;
   evidence: EvidenceReference[];
+  exclusions: string[];
+  execution_boundary: {
+    runtime: string;
+    runtime_version: string;
+    network_access: false;
+    max_duration_seconds: number;
+  };
+  missing_evidence: string[];
 };
 
 type Hypothesis = {
@@ -113,6 +128,8 @@ export function App() {
   const [executionError, setExecutionError] = useState<string | null>(null);
   const [liveEvents, setLiveEvents] = useState<string[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
+  const rejectionRef = useRef<HTMLDivElement>(null);
+  const overviewHeadingRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -138,6 +155,14 @@ export function App() {
     void checkHealth();
     return () => controller.abort();
   }, []);
+
+  useEffect(() => {
+    if (rejection) rejectionRef.current?.focus();
+  }, [rejection]);
+
+  useEffect(() => {
+    if (capsule) overviewHeadingRef.current?.focus();
+  }, [capsule]);
 
   async function submitCapsule(url: string, request?: RequestInit) {
     setImportState("importing");
@@ -258,8 +283,13 @@ export function App() {
     }
   }
 
+  const currentStep = investigation ? 3 : capsule ? 2 : 1;
+
   return (
-    <div className="app-shell">
+    <div className="app-frame">
+      <a className="skip-link" href="#main-content">
+        Skip to investigation
+      </a>
       <header className="topbar">
         <a className="brand" href="/" aria-label="Scully home">
           <span className="brand-mark" aria-hidden="true">
@@ -275,74 +305,136 @@ export function App() {
         </div>
       </header>
 
-      <main>
-        <section className="hero" aria-labelledby="hero-title">
-          <div>
-            <p className="eyebrow">Incident reproduction workspace</p>
-            <h1 id="hero-title">Turn evidence into a testable failure.</h1>
-            <p className="hero-copy">
-              Import a sanitized incident capsule, preserve its evidence lineage,
-              and prepare a deterministic investigation without production access.
-            </p>
-          </div>
-          <div className="import-actions">
-            <button
-              className="primary-action"
-              type="button"
-              disabled={importState === "importing" || connection !== "ready"}
-              onClick={() =>
-                void submitCapsule(
-                  "/api/capsules/import?seed=proxy-identity-collapse",
-                )
-              }
-            >
-              {importState === "importing" ? "Checking capsule" : "Load seed capsule"}
-              <span aria-hidden="true">→</span>
-            </button>
-            <button
-              className="secondary-action"
-              type="button"
-              disabled={importState === "importing" || connection !== "ready"}
-              onClick={() => fileInput.current?.click()}
-            >
-              Import ZIP
-            </button>
-            <input
-              ref={fileInput}
-              className="visually-hidden"
-              type="file"
-              accept=".zip,application/zip"
-              aria-label="Select capsule ZIP"
-              onChange={(event) => {
-                const file = event.currentTarget.files?.[0];
-                if (file) void importFile(file);
-                event.currentTarget.value = "";
-              }}
-            />
-          </div>
-        </section>
-
-        <section className="workspace" aria-label="Capsule import workspace">
-          <div className="workspace-heading">
-            <div>
-              <p className="section-label">
-                {capsule ? "Accepted capsule" : "Ingestion boundary"}
-              </p>
-              <h2>{capsule?.title ?? "Review before investigation"}</h2>
-            </div>
-            <span className={`phase-badge phase-${importState}`}>
-              {importState === "accepted" ? "Accepted" : "Step 2.2"}
-            </span>
-          </div>
-
-          {rejection && (
-            <div className="rejection" role="alert">
-              <strong>Capsule rejected</strong>
-              <span>{rejection}</span>
-            </div>
+      <nav className="progress-nav" aria-label="Investigation progress">
+        <ol>
+          {["Intake", "Overview", "Hypotheses", "Inspector", "Proof"].map(
+            (label, index) => {
+              const step = index + 1;
+              const state = step < currentStep ? "complete" : step === currentStep ? "current" : "pending";
+              return (
+                <li className={`progress-${state}`} key={label}>
+                  <span aria-hidden="true">{step < currentStep ? "✓" : step}</span>
+                  <strong aria-current={state === "current" ? "step" : undefined}>
+                    {label}
+                  </strong>
+                </li>
+              );
+            },
           )}
+        </ol>
+      </nav>
 
-          {capsule ? (
+      <main id="main-content" tabIndex={-1}>
+        {!capsule ? (
+          <section className="screen intake-screen" aria-labelledby="intake-title">
+            <div className="screen-heading">
+              <div>
+                <p className="screen-kicker">01 · New investigation</p>
+                <h1 id="intake-title">What evidence will enter, and is it safe?</h1>
+                <p>
+                  Validate one sanitized incident capsule before any investigation
+                  begins. Scully never asks for production credentials or access.
+                </p>
+              </div>
+              <span className="mode-label">Local mode</span>
+            </div>
+
+            <div className="intake-layout">
+              <div className="intake-panel">
+                <div className="intake-panel-copy">
+                  <span className="state-label state-observed">● Controlled input</span>
+                  <h2>Select an incident capsule</h2>
+                  <p>
+                    Use the reviewed synthetic seed or provide a ZIP that follows
+                    capsule schema 1.0.
+                  </p>
+                </div>
+                <div className="import-actions">
+                  <button
+                    className="primary-action"
+                    type="button"
+                    disabled={importState === "importing" || connection !== "ready"}
+                    onClick={() =>
+                      void submitCapsule(
+                        "/api/capsules/import?seed=proxy-identity-collapse",
+                      )
+                    }
+                  >
+                    {importState === "importing" ? "Validating capsule" : "Load safe seed"}
+                    <span aria-hidden="true">→</span>
+                  </button>
+                  <button
+                    className="secondary-action"
+                    type="button"
+                    disabled={importState === "importing" || connection !== "ready"}
+                    onClick={() => fileInput.current?.click()}
+                  >
+                    Choose ZIP
+                  </button>
+                  <input
+                    ref={fileInput}
+                    className="visually-hidden"
+                    type="file"
+                    accept=".zip,application/zip"
+                    aria-label="Select capsule ZIP"
+                    onChange={(event) => {
+                      const file = event.currentTarget.files?.[0];
+                      if (file) void importFile(file);
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                </div>
+              </div>
+
+              <aside className="boundary-panel" aria-labelledby="boundary-title">
+                <span className="boundary-symbol" aria-hidden="true">◇</span>
+                <div>
+                  <p className="section-label">Safety boundary</p>
+                  <h2 id="boundary-title">No production connection</h2>
+                  <p>
+                    Only files you select cross the boundary. Provider execution
+                    remains disabled by default.
+                  </p>
+                </div>
+              </aside>
+            </div>
+
+            {rejection && (
+              <div className="rejection" ref={rejectionRef} role="alert" tabIndex={-1}>
+                <strong>Capsule rejected</strong>
+                <span>{rejection}</span>
+                <small>No evidence was accepted. Choose a corrected capsule to continue.</small>
+              </div>
+            )}
+
+            <div className="validation-panel" aria-labelledby="validation-title">
+              <div>
+                <p className="section-label">Before acceptance</p>
+                <h2 id="validation-title">Four checks must pass</h2>
+              </div>
+              <ol>
+                <li><span>01</span><strong>Schema and file structure</strong><small>Unknown fields and unsafe paths fail closed.</small></li>
+                <li><span>02</span><strong>Credential and local-path scan</strong><small>Obvious sensitive material stops the import.</small></li>
+                <li><span>03</span><strong>Size, type, and hash integrity</strong><small>Every declared file must match exactly.</small></li>
+                <li><span>04</span><strong>Evidence lineage</strong><small>Accepted files retain provenance and redaction status.</small></li>
+              </ol>
+            </div>
+          </section>
+        ) : (
+          <section className="screen overview-screen" aria-labelledby="overview-title">
+            <div className="screen-heading">
+              <div>
+                <p className="screen-kicker">02 · Incident overview</p>
+                <h1 id="overview-title" ref={overviewHeadingRef} tabIndex={-1}>
+                  What do we know happened?
+                </h1>
+                <p>
+                  Direct observations stay separate from the hypotheses that will
+                  be tested next.
+                </p>
+              </div>
+              <span className="state-label state-observed">● Observed</span>
+            </div>
             <CapsuleDetails
               capsule={capsule}
               planningState={planningState}
@@ -350,69 +442,48 @@ export function App() {
                 void createInvestigation(capsule.capsule_id)
               }
             />
-          ) : (
-            <div className="signal-grid">
-              <article className="signal-card">
-                <span className="signal-index">01</span>
-                <p className="signal-label">Validate</p>
-                <strong>Fail closed</strong>
-                <span>Schema, paths, sizes, types, and hashes must all agree</span>
-              </article>
-              <article className="signal-card">
-                <span className="signal-index">02</span>
-                <p className="signal-label">Scan</p>
-                <strong>No credentials</strong>
-                <span>Obvious secrets and local machine paths stop the import</span>
-              </article>
-              <article className="signal-card">
-                <span className="signal-index">03</span>
-                <p className="signal-label">Normalize</p>
-                <strong>Lineage retained</strong>
-                <span>Accepted evidence keeps its hash, provenance, and redaction state</span>
-              </article>
-            </div>
-          )}
+          </section>
+        )}
 
-          {planningError && (
-            <div className="rejection" role="alert">
-              <strong>Planning stopped</strong>
-              <span>{planningError}</span>
-            </div>
-          )}
-
-          {executionError && (
-            <div className="rejection" role="alert">
-              <strong>Execution stopped</strong>
-              <span>{executionError}</span>
-            </div>
-          )}
-
-          {investigation && (
-            <InvestigationPlan
-              investigation={investigation}
-              executionState={executionState}
-              liveEvents={liveEvents}
-              onExecute={() =>
-                void executeInvestigation(investigation.investigation_id)
-              }
-            />
-          )}
-
-          <div className="foundation-status">
-            <div>
-              <p className="section-label">Runtime</p>
-              <strong>{health?.database === "ready" ? "SQLite ready" : "Waiting for API"}</strong>
-            </div>
-            <div>
-              <p className="section-label">Providers</p>
-              <strong>{health?.live_providers_enabled ? "Enabled" : "Disabled by default"}</strong>
-            </div>
-            <div>
-              <p className="section-label">Version</p>
-              <strong>{health?.version ?? "0.1.0"}</strong>
-            </div>
+        {planningError && (
+          <div className="rejection" role="alert">
+            <strong>Planning stopped</strong>
+            <span>{planningError}</span>
           </div>
-        </section>
+        )}
+
+        {executionError && (
+          <div className="rejection" role="alert">
+            <strong>Execution stopped</strong>
+            <span>{executionError}</span>
+          </div>
+        )}
+
+        {investigation && (
+          <InvestigationPlan
+            investigation={investigation}
+            executionState={executionState}
+            liveEvents={liveEvents}
+            onExecute={() =>
+              void executeInvestigation(investigation.investigation_id)
+            }
+          />
+        )}
+
+        <footer className="foundation-status" aria-label="Local product status">
+          <div>
+            <p className="section-label">Runtime</p>
+            <strong>{health?.database === "ready" ? "SQLite ready" : "Waiting for API"}</strong>
+          </div>
+          <div>
+            <p className="section-label">Providers</p>
+            <strong>{health?.live_providers_enabled ? "Enabled" : "Disabled by default"}</strong>
+          </div>
+          <div>
+            <p className="section-label">Version</p>
+            <strong>{health?.version ?? "0.1.0"}</strong>
+          </div>
+        </footer>
       </main>
     </div>
   );
@@ -434,24 +505,162 @@ function CapsuleDetails({
   planningState: PlanningState;
   onCreateInvestigation: () => void;
 }) {
+  const observedFacts = capsule.observed_summary
+    .split(/\.\s+/)
+    .map((item) => item.replace(/\.$/, "").trim())
+    .filter(Boolean);
+  const changedEnvironment = capsule.environment.filter(
+    (item) => item.incident_value !== item.known_good_value,
+  ).length;
+
   return (
-    <div className="capsule-details">
-      <div className="capsule-summary">
-        <p>{capsule.observed_summary}</p>
-        <dl>
+    <div className="overview-layout">
+      <section className="incident-card" aria-labelledby="incident-title">
+        <div className="incident-card-heading">
           <div>
-            <dt>Schema</dt>
-            <dd>{capsule.schema_version}</dd>
+            <span className="state-label state-observed">● Observed incident</span>
+            <h2 id="incident-title">{capsule.title}</h2>
           </div>
+          <code>{capsule.capsule_id}</code>
+        </div>
+        <p className="incident-summary">{capsule.observed_summary}</p>
+        <dl className="incident-metrics">
           <div>
-            <dt>Signature</dt>
-            <dd>{capsule.signature_id}</dd>
-          </div>
-          <div>
-            <dt>Evidence</dt>
+            <dt>Accepted evidence</dt>
             <dd>{capsule.evidence.length} files</dd>
           </div>
+          <div>
+            <dt>Environment deltas</dt>
+            <dd>{changedEnvironment}</dd>
+          </div>
+          <div>
+            <dt>Execution boundary</dt>
+            <dd>{capsule.execution_boundary.max_duration_seconds}s, offline</dd>
+          </div>
         </dl>
+      </section>
+
+      <section className="signature-card" aria-labelledby="signature-title">
+        <div className="signature-icon" aria-hidden="true">⌁</div>
+        <div>
+          <p className="section-label">Failure signature</p>
+          <h2 id="signature-title">{capsule.signature_id}</h2>
+          <p>
+            {capsule.signature_matcher_count} deterministic matchers must agree
+            before a branch can be marked reproduced.
+          </p>
+        </div>
+      </section>
+
+      <section className="overview-panel observed-sequence" aria-labelledby="sequence-title">
+        <div className="panel-heading">
+          <div>
+            <p className="section-label">Observed sequence</p>
+            <h2 id="sequence-title">Incident facts</h2>
+          </div>
+          <span>{observedFacts.length} facts</span>
+        </div>
+        <ol>
+          {observedFacts.map((fact, index) => (
+            <li key={fact}>
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              <p>{fact}</p>
+            </li>
+          ))}
+        </ol>
+        <div className="known-good">
+          <span className="state-label state-observed">● Known-good comparison</span>
+          <p>{capsule.known_good_summary}</p>
+        </div>
+      </section>
+
+      <section className="overview-panel environment-panel" aria-labelledby="environment-title">
+        <div className="panel-heading">
+          <div>
+            <p className="section-label">Environment comparison</p>
+            <h2 id="environment-title">What changed?</h2>
+          </div>
+          <span>{changedEnvironment} delta</span>
+        </div>
+        <div className="table-scroll" tabIndex={0} aria-label="Scrollable environment comparison">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Setting</th>
+                <th scope="col">Incident</th>
+                <th scope="col">Known good</th>
+              </tr>
+            </thead>
+            <tbody>
+              {capsule.environment.map((item) => {
+                const changed = item.incident_value !== item.known_good_value;
+                return (
+                  <tr className={changed ? "environment-changed" : ""} key={item.name}>
+                    <th scope="row">{formatVariant(item.name)}</th>
+                    <td>{item.incident_value}</td>
+                    <td>{item.known_good_value ?? "Not supplied"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="overview-panel manifest-panel" aria-labelledby="manifest-title">
+        <div className="panel-heading">
+          <div>
+            <p className="section-label">Manifest review</p>
+            <h2 id="manifest-title">Included evidence</h2>
+          </div>
+          <span>Schema {capsule.schema_version}</span>
+        </div>
+        <div className="evidence-list" aria-label="Accepted evidence">
+          {capsule.evidence.map((evidence) => (
+            <article className="evidence-row" key={evidence.evidence_id}>
+              <span className="evidence-status" aria-hidden="true">✓</span>
+              <div>
+                <strong>{evidence.evidence_id}</strong>
+                <span>{evidence.provenance}</span>
+                <code>{evidence.relative_path}</code>
+              </div>
+              <div className="evidence-meta">
+                <span>{formatBytes(evidence.byte_size)}</span>
+                <span>{evidence.redaction_status}</span>
+              </div>
+            </article>
+          ))}
+        </div>
+        <div className="exclusion-list">
+          <h3>Explicitly excluded</h3>
+          <ul>
+            {capsule.exclusions.map((exclusion) => (
+              <li key={exclusion}><span aria-hidden="true">×</span>{exclusion}</li>
+            ))}
+          </ul>
+        </div>
+      </section>
+
+      <aside className="readiness-panel" aria-labelledby="readiness-title">
+        <div>
+          <span className="readiness-symbol" aria-hidden="true">✓</span>
+          <p className="section-label">Safety review passed</p>
+          <h2 id="readiness-title">Ready to investigate</h2>
+          <p>
+            Schema, credential scan, file integrity, and evidence lineage passed.
+            Network access is disabled.
+          </p>
+        </div>
+        <div className={`missing-evidence ${capsule.missing_evidence.length ? "has-gaps" : ""}`}>
+          <strong>Missing evidence</strong>
+          {capsule.missing_evidence.length ? (
+            <ul>
+              {capsule.missing_evidence.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+          ) : (
+            <span>No required comparison gaps detected.</span>
+          )}
+        </div>
         <button
           className="primary-action planning-action"
           type="button"
@@ -459,28 +668,13 @@ function CapsuleDetails({
           onClick={onCreateInvestigation}
         >
           {planningState === "planning"
-            ? "Planning investigation"
+            ? "Creating investigation"
             : planningState === "ready"
-              ? "Plan ready"
+              ? "Investigation ready"
               : "Create investigation"}
           <span aria-hidden="true">→</span>
         </button>
-      </div>
-      <div className="evidence-list" aria-label="Accepted evidence">
-        {capsule.evidence.map((evidence) => (
-          <article className="evidence-row" key={evidence.evidence_id}>
-            <span className="evidence-status" aria-hidden="true">✓</span>
-            <div>
-              <strong>{evidence.evidence_id}</strong>
-              <span>{evidence.provenance}</span>
-            </div>
-            <div className="evidence-meta">
-              <span>{formatBytes(evidence.byte_size)}</span>
-              <span>{evidence.redaction_status}</span>
-            </div>
-          </article>
-        ))}
-      </div>
+      </aside>
     </div>
   );
 }
