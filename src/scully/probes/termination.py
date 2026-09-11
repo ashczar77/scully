@@ -25,12 +25,13 @@ from scully.providers.termination import (
     REQUIRED_SANDBOX_OPERATIONS,
     TerminationAdapter,
     TerminationClient,
+    TerminationContractError,
     TerminationOutcome,
     TerminationTracker,
 )
 
 
-PROBE_ID = "g1.3-termination-002"
+PROBE_ID = "g1.3-termination-003"
 PROBE_IMAGE = "tag:python:3.12-slim"
 REQUIRED_BUDGET_TIMEOUT_SECONDS = 15
 CLIENT_PACKAGE = "contree-client"
@@ -249,7 +250,7 @@ def _failure_record(
         sandbox_operations=tracker.operation_ids_confirmed,
         retries=0,
     )
-    return {
+    record: dict[str, object] = {
         "probe_id": PROBE_ID,
         "provider": Provider.SANDBOX.value,
         "status": status.value,
@@ -263,6 +264,9 @@ def _failure_record(
         "provider_reported_cost_available": False,
         "measurement": _measurement_record(measurement),
     }
+    if isinstance(error, TerminationContractError):
+        record["failure_reason"] = error.reason.value
+    return record
 
 
 def _measurement_record(measurement: Measurement) -> dict[str, str | int | float]:

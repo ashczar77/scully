@@ -554,6 +554,16 @@ corrected timeout and cancellation paths reach their expected remote terminal
 states, remain evaluator-inconclusive, retain no result image, and leave no
 unexplained active operation. Approval authorizes the Gate G1.3 review.
 
+If G1.3f records a terminal-response contract mismatch that cannot be safely
+distinguished, approval may instead authorize offline diagnostic correction
+only.
+
+**Checkpoint G1.3g, termination diagnostic review:** Approve only if every
+remaining post-terminal mismatch has a bounded, non-sensitive reason code,
+fixture coverage proves each mapping, prior results remain immutable, and all
+execution limits remain unchanged. Approval authorizes only one execution of
+the distinctly identified corrected probe.
+
 **Gate G1.3, execution integrity review:** Approve only if experiment isolation
 is demonstrated and only deterministic code, not the language model, can mark
 a reproduction as successful.

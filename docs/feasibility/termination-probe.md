@@ -1,6 +1,6 @@
 # Step 1.3 Termination Probe
 
-**Status:** Corrective live result in review at checkpoint G1.3f
+**Status:** Diagnostic correction in review at checkpoint G1.3g
 
 **Review date:** 2026-09-08
 
@@ -264,9 +264,40 @@ No additional provider call is needed to improve this diagnosis. A future
 offline correction can assign non-sensitive reason codes to these individual
 checks and test their redaction before any new execution proposal.
 
+## G1.3f decision
+
+Checkpoint G1.3f accepted the failed corrective result but did not approve Gate
+G1.3. It authorized offline addition of bounded, non-sensitive failure reason
+codes and fixture coverage. It did not authorize another live attempt.
+
+## Offline diagnostic correction
+
+The runner now assigns any future attempt the distinct ID
+`g1.3-termination-003`. Results 001 and 002 remain unchanged. A specialized
+contract error carries exactly one of four fixed reason codes:
+
+| Reason code | Meaning |
+|---|---|
+| `cancellation_status_mismatch` | The terminal status was not `CANCELLED` |
+| `cancellation_disposable_invalid` | Disposable metadata was false or malformed |
+| `cancellation_result_image_present` | A result image was reported |
+| `cancellation_duration_invalid` | Duration did not satisfy the numeric contract |
+
+Only the fixed reason value may enter a failure record. Exception messages,
+provider content, operation identifiers, credentials, project identifiers,
+and command output remain excluded.
+
+Fixture tests exercise all four mappings. A runner test proves the bounded
+reason reaches the redacted result while both operation identifiers remain
+absent. The full suite contains 109 passing tests.
+
+No request, operation, status read, or cancellation call was made while
+implementing this correction. The image, commands, timeouts, two-operation
+cap, status-read cap, cancellation and cleanup caps, transport behavior,
+evidence boundary, and no-retry rule remain unchanged.
+
 ## Decision requested
 
-Accept the failed corrective result at checkpoint G1.3f. Do not approve Gate
-G1.3 yet. Authorize offline addition of bounded, non-sensitive failure reason
-codes and fixture coverage, without provider use. Any further live attempt
-would require a separate reviewed proposal.
+Approve exactly one execution of `g1.3-termination-003` within the unchanged
+reviewed bounds. Approval does not authorize a retry or any other provider
+use. Submit the redacted result for review before deciding Gate G1.3.

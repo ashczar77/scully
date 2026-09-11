@@ -6,6 +6,7 @@ import re
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from enum import Enum
 from math import isfinite
 from types import EllipsisType
 from typing import Protocol
@@ -31,6 +32,27 @@ TERMINAL_STATUSES = frozenset({"SUCCESS", "FAILED", "CANCELLED"})
 IMAGE_TAG_PATTERN = re.compile(
     r"tag:[A-Za-z0-9][A-Za-z0-9_-]*(?:[:/.][A-Za-z0-9_-]+)*"
 )
+
+
+class TerminationFailureReason(str, Enum):
+    """Bounded reason codes that contain no provider-supplied content."""
+
+    CANCELLATION_STATUS_MISMATCH = "cancellation_status_mismatch"
+    CANCELLATION_DISPOSABLE_INVALID = "cancellation_disposable_invalid"
+    CANCELLATION_RESULT_IMAGE_PRESENT = "cancellation_result_image_present"
+    CANCELLATION_DURATION_INVALID = "cancellation_duration_invalid"
+
+
+class TerminationContractError(ProviderContractError):
+    """Contract failure with a safe, bounded diagnostic reason."""
+
+    def __init__(
+        self,
+        reason: TerminationFailureReason,
+        message: str,
+    ) -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 class TerminationClient(Protocol):
@@ -322,17 +344,41 @@ class TerminationAdapter:
     ) -> TerminationObservation:
         status = _operation_status(response, operation_id)
         if status != "CANCELLED":
-            raise ProviderContractError("Cancellation was not confirmed remotely")
-        disposable, no_result_image = _retention_facts(response)
-        if not disposable or not no_result_image:
-            raise ProviderContractError("Cancellation path retained Sandbox state")
+            raise TerminationContractError(
+                TerminationFailureReason.CANCELLATION_STATUS_MISMATCH,
+                "Cancellation was not confirmed remotely",
+            )
+        try:
+            disposable, no_result_image = _retention_facts(response)
+        except ProviderContractError as error:
+            raise TerminationContractError(
+                TerminationFailureReason.CANCELLATION_DISPOSABLE_INVALID,
+                "Cancellation disposable state was invalid",
+            ) from error
+        if not disposable:
+            raise TerminationContractError(
+                TerminationFailureReason.CANCELLATION_DISPOSABLE_INVALID,
+                "Cancellation operation was not disposable",
+            )
+        if not no_result_image:
+            raise TerminationContractError(
+                TerminationFailureReason.CANCELLATION_RESULT_IMAGE_PRESENT,
+                "Cancellation operation retained a result image",
+            )
+        try:
+            duration = _duration(response)
+        except ProviderContractError as error:
+            raise TerminationContractError(
+                TerminationFailureReason.CANCELLATION_DURATION_INVALID,
+                "Cancellation duration was invalid",
+            ) from error
         return TerminationObservation(
             path="cancellation",
             terminal_status=status,
             timed_out=False,
             disposable=disposable,
             no_result_image=no_result_image,
-            duration_seconds=_duration(response),
+            duration_seconds=duration,
             status_reads=status_reads,
             cancel_requests=cancel_requests,
             cleanup_cancel_requests=cleanup_requests,

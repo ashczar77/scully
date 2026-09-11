@@ -13,8 +13,8 @@ customer data.
 
 - Phase: Sponsor-stack and architecture feasibility
 - Completed gates: G0.1 through G1.2 and checkpoints G1.2a through G1.3f
-- Active step: Offline termination diagnostic correction
-- Next checkpoint: Checkpoint G1.3g, diagnostic correction review
+- Active step: Checkpoint G1.3g, termination diagnostic review
+- Next checkpoint: Gate G1.3g decision
 - Implementation: Bounded termination failure reason codes and fixtures
 - Out-of-pocket cost limit: Zero
 - Submission deadline: 30 October 2026
@@ -63,6 +63,7 @@ customer data.
 | [Checkpoint G1.3d review](gates/G1.3d-termination-result-review.md) | Failure evidence, root cause, and corrective preparation decision | Approved |
 | [Checkpoint G1.3e review](gates/G1.3e-corrective-termination-review.md) | Corrected image-source contract, accounting, and execution decision | Approved |
 | [Checkpoint G1.3f review](gates/G1.3f-corrective-termination-result-review.md) | Evidence and decision record for the corrected termination attempt | Approved for offline correction |
+| [Checkpoint G1.3g review](gates/G1.3g-termination-diagnostic-review.md) | Bounded reason codes, fixtures, and execution decision | In review |
 | [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol retained for later direct validation | Deferred evidence |
 | [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for later direct validation | Ready for future use |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |
@@ -71,10 +72,10 @@ The Apache License 2.0 in the repository root remains the project license.
 
 ## Immediate decision
 
-The corrected attempt ran exactly once. Its timeout path passed, but its
-cancellation path returned a terminal response that failed a post-terminal
-contract check. The redacted result is safe but does not distinguish status,
-retention, and duration mismatches. Checkpoint G1.3f authorizes an offline
-diagnostic correction only. No further live attempt is authorized.
+Four bounded reason codes now distinguish cancellation status, disposable
+metadata, result-image retention, and duration mismatches without retaining
+provider content. All 109 tests pass. Checkpoint G1.3g asks whether to
+authorize `g1.3-termination-003` exactly once. No live attempt is authorized
+yet.
 
 New documentation should support the active hackathon project.

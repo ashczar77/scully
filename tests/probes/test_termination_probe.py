@@ -44,7 +44,7 @@ class TerminationProbeTests(unittest.TestCase):
         encoded = json.dumps(record)
 
         self.assertEqual(record["status"], "succeeded")
-        self.assertEqual(record["probe_id"], "g1.3-termination-002")
+        self.assertEqual(record["probe_id"], "g1.3-termination-003")
         self.assertEqual(record["base_image"], "tag:python:3.12-slim")
         self.assertEqual(record["timeout"]["evaluation_verdict"], "inconclusive")
         self.assertEqual(
@@ -106,6 +106,42 @@ class TerminationProbeTests(unittest.TestCase):
         self.assertEqual(record["operation_ids_confirmed"], 0)
         self.assertEqual(record["measurement"]["sandbox_operations"], 0)
         self.assertNotIn("sensitive provider message", json.dumps(record))
+        self.assertTrue(client.closed)
+
+    def test_cancellation_reason_is_bounded_and_redacted(self) -> None:
+        terminal = response("sensitive-cancel-id", "FAILED")
+        terminal.error = "sensitive provider message"
+        client = FakeClient(
+            {
+                "sensitive-timeout-id": [
+                    response(
+                        "sensitive-timeout-id",
+                        "SUCCESS",
+                        timed_out=True,
+                    )
+                ],
+                "sensitive-cancel-id": [
+                    response("sensitive-cancel-id", "EXECUTING"),
+                    terminal,
+                ],
+            }
+        )
+        record = run_probe(
+            live_settings(),
+            client_factory=lambda settings: client,
+            version_lookup=exact_version,
+            clock=clock(),
+        )
+        encoded = json.dumps(record)
+
+        self.assertEqual(record["status"], "failed")
+        self.assertEqual(
+            record["failure_reason"],
+            "cancellation_status_mismatch",
+        )
+        self.assertNotIn("sensitive-timeout-id", encoded)
+        self.assertNotIn("sensitive-cancel-id", encoded)
+        self.assertNotIn("sensitive provider message", encoded)
         self.assertTrue(client.closed)
 
     def test_preflight_is_closed_for_wrong_package_or_budget(self) -> None:

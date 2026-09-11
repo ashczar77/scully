@@ -12,6 +12,8 @@ from scully.providers.termination import (
     REQUIRED_SANDBOX_OPERATIONS,
     TIMEOUT_COMMAND_SECONDS,
     TerminationAdapter,
+    TerminationContractError,
+    TerminationFailureReason,
     TerminationTracker,
     require_image_source,
 )
@@ -22,9 +24,9 @@ def response(
     status: str,
     *,
     timed_out: bool = False,
-    disposable: bool = True,
+    disposable: object = True,
     result_image_uuid: str | None = None,
-    duration: float = 0.1,
+    duration: object = 0.1,
 ) -> object:
     return SimpleNamespace(
         uuid=operation_id,
@@ -309,35 +311,59 @@ class TerminationAdapterTests(unittest.TestCase):
                 self.assertEqual(len(client.spawn_calls), 1)
                 self.assertEqual(client.cancel_calls, [])
 
-    def test_rejects_retained_cancellation_state(self) -> None:
-        client = FakeClient(
-            {
-                "timeout-id": [
-                    response("timeout-id", "SUCCESS", timed_out=True)
-                ],
-                "cancel-id": [
-                    response("cancel-id", "EXECUTING"),
-                    response(
-                        "cancel-id",
-                        "CANCELLED",
-                        result_image_uuid="unexpected-image-id",
-                    ),
-                ],
-            }
+    def test_cancellation_failures_have_bounded_reason_codes(self) -> None:
+        cases = (
+            (
+                response("cancel-id", "SUCCESS"),
+                TerminationFailureReason.CANCELLATION_STATUS_MISMATCH,
+            ),
+            (
+                response("cancel-id", "CANCELLED", disposable=False),
+                TerminationFailureReason.CANCELLATION_DISPOSABLE_INVALID,
+            ),
+            (
+                response("cancel-id", "CANCELLED", disposable="invalid"),
+                TerminationFailureReason.CANCELLATION_DISPOSABLE_INVALID,
+            ),
+            (
+                response(
+                    "cancel-id",
+                    "CANCELLED",
+                    result_image_uuid="unexpected-image-id",
+                ),
+                TerminationFailureReason.CANCELLATION_RESULT_IMAGE_PRESENT,
+            ),
+            (
+                response("cancel-id", "CANCELLED", duration="invalid"),
+                TerminationFailureReason.CANCELLATION_DURATION_INVALID,
+            ),
         )
-        fake_time = FakeTime()
+        self.assertEqual(len(TerminationFailureReason), 4)
+        for terminal, expected_reason in cases:
+            with self.subTest(expected_reason=expected_reason):
+                client = FakeClient(
+                    {
+                        "timeout-id": [
+                            response("timeout-id", "SUCCESS", timed_out=True)
+                        ],
+                        "cancel-id": [
+                            response("cancel-id", "EXECUTING"),
+                            terminal,
+                        ],
+                    }
+                )
+                fake_time = FakeTime()
 
-        with self.assertRaisesRegex(
-            ProviderContractError,
-            "retained Sandbox state",
-        ):
-            TerminationAdapter(
-                client,
-                live_settings(),
-                monotonic=fake_time.monotonic,
-                sleeper=fake_time.sleep,
-            ).run(base_image="tag:python:3.12-slim")
-        self.assertEqual(client.cancel_calls, ["cancel-id"])
+                with self.assertRaises(TerminationContractError) as raised:
+                    TerminationAdapter(
+                        client,
+                        live_settings(),
+                        monotonic=fake_time.monotonic,
+                        sleeper=fake_time.sleep,
+                    ).run(base_image="tag:python:3.12-slim")
+
+                self.assertEqual(raised.exception.reason, expected_reason)
+                self.assertEqual(client.cancel_calls, ["cancel-id"])
 
     def test_requires_exact_reviewed_operation_budget(self) -> None:
         client = successful_client()
