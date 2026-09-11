@@ -109,3 +109,11 @@ showing observed responses `200,429` against the `200,200` expectation.
 6. Previously recorded provider repeatability, Tavily deduplication and overage
    status, Sandbox retention and cost-unit questions, timeout evidence, and
    cancellation debt remain open.
+
+## Step 3.5 comprehension corrections
+
+The proxy comprehension pass replaced symbol-only signature equality with the
+visible phrase `Exact match`. The runnable-test panel now states `Expected
+failure, not a setup error` beside the exit-status contract. These changes make
+the two most consequential proof interpretations available without requiring
+the viewer to infer them from an icon or surrounding prose.

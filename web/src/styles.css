@@ -858,6 +858,12 @@ a:focus-visible,
   font-size: 0.66rem;
 }
 
+.progress-nav li > small {
+  color: #78867e;
+  font-size: 0.6rem;
+  white-space: nowrap;
+}
+
 .progress-nav .progress-current,
 .progress-nav .progress-complete {
   color: var(--text-primary);
@@ -1349,6 +1355,30 @@ a:focus-visible,
   min-height: 70vh;
 }
 
+.map-reading-key {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 30px;
+}
+
+.map-reading-key > div {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding: 14px 16px;
+  border: 1px solid rgba(238, 243, 239, 0.1);
+  border-radius: 10px;
+  background: rgba(12, 25, 20, 0.62);
+}
+
+.map-reading-key p {
+  margin: 0;
+  color: #8d9a93;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
 .checkpoint-card {
   position: relative;
   z-index: 1;
@@ -1669,6 +1699,22 @@ a:focus-visible,
 
 .proof-partial {
   border-color: rgba(240, 165, 98, 0.3);
+}
+
+.winner-cause,
+.winner-reason {
+  display: block;
+  margin-top: 9px;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.winner-cause {
+  color: #dce6e0;
+}
+
+.winner-reason {
+  color: #94a198;
 }
 
 .back-action {
@@ -2089,16 +2135,33 @@ a:focus-visible,
 }
 
 .signature-link {
+  display: flex;
+  width: 76px;
+  align-self: center;
+  gap: 7px;
+  align-items: center;
+  color: var(--state-reproduced);
+  flex-direction: column;
+  font-weight: 800;
+  text-align: center;
+}
+
+.signature-link > span {
   display: grid;
   width: 36px;
   height: 36px;
-  align-self: center;
   place-items: center;
   border: 1px solid rgba(119, 242, 191, 0.4);
   border-radius: 999px;
   color: #07100d;
   background: var(--state-reproduced);
-  font-weight: 900;
+}
+
+.signature-link small {
+  color: var(--state-reproduced);
+  font-size: 0.6rem;
+  line-height: 1.2;
+  text-transform: uppercase;
 }
 
 .proof-grid {
@@ -2242,6 +2305,17 @@ a:focus-visible,
   line-height: 1.6;
 }
 
+.expected-failure {
+  display: inline-flex;
+  margin-bottom: 20px;
+  padding: 7px 9px;
+  border: 1px solid rgba(240, 165, 98, 0.3);
+  border-radius: 7px;
+  color: var(--state-inconclusive);
+  background: rgba(240, 165, 98, 0.07);
+  font-size: 0.7rem;
+}
+
 .test-contract .panel-heading > code {
   padding: 8px 10px;
   border-radius: 7px;
@@ -2320,7 +2394,8 @@ a:focus-visible,
   }
 
   .intake-layout,
-  .validation-panel {
+  .validation-panel,
+  .map-reading-key {
     grid-template-columns: 1fr;
   }
 
@@ -2433,6 +2508,11 @@ a:focus-visible,
     padding: 22px;
   }
 
+  .map-reading-key > div {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .screen-heading h1 {
     font-size: clamp(2.4rem, 13vw, 4rem);
   }
@@ -2471,7 +2551,7 @@ a:focus-visible,
   }
 
   .signature-link {
-    transform: rotate(90deg);
+    justify-self: center;
   }
 
   .branch-plan,

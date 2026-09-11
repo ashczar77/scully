@@ -123,3 +123,14 @@ persistence, and packaging.
    Phase 3 validation pass.
 6. Previously recorded provider limitations, retention questions, and explicit
    cancellation debt remain open.
+
+## Step 3.5 comprehension corrections
+
+The proxy comprehension pass found that unfamiliar viewers could reverse the
+meaning of a reproduced branch and a cause-eliminating branch. The map now
+defines both outcomes before the checkpoint. Its completed summary names the
+winning experiment, the supported cause, and the one-variable reason together.
+
+The progress rail also labels the Inspector as an optional audit and records it
+complete only after a visit. This keeps the focused branch review available
+without implying that the happy path requires it.

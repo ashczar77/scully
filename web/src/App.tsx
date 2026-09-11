@@ -134,6 +134,7 @@ export function App() {
   const [liveEvents, setLiveEvents] = useState<LiveEvent[]>([]);
   const [selectedExperimentId, setSelectedExperimentId] = useState<string | null>(null);
   const [proofVisible, setProofVisible] = useState(false);
+  const [inspectorVisited, setInspectorVisited] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const rejectionRef = useRef<HTMLDivElement>(null);
   const overviewHeadingRef = useRef<HTMLHeadingElement>(null);
@@ -208,6 +209,7 @@ export function App() {
       setLiveEvents([]);
       setSelectedExperimentId(null);
       setProofVisible(false);
+      setInspectorVisited(false);
     } catch (error) {
       setCapsule(null);
       setRejection(error instanceof Error ? error.message : "Capsule was rejected");
@@ -244,6 +246,7 @@ export function App() {
       setLiveEvents([]);
       setSelectedExperimentId(null);
       setProofVisible(false);
+      setInspectorVisited(false);
     } catch (error) {
       setInvestigation(null);
       setPlanningError(
@@ -318,15 +321,46 @@ export function App() {
     }
   }
 
-  const currentStep = proofVisible
-    ? 5
-    : selectedExperimentId
-      ? 4
-      : investigation
-        ? 3
-        : capsule
-          ? 2
-          : 1;
+  const progressItems = [
+    {
+      label: "Intake",
+      state: capsule ? "complete" : "current",
+      optional: false,
+    },
+    {
+      label: "Overview",
+      state: investigation ? "complete" : capsule ? "current" : "pending",
+      optional: false,
+    },
+    {
+      label: "Hypotheses",
+      state: selectedExperimentId || proofVisible
+        ? "complete"
+        : investigation
+          ? "current"
+          : "pending",
+      optional: false,
+    },
+    {
+      label: "Inspector",
+      state: selectedExperimentId
+        ? "current"
+        : inspectorVisited
+          ? "complete"
+          : "pending",
+      optional: true,
+    },
+    {
+      label: "Proof",
+      state: proofVisible ? "current" : "pending",
+      optional: false,
+    },
+  ] as const;
+
+  function inspectExperiment(experimentId: string) {
+    setInspectorVisited(true);
+    setSelectedExperimentId(experimentId);
+  }
 
   return (
     <div className="app-frame">
@@ -350,16 +384,16 @@ export function App() {
 
       <nav className="progress-nav" aria-label="Investigation progress">
         <ol>
-          {["Intake", "Overview", "Hypotheses", "Inspector", "Proof"].map(
-            (label, index) => {
+          {progressItems.map(
+            ({ label, state, optional }, index) => {
               const step = index + 1;
-              const state = step < currentStep ? "complete" : step === currentStep ? "current" : "pending";
               return (
                 <li className={`progress-${state}`} key={label}>
-                  <span aria-hidden="true">{step < currentStep ? "✓" : step}</span>
+                  <span aria-hidden="true">{state === "complete" ? "✓" : step}</span>
                   <strong aria-current={state === "current" ? "step" : undefined}>
                     {label}
                   </strong>
+                  {optional && <small>Optional audit</small>}
                 </li>
               );
             },
@@ -486,7 +520,7 @@ export function App() {
             executionError={executionError}
             liveEvents={liveEvents}
             headingRef={hypothesisHeadingRef}
-            onInspect={setSelectedExperimentId}
+            onInspect={inspectExperiment}
             onOpenProof={() => setProofVisible(true)}
             onExecute={() =>
               void executeInvestigation(investigation.investigation_id)
@@ -764,6 +798,9 @@ function HypothesisMap({
   const supportedHypothesis = investigation.hypotheses.find(
     (item) => item.hypothesis_id === execution?.supported_hypothesis_id,
   );
+  const supportedExperiment = investigation.experiments.find(
+    (item) => item.hypothesis_id === execution?.supported_hypothesis_id,
+  );
   const latestEvent = liveEvents.at(-1);
 
   return (
@@ -784,6 +821,17 @@ function HypothesisMap({
           <code>{investigation.investigation_id}</code>
         </div>
       </div>
+
+      <aside className="map-reading-key" aria-label="How to read branch results">
+        <div>
+          <span className="state-label state-eliminated"><span aria-hidden="true">×</span> Failure eliminated</span>
+          <p>The intervention removed the signature, so its causal hypothesis is supported.</p>
+        </div>
+        <div>
+          <span className="state-label state-reproduced"><span aria-hidden="true">✓</span> Reproduced</span>
+          <p>The signature remained, so that intervention hypothesis is eliminated.</p>
+        </div>
+      </aside>
 
       <div className="checkpoint-card">
         <span className="checkpoint-symbol" aria-hidden="true">◎</span>
@@ -893,8 +941,12 @@ function HypothesisMap({
             <span aria-hidden="true">✓</span>
             <div>
               <p className="section-label">Reproduction proof ready</p>
-              <h2 id="result-title">Supported cause</h2>
-              <p>{supportedHypothesis?.title}</p>
+              <h2 id="result-title">Winning experiment</h2>
+              <p>{supportedExperiment ? formatVariant(supportedExperiment.variant) : "Unavailable"}</p>
+              <strong className="winner-cause">Supports: {supportedHypothesis?.title}</strong>
+              <span className="winner-reason">
+                Changing only trust proxy from false to loopback removed HTTP 429.
+              </span>
               <small>
                 {execution.isolation_verified ? "Isolation verified" : "Isolation unverified"}
                 {" · "}{execution.operation_count} operations{" · "}
@@ -1052,7 +1104,10 @@ function ReproductionProof({
           <p>{capsule.observed_summary}</p>
           <small>{capsule.signature_matcher_count} declared matchers from accepted evidence</small>
         </article>
-        <span className="signature-link" aria-hidden="true">=</span>
+        <span className="signature-link">
+          <span aria-hidden="true">=</span>
+          <small>Exact match</small>
+        </span>
         <article>
           <p className="section-label">Reproduced signature</p>
           <h2>{execution.signature_id}</h2>
@@ -1109,6 +1164,7 @@ function ReproductionProof({
             The test expects two independent client buckets. The reproduced
             incident violates that expectation and exits with status 1.
           </p>
+          <strong className="expected-failure">Expected failure, not a setup error</strong>
           <dl>
             <div><dt>Expected</dt><dd>200,200</dd></div>
             <div><dt>Observed</dt><dd>200,429</dd></div>

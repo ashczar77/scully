@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
@@ -38,6 +38,7 @@ describe("App", () => {
     expect(screen.getByText("Disabled by default")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "No production connection" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Skip to investigation" })).toBeTruthy();
+    expect(screen.getByText("Optional audit")).toBeTruthy();
   });
 
   it("loads the seed capsule and displays accepted evidence lineage", async () => {
@@ -126,6 +127,16 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "Limiter key is global" })).toBeTruthy();
     expect(screen.getByText("Common clean checkpoint")).toBeTruthy();
     expect(screen.getAllByText("Hypothesis")).toHaveLength(3);
+    expect(
+      screen.getByText(
+        "The intervention removed the signature, so its causal hypothesis is supported.",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        "The signature remained, so that intervention hypothesis is eliminated.",
+      ),
+    ).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Run from one checkpoint" })).toBeTruthy();
     expect(screen.getByText(/Proof unavailable until execution completes/)).toBeTruthy();
     expect(fetchMock).toHaveBeenLastCalledWith("/api/investigations", {
@@ -158,11 +169,21 @@ describe("App", () => {
     expect(
       await screen.findByText("Failure did not reproduce; completed sibling retained."),
     ).toBeTruthy();
-    expect(await screen.findByText("Supported cause")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Winning experiment" })).toBeTruthy();
+    expect(screen.getAllByText("trust loopback")).toHaveLength(2);
+    expect(
+      screen.getByText(
+        "Changing only trust proxy from false to loopback removed HTTP 429.",
+      ),
+    ).toBeTruthy();
     expect(screen.getByText(/Isolation verified/)).toBeTruthy();
     expect(screen.getByText("Supports hypothesis")).toBeTruthy();
     expect(screen.getAllByText("Hypothesis eliminated")).toHaveLength(2);
-    expect(screen.getAllByText("Reproduced")).toHaveLength(2);
+    expect(
+      within(screen.getByRole("list", { name: "Causal alternatives" })).getAllByText(
+        "Reproduced",
+      ),
+    ).toHaveLength(2);
     expect(fetchMock).toHaveBeenLastCalledWith(
       "/api/investigations/inv-test/execute/stream",
       { method: "POST" },
@@ -182,14 +203,19 @@ describe("App", () => {
     });
     expect(document.activeElement).toBe(proofHeading);
     expect(screen.getByText("Proof").getAttribute("aria-current")).toBe("step");
+    expect(screen.getByText("Inspector").closest("li")?.className).toBe(
+      "progress-complete",
+    );
     expect(screen.getByText("Original signature")).toBeTruthy();
     expect(screen.getByText("Reproduced signature")).toBeTruthy();
+    expect(screen.getByText("Exact match")).toBeTruthy();
     expect(
       screen.getAllByRole("heading", { name: "proxy-identity-collapse-v1" }),
     ).toHaveLength(2);
     expect(screen.getByRole("heading", { name: "One environment change" })).toBeTruthy();
     expect(screen.getByText("Input unchanged")).toBeTruthy();
     expect(screen.getAllByText("npm test")).toHaveLength(2);
+    expect(screen.getByText("Expected failure, not a setup error")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Run from a clean directory" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Limitations and uncertainty" })).toBeTruthy();
     const download = screen.getByRole("link", { name: /download.*reproduction/i });
@@ -229,6 +255,9 @@ describe("App", () => {
     ).toBeTruthy();
     expect(screen.queryByRole("button", { name: /review reproduction proof/i })).toBeNull();
     expect(screen.queryByRole("link", { name: /download.*reproduction/i })).toBeNull();
+    expect(screen.getByText("Inspector").closest("li")?.className).toBe(
+      "progress-pending",
+    );
   });
 
   it("keeps a bounded error visible and offers a retry", async () => {
