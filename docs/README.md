@@ -11,12 +11,12 @@ customer data.
 
 ## Current status
 
-- Phase: Thin vertical proof
-- Completed gates: G0.1 through G2.4 and checkpoints G1.2a through G1.3f
-- Active step: Step 2.5, first end-to-end proof
-- Next checkpoint: Gate G2.5, Phase 2 exit review
-- Implementation: Working offline path from safe capsule import through three
-  isolated branches and deterministic cause selection
+- Phase: Trust UI and visual system
+- Completed gates: G0.1 through G2.5 and checkpoints G1.2a through G1.3f
+- Active step: Step 3.1, interaction and visual foundations
+- Next checkpoint: Gate G3.1, experience foundation review
+- Implementation: Working offline path from safe capsule import through
+  progressive branch execution and a runnable reproduction download
 - Out-of-pocket cost limit: Zero
 - Submission deadline: 30 October 2026
 
@@ -77,7 +77,7 @@ customer data.
 | [Branched execution](product/branched-execution.md) | Local branch isolation, signature evaluation, limits, event replay, UI, and Sandbox boundary | Implemented for G2.4 review |
 | [Gate G2.4 review](gates/G2.4-execution-review.md) | Evidence and decision record for deterministic branch execution | Approved |
 | [First end-to-end proof](product/end-to-end-proof.md) | Progressive execution, runnable reproduction, clean setup, measurements, and limitations | Implemented for G2.5 review |
-| [Gate G2.5 review](gates/G2.5-phase-2-exit-review.md) | Evidence and decision record for the Phase 2 vertical proof | In review |
+| [Gate G2.5 review](gates/G2.5-phase-2-exit-review.md) | Evidence and decision record for the Phase 2 vertical proof | Approved |
 | [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol retained for later direct validation | Deferred evidence |
 | [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for later direct validation | Ready for future use |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |
@@ -96,6 +96,7 @@ execution and deterministic signature matching only. Live Sandbox use remains
 separately gated.
 
 Gate G2.4 approved the local execution path and authorized Step 2.5 only.
-Progressive event delivery is a required part of Step 2.5.
+Gate G2.5 approved the complete vertical proof and authorized Step 3.1 only.
+Live provider product paths remain disabled and separately gated.
 
 New documentation should support the active hackathon project.
