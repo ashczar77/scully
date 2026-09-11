@@ -12,10 +12,10 @@ customer data.
 ## Current status
 
 - Phase: Sponsor-stack and architecture feasibility
-- Completed gates: G0.1 through G1.2 and checkpoints G1.2a through G1.3f
-- Active step: Checkpoint G1.3g, termination diagnostic review
-- Next checkpoint: Gate G1.3g decision
-- Implementation: Bounded termination failure reason codes and fixtures
+- Completed gates: G0.1 through G1.3 and checkpoints G1.2a through G1.3f
+- Active step: Step 1.4, implementation architecture
+- Next checkpoint: Gate G1.4, Phase 1 exit review
+- Implementation: Product architecture and first vertical-slice backlog
 - Out-of-pocket cost limit: Zero
 - Submission deadline: 30 October 2026
 
@@ -63,7 +63,8 @@ customer data.
 | [Checkpoint G1.3d review](gates/G1.3d-termination-result-review.md) | Failure evidence, root cause, and corrective preparation decision | Approved |
 | [Checkpoint G1.3e review](gates/G1.3e-corrective-termination-review.md) | Corrected image-source contract, accounting, and execution decision | Approved |
 | [Checkpoint G1.3f review](gates/G1.3f-corrective-termination-result-review.md) | Evidence and decision record for the corrected termination attempt | Approved for offline correction |
-| [Checkpoint G1.3g review](gates/G1.3g-termination-diagnostic-review.md) | Bounded reason codes, fixtures, and execution decision | In review |
+| [Checkpoint G1.3g review](gates/G1.3g-termination-diagnostic-review.md) | Bounded reason codes, fixtures, and execution decision | Deferred, no execution approved |
+| [Gate G1.3 review](gates/G1.3-execution-integrity-review.md) | Accepted evidence, cancellation limitation, and timeout fallback | Accepted with limitation |
 | [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol retained for later direct validation | Deferred evidence |
 | [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for later direct validation | Ready for future use |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |
@@ -72,10 +73,9 @@ The Apache License 2.0 in the repository root remains the project license.
 
 ## Immediate decision
 
-Four bounded reason codes now distinguish cancellation status, disposable
-metadata, result-image retention, and duration mismatches without retaining
-provider content. All 109 tests pass. Checkpoint G1.3g asks whether to
-authorize `g1.3-termination-003` exactly once. No live attempt is authorized
-yet.
+No further termination probe is approved. Explicit cancellation is tracked as
+technical debt, with provider command timeout plus local deadlines as the
+initial fallback. The active work is now implementation architecture and the
+working product foundation.
 
 New documentation should support the active hackathon project.

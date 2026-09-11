@@ -564,9 +564,15 @@ fixture coverage proves each mapping, prior results remain immutable, and all
 execution limits remain unchanged. Approval authorizes only one execution of
 the distinctly identified corrected probe.
 
+Project-owner decision on 11 September 2026: defer G1.3g execution. Do not run
+another termination probe. Track explicit cancellation as technical debt and
+use provider command timeout plus local deadlines as the initial fallback.
+
 **Gate G1.3, execution integrity review:** Approve only if experiment isolation
 is demonstrated and only deterministic code, not the language model, can mark
-a reproduction as successful.
+a reproduction as successful. The gate may be accepted with explicit
+cancellation as a documented limitation when provider timeout and local
+deadlines form the approved initial fallback.
 
 #### Step 1.4: Establish the implementation architecture
 

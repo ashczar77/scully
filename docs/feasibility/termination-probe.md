@@ -1,6 +1,6 @@
 # Step 1.3 Termination Probe
 
-**Status:** Diagnostic correction in review at checkpoint G1.3g
+**Status:** Deferred technical debt, no further probe approved
 
 **Review date:** 2026-09-08
 
@@ -296,8 +296,16 @@ implementing this correction. The image, commands, timeouts, two-operation
 cap, status-read cap, cancellation and cleanup caps, transport behavior,
 evidence boundary, and no-retry rule remain unchanged.
 
-## Decision requested
+## G1.3g proposal
 
 Approve exactly one execution of `g1.3-termination-003` within the unchanged
 reviewed bounds. Approval does not authorize a retry or any other provider
 use. Submit the redacted result for review before deciding Gate G1.3.
+
+## Final project decision
+
+The project owner declined another termination probe on 11 September 2026.
+Explicit cancellation remains known technical debt. The working product will
+use the proven provider command timeout plus a separate local deadline as its
+initial fallback. The runner and bounded reason codes remain available for a
+future reviewed investigation, but `g1.3-termination-003` is not authorized.
