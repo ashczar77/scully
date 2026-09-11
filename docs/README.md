@@ -13,8 +13,8 @@ customer data.
 
 - Phase: Trust UI and visual system
 - Completed gates: G0.1 through G2.5 and checkpoints G1.2a through G1.3f
-- Active step: Step 3.2, intake and incident overview
-- Next checkpoint: Gate G3.2, intake trust review
+- Active step: Step 3.3, hypothesis map and experiment inspector
+- Next checkpoint: Gate G3.3, investigation legibility review
 - Implementation: Working offline path from safe capsule import through
   progressive branch execution and a runnable reproduction download
 - Out-of-pocket cost limit: Zero
@@ -81,7 +81,7 @@ customer data.
 | [Interaction and visual foundations](product/experience-foundations.md) | Five-screen architecture, state system, flows, tokens, responsiveness, and accessibility | Defined for G3.1 review |
 | [Gate G3.1 review](gates/G3.1-experience-foundation-review.md) | Evidence and decision record for the trust-experience foundation | Approved |
 | [Capsule intake and incident overview](product/intake-overview.md) | Intake safety, manifest review, observed facts, environment delta, responsiveness, and keyboard behavior | Implemented for G3.2 review |
-| [Gate G3.2 review](gates/G3.2-intake-trust-review.md) | Evidence and decision record for intake and incident orientation | In review |
+| [Gate G3.2 review](gates/G3.2-intake-trust-review.md) | Evidence and decision record for intake and incident orientation | Approved |
 | [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol retained for later direct validation | Deferred evidence |
 | [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for later direct validation | Ready for future use |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |
@@ -102,6 +102,7 @@ separately gated.
 Gate G2.4 approved the local execution path and authorized Step 2.5 only.
 Gate G2.5 approved the complete vertical proof and authorized Step 3.1 only.
 Gate G3.1 approved the experience foundation and authorized Step 3.2 only.
+Gate G3.2 approved intake and incident orientation and authorized Step 3.3 only.
 Live provider product paths remain disabled and separately gated.
 
 New documentation should support the active hackathon project.
