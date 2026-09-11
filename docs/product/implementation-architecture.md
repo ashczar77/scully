@@ -1,6 +1,6 @@
 # Scully Implementation Architecture
 
-**Status:** In review at Gate G1.4
+**Status:** Approved at Gate G1.4
 
 **Review date:** 2026-09-11
 
