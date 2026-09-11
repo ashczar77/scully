@@ -132,9 +132,8 @@ Tests cover:
    timeline entries.
 2. The five-step progress list reflects application state but is not yet backed
    by reloadable routes. Route persistence remains later implementation work.
-3. The reproduction proof retains its Phase 2 presentation until Step 3.4.
-4. Exact viewport and assistive-technology testing remains part of the later
+3. Exact viewport and assistive-technology testing remains part of the later
    Phase 3 validation pass.
-5. Artifact retention, live provider repeatability, Tavily deduplication,
+4. Artifact retention, live provider repeatability, Tavily deduplication,
    Sandbox cost-unit clarification, and explicit cancellation remain unchanged
    technical debt.

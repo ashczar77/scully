@@ -84,6 +84,8 @@ customer data.
 | [Gate G3.2 review](gates/G3.2-intake-trust-review.md) | Evidence and decision record for intake and incident orientation | Approved |
 | [Hypothesis map and experiment inspector](product/hypothesis-map-inspector.md) | Branch states, progressive results, comparison, diffs, output boundary, matcher results, and evidence lineage | Implemented for G3.3 review |
 | [Gate G3.3 review](gates/G3.3-investigation-legibility-review.md) | Evidence and decision record for investigation legibility | Approved |
+| [Reproduction proof experience](product/reproduction-proof-experience.md) | Signature comparison, causal delta, evidence chain, runnable test, export, limitations, and proof states | Implemented for G3.4 review |
+| [Gate G3.4 review](gates/G3.4-proof-accessibility-review.md) | Evidence and decision record for the reproduction proof and accessibility | In review |
 | [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol retained for later direct validation | Deferred evidence |
 | [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for later direct validation | Ready for future use |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |

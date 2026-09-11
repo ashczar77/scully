@@ -29,7 +29,10 @@ shows:
   reproduced, or inconclusive;
 - the experiment result separately from the hypothesis disposition;
 - a persisted event timeline and the latest live event;
-- the supported cause and existing reproduction download after completion.
+- a proof-ready state and explicit transition when exactly one cause is
+  supported;
+- an inconclusive final state with no proof or download action when no single
+  cause is supported.
 
 During execution, each server-sent branch event updates only its named branch.
 A completed sibling remains visibly terminal while a later branch is testing.
@@ -102,7 +105,7 @@ The frontend flow verifies planning, all three alternatives, checkpoint
 identity, evidence links, pre-run inspection, focus movement, unchanged inputs,
 the environment delta, delayed progressive branch completion, terminal states,
 post-run output inspection, matcher results, elimination reasons, return to the
-map, and the existing reproduction download.
+map, and the transition into the reproduction proof.
 
 The existing backend suite continues to verify strict planning, allowlisted
 execution, event ordering, sibling isolation, deterministic evaluation,

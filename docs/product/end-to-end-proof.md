@@ -25,8 +25,12 @@ provider client, make a provider request, or use credits.
    each server-sent event before the terminal investigation payload arrives.
 4. The executor runs the three branches from isolated copies of one checkpoint.
 5. The evaluator identifies disabled proxy trust as the only supported cause.
-6. The result view exposes a **Download reproduction** link.
-7. The ZIP contains a pinned Express project, the observed failure, a known-good
+6. The completed map exposes **Review reproduction proof** only when one cause
+   is supported.
+7. The proof connects the original and reproduced signatures to the causal
+   delta, evidence lineage, test contract, and archive manifest.
+8. The proof exposes the primary **Download reproduction** action.
+9. The ZIP contains a pinned Express project, the observed failure, a known-good
    comparison, an intentionally failing regression test, and a verification
    command.
 
@@ -87,7 +91,8 @@ Open `http://127.0.0.1:8000` and select these actions in order:
 1. **Load safe seed**
 2. **Create investigation**
 3. **Run 3 branches**
-4. **Download current reproduction**
+4. **Review reproduction proof**
+5. **Download reproduction**
 
 Extract the downloaded ZIP, enter its
 `scully-proxy-identity-collapse` directory, and run:

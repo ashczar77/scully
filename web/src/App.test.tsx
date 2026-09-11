@@ -127,6 +127,7 @@ describe("App", () => {
     expect(screen.getByText("Common clean checkpoint")).toBeTruthy();
     expect(screen.getAllByText("Hypothesis")).toHaveLength(3);
     expect(screen.getByRole("heading", { name: "Run from one checkpoint" })).toBeTruthy();
+    expect(screen.getByText(/Proof unavailable until execution completes/)).toBeTruthy();
     expect(fetchMock).toHaveBeenLastCalledWith("/api/investigations", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -152,6 +153,7 @@ describe("App", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /run 3 branches/i }));
 
+    expect(await screen.findByRole("heading", { name: "Building proof evidence" })).toBeTruthy();
     expect(await screen.findByText("execution started")).toBeTruthy();
     expect(
       await screen.findByText("Failure did not reproduce; completed sibling retained."),
@@ -174,10 +176,84 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "Selected and nearest alternative" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /return to hypothesis map/i }));
 
+    fireEvent.click(screen.getByRole("button", { name: /review reproduction proof/i }));
+    const proofHeading = await screen.findByRole("heading", {
+      name: "What can another engineer run and verify?",
+    });
+    expect(document.activeElement).toBe(proofHeading);
+    expect(screen.getByText("Proof").getAttribute("aria-current")).toBe("step");
+    expect(screen.getByText("Original signature")).toBeTruthy();
+    expect(screen.getByText("Reproduced signature")).toBeTruthy();
+    expect(
+      screen.getAllByRole("heading", { name: "proxy-identity-collapse-v1" }),
+    ).toHaveLength(2);
+    expect(screen.getByRole("heading", { name: "One environment change" })).toBeTruthy();
+    expect(screen.getByText("Input unchanged")).toBeTruthy();
+    expect(screen.getAllByText("npm test")).toHaveLength(2);
+    expect(screen.getByRole("heading", { name: "Run from a clean directory" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Limitations and uncertainty" })).toBeTruthy();
     const download = screen.getByRole("link", { name: /download.*reproduction/i });
     expect(download.getAttribute("href")).toBe(
       "/api/investigations/inv-test/reproduction.zip",
     );
+    expect(download.getAttribute("download")).toBe(
+      "scully-proxy-identity-collapse.zip",
+    );
+    fireEvent.click(screen.getByRole("button", { name: /return to hypothesis map/i }));
+    expect(document.activeElement).toBe(
+      screen.getByRole("heading", {
+        name: "What is suspected, tested, eliminated, or reproduced?",
+      }),
+    );
+  });
+
+  it("ends at the hypothesis map when no single cause is supported", async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock
+      .mockResolvedValueOnce(response(healthPayload()))
+      .mockResolvedValueOnce(response(capsulePayload()))
+      .mockResolvedValueOnce(response(investigationPayload()))
+      .mockResolvedValueOnce(
+        streamResponse([["complete", inconclusiveInvestigationPayload()]]),
+      );
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /load safe seed/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /create investigation/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /run 3 branches/i }));
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Proof unavailable: no single supported cause",
+      }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /review reproduction proof/i })).toBeNull();
+    expect(screen.queryByRole("link", { name: /download.*reproduction/i })).toBeNull();
+  });
+
+  it("keeps a bounded error visible and offers a retry", async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock
+      .mockResolvedValueOnce(response(healthPayload()))
+      .mockResolvedValueOnce(response(capsulePayload()))
+      .mockResolvedValueOnce(response(investigationPayload()))
+      .mockResolvedValueOnce(
+        streamResponse([["error", { message: "Fixture execution failed" }]]),
+      );
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /load safe seed/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /create investigation/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /run 3 branches/i }));
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Proof unavailable after execution stopped",
+      }),
+    ).toBeTruthy();
+    expect(screen.getAllByText("Fixture execution failed").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: /retry 3 branches/i })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /download.*reproduction/i })).toBeNull();
   });
 });
 
@@ -331,6 +407,25 @@ function executedInvestigationPayload() {
         duration_ms: 1,
       })),
       limitations: [],
+    },
+  };
+}
+
+function inconclusiveInvestigationPayload() {
+  const executed = executedInvestigationPayload();
+  return {
+    ...executed,
+    execution: {
+      ...executed.execution,
+      supported_hypothesis_id: null,
+      outcomes: executed.execution.outcomes.map((outcome) => ({
+        ...outcome,
+        status: "inconclusive",
+        verdict: "inconclusive",
+        hypothesis_disposition: "inconclusive",
+        elimination_reasons: ["insufficient_evidence"],
+      })),
+      limitations: ["Execution did not support exactly one causal alternative"],
     },
   };
 }

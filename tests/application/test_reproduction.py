@@ -68,12 +68,29 @@ class ReproductionPackagerTests(unittest.TestCase):
             metadata = json.loads(
                 archive.read(f"{PACKAGE_ROOT}/reproduction.json")
             )
+            readme = archive.read(f"{PACKAGE_ROOT}/README.md").decode("utf-8")
+            package = json.loads(
+                archive.read(f"{PACKAGE_ROOT}/package.json")
+            )
         self.assertEqual(metadata["investigation_id"], "inv-package")
+        self.assertEqual(metadata["capsule_id"], "proxy-identity-collapse-v1")
+        self.assertEqual(metadata["signature_id"], "proxy-identity-collapse-v1")
         self.assertEqual(
             metadata["supported_cause"],
             "Proxy trust boundary is disabled",
         )
         self.assertTrue(metadata["execution"]["isolation_verified"])
+        self.assertIn("200,429", readme)
+        self.assertIn("200,200", readme)
+        self.assertIn("expected to fail", readme)
+        self.assertEqual(
+            package["scripts"]["test"],
+            "node --test test/proxy-identity-collapse.test.mjs",
+        )
+        self.assertEqual(
+            package["scripts"]["verify"],
+            "node scripts/verify-reproduction.mjs",
+        )
         self.assertNotIn("node_modules", "\n".join(names))
 
     def test_planned_investigation_cannot_be_packaged(self) -> None:

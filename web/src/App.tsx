@@ -133,11 +133,13 @@ export function App() {
   const [executionError, setExecutionError] = useState<string | null>(null);
   const [liveEvents, setLiveEvents] = useState<LiveEvent[]>([]);
   const [selectedExperimentId, setSelectedExperimentId] = useState<string | null>(null);
+  const [proofVisible, setProofVisible] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const rejectionRef = useRef<HTMLDivElement>(null);
   const overviewHeadingRef = useRef<HTMLHeadingElement>(null);
   const hypothesisHeadingRef = useRef<HTMLHeadingElement>(null);
   const inspectorHeadingRef = useRef<HTMLHeadingElement>(null);
+  const proofHeadingRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -173,14 +175,18 @@ export function App() {
   }, [capsule]);
 
   useEffect(() => {
-    if (investigation && !selectedExperimentId) {
+    if (investigation && !selectedExperimentId && !proofVisible) {
       hypothesisHeadingRef.current?.focus();
     }
-  }, [investigation?.investigation_id, selectedExperimentId]);
+  }, [investigation?.investigation_id, proofVisible, selectedExperimentId]);
 
   useEffect(() => {
     if (selectedExperimentId) inspectorHeadingRef.current?.focus();
   }, [selectedExperimentId]);
+
+  useEffect(() => {
+    if (proofVisible) proofHeadingRef.current?.focus();
+  }, [proofVisible]);
 
   async function submitCapsule(url: string, request?: RequestInit) {
     setImportState("importing");
@@ -201,6 +207,7 @@ export function App() {
       setExecutionError(null);
       setLiveEvents([]);
       setSelectedExperimentId(null);
+      setProofVisible(false);
     } catch (error) {
       setCapsule(null);
       setRejection(error instanceof Error ? error.message : "Capsule was rejected");
@@ -236,6 +243,7 @@ export function App() {
       setExecutionState("idle");
       setLiveEvents([]);
       setSelectedExperimentId(null);
+      setProofVisible(false);
     } catch (error) {
       setInvestigation(null);
       setPlanningError(
@@ -249,6 +257,7 @@ export function App() {
     setExecutionState("running");
     setExecutionError(null);
     setLiveEvents([]);
+    setProofVisible(false);
     try {
       const response = await fetch(
         `/api/investigations/${investigationId}/execute/stream`,
@@ -309,7 +318,15 @@ export function App() {
     }
   }
 
-  const currentStep = selectedExperimentId ? 4 : investigation ? 3 : capsule ? 2 : 1;
+  const currentStep = proofVisible
+    ? 5
+    : selectedExperimentId
+      ? 4
+      : investigation
+        ? 3
+        : capsule
+          ? 2
+          : 1;
 
   return (
     <div className="app-frame">
@@ -446,6 +463,13 @@ export function App() {
               </ol>
             </div>
           </section>
+        ) : investigation && proofVisible && investigation.execution ? (
+          <ReproductionProof
+            capsule={capsule}
+            investigation={investigation}
+            headingRef={proofHeadingRef}
+            onReturn={() => setProofVisible(false)}
+          />
         ) : selectedExperimentId && investigation ? (
           <ExperimentInspector
             capsule={capsule}
@@ -459,9 +483,11 @@ export function App() {
           <HypothesisMap
             investigation={investigation}
             executionState={executionState}
+            executionError={executionError}
             liveEvents={liveEvents}
             headingRef={hypothesisHeadingRef}
             onInspect={setSelectedExperimentId}
+            onOpenProof={() => setProofVisible(true)}
             onExecute={() =>
               void executeInvestigation(investigation.investigation_id)
             }
@@ -717,16 +743,20 @@ function CapsuleDetails({
 function HypothesisMap({
   investigation,
   executionState,
+  executionError,
   liveEvents,
   headingRef,
   onInspect,
+  onOpenProof,
   onExecute,
 }: {
   investigation: InvestigationDetail;
   executionState: ExecutionState;
+  executionError: string | null;
   liveEvents: LiveEvent[];
   headingRef: RefObject<HTMLHeadingElement | null>;
   onInspect: (experimentId: string) => void;
+  onOpenProof: () => void;
   onExecute: () => void;
 }) {
   const execution = investigation.execution;
@@ -858,26 +888,38 @@ function HypothesisMap({
           </ol>
         </section>
 
-        {execution ? (
+        {execution?.supported_hypothesis_id ? (
           <aside className="execution-result map-result" aria-labelledby="result-title">
             <span aria-hidden="true">✓</span>
             <div>
-              <p className="section-label">Deterministic evaluation</p>
+              <p className="section-label">Reproduction proof ready</p>
               <h2 id="result-title">Supported cause</h2>
-              <p>{supportedHypothesis?.title ?? "No single supported cause"}</p>
+              <p>{supportedHypothesis?.title}</p>
               <small>
                 {execution.isolation_verified ? "Isolation verified" : "Isolation unverified"}
                 {" · "}{execution.operation_count} operations{" · "}
                 {execution.retry_count} retries
               </small>
-              <a
-                className="reproduction-download"
-                href={`/api/investigations/${investigation.investigation_id}/reproduction.zip`}
-                download="scully-proxy-identity-collapse.zip"
+              <button
+                className="primary-action proof-action"
+                type="button"
+                onClick={onOpenProof}
               >
-                Download current reproduction
-                <span aria-hidden="true">↓</span>
-              </a>
+                Review reproduction proof
+                <span aria-hidden="true">→</span>
+              </button>
+            </div>
+          </aside>
+        ) : execution ? (
+          <aside className="execution-lock map-execution proof-partial" aria-labelledby="partial-proof-title">
+            <span aria-hidden="true">?</span>
+            <div>
+              <p className="section-label">Partial result</p>
+              <h2 id="partial-proof-title">Proof unavailable: no single supported cause</h2>
+              <p>
+                The branch map remains the final result until one causal
+                alternative has inspectable support.
+              </p>
             </div>
           </aside>
         ) : (
@@ -885,15 +927,31 @@ function HypothesisMap({
             <span aria-hidden="true">◇</span>
             <div>
               <p className="section-label">Bounded execution</p>
-              <h2 id="execution-title">Run from one checkpoint</h2>
-              <p>Execute all three allowlisted branches with no network access.</p>
+              <h2 id="execution-title">
+                {executionState === "running"
+                  ? "Building proof evidence"
+                  : executionState === "rejected"
+                    ? "Proof unavailable after execution stopped"
+                    : "Run from one checkpoint"}
+              </h2>
+              <p>
+                {executionState === "rejected"
+                  ? executionError ?? "The bounded execution did not complete."
+                  : executionState === "running"
+                    ? "Completed sibling results remain visible while the bounded run continues."
+                    : "Proof unavailable until execution completes. Run all three allowlisted branches with no network access."}
+              </p>
               <button
                 className="primary-action execution-action"
                 type="button"
                 disabled={executionState === "running"}
                 onClick={onExecute}
               >
-                {executionState === "running" ? "Running branches" : "Run 3 branches"}
+                {executionState === "running"
+                  ? "Running branches"
+                  : executionState === "rejected"
+                    ? "Retry 3 branches"
+                    : "Run 3 branches"}
                 <span aria-hidden="true">→</span>
               </button>
               {executionState === "running" && latestEvent && (
@@ -908,6 +966,201 @@ function HypothesisMap({
             </div>
           </aside>
         )}
+      </div>
+    </section>
+  );
+}
+
+function ReproductionProof({
+  capsule,
+  investigation,
+  headingRef,
+  onReturn,
+}: {
+  capsule: CapsuleSummary;
+  investigation: InvestigationDetail;
+  headingRef: RefObject<HTMLHeadingElement | null>;
+  onReturn: () => void;
+}) {
+  const execution = investigation.execution;
+  if (!execution?.supported_hypothesis_id) return null;
+
+  const supportedHypothesis = investigation.hypotheses.find(
+    (item) => item.hypothesis_id === execution.supported_hypothesis_id,
+  );
+  const supportedExperiment = investigation.experiments.find(
+    (item) => item.hypothesis_id === execution.supported_hypothesis_id,
+  );
+  const supportedOutcome = execution.outcomes.find(
+    (item) => item.hypothesis_id === execution.supported_hypothesis_id,
+  );
+  const reproducedOutcome = execution.outcomes.find(
+    (item) => item.status === "reproduced",
+  );
+  if (!supportedHypothesis || !supportedExperiment || !supportedOutcome) return null;
+
+  const linkedEvidence = supportedHypothesis.evidence_ids
+    .map((evidenceId) => capsule.evidence.find((item) => item.evidence_id === evidenceId))
+    .filter((item): item is EvidenceReference => Boolean(item));
+  const limitations = [
+    ...execution.limitations,
+    "The archive covers one synthetic Express proxy-trust incident.",
+    "Raw standard output is not retained; digests and matcher results are the audit boundary.",
+    "Provider execution and remote cancellation are outside this local proof.",
+  ];
+
+  return (
+    <section className="screen proof-screen" aria-labelledby="proof-title">
+      <button className="back-action" type="button" onClick={onReturn}>
+        <span aria-hidden="true">←</span> Return to hypothesis map
+      </button>
+
+      <div className="screen-heading proof-heading">
+        <div>
+          <p className="screen-kicker">05 · Reproduction proof</p>
+          <h1 id="proof-title" ref={headingRef} tabIndex={-1}>
+            What can another engineer run and verify?
+          </h1>
+          <p>
+            One supported cause is connected to the accepted observation,
+            bounded experiment, deterministic result, and runnable archive.
+          </p>
+        </div>
+        <span className="state-label state-reproduced">
+          <span aria-hidden="true">✓</span> Proof ready
+        </span>
+      </div>
+
+      <section className="proof-verdict" aria-labelledby="proof-cause-title">
+        <div>
+          <p className="section-label">Supported cause</p>
+          <h2 id="proof-cause-title">{supportedHypothesis.title}</h2>
+          <p>{supportedHypothesis.mechanism}</p>
+        </div>
+        <dl>
+          <div><dt>Experiment</dt><dd>{supportedExperiment.experiment_id}</dd></div>
+          <div><dt>Disposition</dt><dd>{formatDisposition(supportedOutcome.hypothesis_disposition)}</dd></div>
+          <div><dt>Evaluator</dt><dd>Version {execution.evaluator_version}</dd></div>
+          <div><dt>Isolation</dt><dd>{execution.isolation_verified ? "Verified" : "Unverified"}</dd></div>
+        </dl>
+      </section>
+
+      <div className="signature-comparison" aria-label="Original and reproduced failure signatures">
+        <article>
+          <p className="section-label">Original signature</p>
+          <h2>{capsule.signature_id}</h2>
+          <p>{capsule.observed_summary}</p>
+          <small>{capsule.signature_matcher_count} declared matchers from accepted evidence</small>
+        </article>
+        <span className="signature-link" aria-hidden="true">=</span>
+        <article>
+          <p className="section-label">Reproduced signature</p>
+          <h2>{execution.signature_id}</h2>
+          <p>Two synthetic clients resolve to one limiter identity and return 200,429.</p>
+          <small>
+            {reproducedOutcome?.matcher_results.filter((item) => item.required && item.passed).length ?? 0}
+            {" "}required matcher results passed
+          </small>
+        </article>
+      </div>
+
+      <div className="proof-grid">
+        <section className="proof-panel proof-lineage" aria-labelledby="proof-lineage-title">
+          <div className="panel-heading compact-heading">
+            <div><p className="section-label">Evidence lineage</p><h2 id="proof-lineage-title">Observation to runnable result</h2></div>
+            <span>{linkedEvidence.length} accepted sources</span>
+          </div>
+          <ol>
+            <li><span>01</span><div><strong>Accepted observation</strong><p>{linkedEvidence.map((item) => item.evidence_id).join(", ")}</p></div></li>
+            <li><span>02</span><div><strong>Failure signature</strong><p>{capsule.signature_id}</p></div></li>
+            <li><span>03</span><div><strong>Supported hypothesis</strong><p>{supportedHypothesis.hypothesis_id}</p></div></li>
+            <li><span>04</span><div><strong>Cause-eliminating experiment</strong><p>{formatVariant(supportedExperiment.variant)}</p></div></li>
+            <li><span>05</span><div><strong>Deterministic result</strong><p><code>{supportedOutcome.observation_digest}</code></p></div></li>
+            <li><span>06</span><div><strong>Runnable archive</strong><p>Manifest binds this investigation, signature, cause, and file hashes.</p></div></li>
+          </ol>
+        </section>
+
+        <section className="proof-panel minimal-delta" aria-labelledby="minimal-delta-title">
+          <div className="panel-heading compact-heading">
+            <div><p className="section-label">Smallest known delta</p><h2 id="minimal-delta-title">One environment change</h2></div>
+            <span>Input unchanged</span>
+          </div>
+          <div className="unchanged-input">
+            <strong>Accepted input</strong>
+            <p>Same evidence IDs, two-request sequence, and clean checkpoint.</p>
+          </div>
+          <div className="proof-diff">
+            {Object.entries(supportedExperiment.parameters).map(([name, value]) => (
+              <div key={name}>
+                <strong>{formatVariant(name)}</strong>
+                <span><small>Incident</small>{baselineValue(name)}</span>
+                <span><small>Cause eliminated</small>{String(value)}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="proof-panel test-contract" aria-labelledby="test-contract-title">
+          <div className="panel-heading compact-heading">
+            <div><p className="section-label">Runnable regression test</p><h2 id="test-contract-title">An intentionally failing witness</h2></div>
+            <code>npm test</code>
+          </div>
+          <p>
+            The test expects two independent client buckets. The reproduced
+            incident violates that expectation and exits with status 1.
+          </p>
+          <dl>
+            <div><dt>Expected</dt><dd>200,200</dd></div>
+            <div><dt>Observed</dt><dd>200,429</dd></div>
+            <div><dt>Expected exit</dt><dd>1</dd></div>
+          </dl>
+        </section>
+
+        <section className="proof-panel reproduction-steps" aria-labelledby="reproduction-steps-title">
+          <div className="panel-heading compact-heading">
+            <div><p className="section-label">Reproduction steps</p><h2 id="reproduction-steps-title">Run from a clean directory</h2></div>
+          </div>
+          <ol>
+            <li><span>1</span><code>unzip scully-proxy-identity-collapse.zip</code></li>
+            <li><span>2</span><code>cd scully-proxy-identity-collapse</code></li>
+            <li><span>3</span><code>npm ci</code></li>
+            <li><span>4</span><code>npm run verify</code></li>
+            <li><span>5</span><code>npm test</code></li>
+          </ol>
+        </section>
+
+        <section className="proof-panel export-panel" aria-labelledby="export-title">
+          <div>
+            <p className="section-label">Export</p>
+            <h2 id="export-title">Download the reproduction</h2>
+            <p>
+              The deterministic ZIP includes setup instructions, locked
+              dependencies, source, a verifier, the failing test, and a hashed manifest.
+            </p>
+          </div>
+          <dl>
+            <div><dt>Execution</dt><dd>{execution.execution_source}</dd></div>
+            <div><dt>Operations</dt><dd>{execution.operation_count}</dd></div>
+            <div><dt>Retries</dt><dd>{execution.retry_count}</dd></div>
+          </dl>
+          <a
+            className="primary-action proof-download"
+            href={`/api/investigations/${investigation.investigation_id}/reproduction.zip`}
+            download="scully-proxy-identity-collapse.zip"
+          >
+            Download reproduction
+            <span aria-hidden="true">↓</span>
+          </a>
+        </section>
+
+        <aside className="proof-panel limitations-panel" aria-labelledby="limitations-title">
+          <div className="panel-heading compact-heading">
+            <div><p className="section-label">Boundaries</p><h2 id="limitations-title">Limitations and uncertainty</h2></div>
+          </div>
+          <ul>
+            {limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}
+          </ul>
+        </aside>
       </div>
     </section>
   );
