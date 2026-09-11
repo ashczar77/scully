@@ -93,7 +93,7 @@ describe("App", () => {
     expect(document.activeElement).toBe(alert);
   });
 
-  it("creates and displays three bounded investigation alternatives", async () => {
+  it("maps and inspects three bounded investigation alternatives", async () => {
     const fetchMock = vi.mocked(fetch);
     fetchMock
       .mockResolvedValueOnce(response(healthPayload()))
@@ -103,6 +103,9 @@ describe("App", () => {
         streamResponse([
           ["execution.started", { checkpoint_id: "inv-test-checkpoint" }],
           ["experiment.started", { experiment_id: "inv-test-e1" }],
+          ["experiment.result", { experiment_id: "inv-test-e1", status: "eliminated" }],
+          ["evaluation.completed", { experiment_id: "inv-test-e1", hypothesis_disposition: "supported" }],
+          ["experiment.started", { experiment_id: "inv-test-e2" }],
           ["complete", executedInvestigationPayload()],
         ]),
       );
@@ -113,31 +116,65 @@ describe("App", () => {
       await screen.findByRole("button", { name: /create investigation/i }),
     );
 
-    expect(
-      await screen.findByRole("heading", { name: "Three causal alternatives" }),
-    ).toBeTruthy();
+    const mapHeading = await screen.findByRole("heading", {
+        name: "What is suspected, tested, eliminated, or reproduced?",
+      });
+    expect(mapHeading).toBeTruthy();
+    expect(document.activeElement).toBe(mapHeading);
     expect(screen.getByRole("heading", { name: "Proxy trust is disabled" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Forwarded chain is overwritten" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Limiter key is global" })).toBeTruthy();
-    expect(screen.getByText("Local execution ready")).toBeTruthy();
+    expect(screen.getByText("Common clean checkpoint")).toBeTruthy();
+    expect(screen.getAllByText("Hypothesis")).toHaveLength(3);
+    expect(screen.getByRole("heading", { name: "Run from one checkpoint" })).toBeTruthy();
     expect(fetchMock).toHaveBeenLastCalledWith("/api/investigations", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ capsule_id: "proxy-identity-collapse-v1" }),
     });
 
+    fireEvent.click(screen.getByRole("button", { name: /inspect branch h1/i }));
+    const inspectorHeading = await screen.findByRole("heading", {
+      name: "What exactly happened in this branch?",
+    });
+    expect(document.activeElement).toBe(inspectorHeading);
+    expect(screen.getByText("Inspector").getAttribute("aria-current")).toBe("step");
+    expect(screen.getByRole("heading", { name: "Accepted inputs unchanged" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Allowlisted branch change" })).toBeTruthy();
+    expect(screen.getByText("apply_allowlisted_variant trust-loopback")).toBeTruthy();
+    expect(screen.getByText("This branch has not run. The plan and expected diff remain inspectable.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /return to hypothesis map/i }));
+    expect(document.activeElement).toBe(
+      screen.getByRole("heading", {
+        name: "What is suspected, tested, eliminated, or reproduced?",
+      }),
+    );
+
     fireEvent.click(screen.getByRole("button", { name: /run 3 branches/i }));
 
     expect(await screen.findByText("execution started")).toBeTruthy();
+    expect(
+      await screen.findByText("Failure did not reproduce; completed sibling retained."),
+    ).toBeTruthy();
     expect(await screen.findByText("Supported cause")).toBeTruthy();
     expect(screen.getByText(/Isolation verified/)).toBeTruthy();
     expect(screen.getByText("Supports hypothesis")).toBeTruthy();
     expect(screen.getAllByText("Hypothesis eliminated")).toHaveLength(2);
+    expect(screen.getAllByText("Reproduced")).toHaveLength(2);
     expect(fetchMock).toHaveBeenLastCalledWith(
       "/api/investigations/inv-test/execute/stream",
       { method: "POST" },
     );
-    const download = screen.getByRole("link", { name: /download reproduction/i });
+
+    fireEvent.click(screen.getByRole("button", { name: /inspect branch h2/i }));
+    expect(await screen.findByRole("heading", { name: "Bounded operation result" })).toBeTruthy();
+    expect(screen.getByText("Raw stdout is not retained. The digest and deterministic matcher results are the inspectable output boundary.")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Signature matchers" })).toBeTruthy();
+    expect(screen.getByText("failure signature still reproduced")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Selected and nearest alternative" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /return to hypothesis map/i }));
+
+    const download = screen.getByRole("link", { name: /download.*reproduction/i });
     expect(download.getAttribute("href")).toBe(
       "/api/investigations/inv-test/reproduction.zip",
     );
@@ -212,6 +249,11 @@ function investigationPayload() {
     "preserve-forwarded-chain",
     "per-request-identity",
   ];
+  const parameters = [
+    { trust_proxy: "loopback" },
+    { proxy_mode: "preserve" },
+    { limiter_key: "request_ip" },
+  ];
   const hypotheses = titles.map((title, index) => ({
     schema_version: "1.0",
     hypothesis_id: `inv-test-h${index + 1}`,
@@ -238,7 +280,7 @@ function investigationPayload() {
       checkpoint_id: "inv-test-checkpoint",
       adapter: "local_fixture",
       variant: variants[index],
-      parameters: {},
+      parameters: parameters[index],
       operation_limit: 4,
       timeout_seconds: 60,
     })),
@@ -276,7 +318,14 @@ function executedInvestigationPayload() {
         verdict: index === 0 ? "not_reproduced" : "reproduced",
         hypothesis_disposition: index === 0 ? "supported" : "eliminated",
         observation_digest: "b".repeat(64),
-        matcher_results: [],
+        matcher_results: [
+          {
+            matcher_id: "response-sequence",
+            required: true,
+            passed: index !== 0,
+            reason: index === 0 ? "value_mismatch" : "matched",
+          },
+        ],
         elimination_reasons:
           index === 0 ? [] : ["failure_signature_still_reproduced"],
         duration_ms: 1,
@@ -298,16 +347,17 @@ function streamResponse(messages: [string, unknown][]) {
   let index = 0;
   const body = new ReadableStream<Uint8Array>({
     pull(controller) {
-      const [eventType, payload] = messages[index];
-      controller.enqueue(
-        encoder.encode(`event: ${eventType}\ndata: ${JSON.stringify(payload)}\n\n`),
-      );
-      index += 1;
-      if (index === messages.length) {
-        controller.close();
-        return;
-      }
-      return new Promise((resolve) => setTimeout(resolve, 25));
+      return new Promise<void>((resolve) => {
+        setTimeout(() => {
+          const [eventType, payload] = messages[index];
+          controller.enqueue(
+            encoder.encode(`event: ${eventType}\ndata: ${JSON.stringify(payload)}\n\n`),
+          );
+          index += 1;
+          if (index === messages.length) controller.close();
+          resolve();
+        }, 45);
+      });
     },
   });
   return { ok: true, body } as Response;

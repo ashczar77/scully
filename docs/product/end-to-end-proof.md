@@ -84,10 +84,10 @@ make dev-api
 
 Open `http://127.0.0.1:8000` and select these actions in order:
 
-1. **Load seed capsule**
+1. **Load safe seed**
 2. **Create investigation**
 3. **Run 3 branches**
-4. **Download reproduction**
+4. **Download current reproduction**
 
 Extract the downloaded ZIP, enter its
 `scully-proxy-identity-collapse` directory, and run:

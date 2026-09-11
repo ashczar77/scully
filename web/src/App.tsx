@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 
 type HealthResponse = {
   status: "ok" | "degraded";
@@ -69,6 +69,11 @@ type InvestigationEvent = {
   event_type: string;
 };
 
+type LiveEvent = {
+  eventType: string;
+  payload: Record<string, unknown>;
+};
+
 type ExperimentOutcome = {
   experiment_id: string;
   hypothesis_id: string;
@@ -126,10 +131,13 @@ export function App() {
   const [planningError, setPlanningError] = useState<string | null>(null);
   const [executionState, setExecutionState] = useState<ExecutionState>("idle");
   const [executionError, setExecutionError] = useState<string | null>(null);
-  const [liveEvents, setLiveEvents] = useState<string[]>([]);
+  const [liveEvents, setLiveEvents] = useState<LiveEvent[]>([]);
+  const [selectedExperimentId, setSelectedExperimentId] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const rejectionRef = useRef<HTMLDivElement>(null);
   const overviewHeadingRef = useRef<HTMLHeadingElement>(null);
+  const hypothesisHeadingRef = useRef<HTMLHeadingElement>(null);
+  const inspectorHeadingRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -164,6 +172,16 @@ export function App() {
     if (capsule) overviewHeadingRef.current?.focus();
   }, [capsule]);
 
+  useEffect(() => {
+    if (investigation && !selectedExperimentId) {
+      hypothesisHeadingRef.current?.focus();
+    }
+  }, [investigation?.investigation_id, selectedExperimentId]);
+
+  useEffect(() => {
+    if (selectedExperimentId) inspectorHeadingRef.current?.focus();
+  }, [selectedExperimentId]);
+
   async function submitCapsule(url: string, request?: RequestInit) {
     setImportState("importing");
     setRejection(null);
@@ -182,6 +200,7 @@ export function App() {
       setExecutionState("idle");
       setExecutionError(null);
       setLiveEvents([]);
+      setSelectedExperimentId(null);
     } catch (error) {
       setCapsule(null);
       setRejection(error instanceof Error ? error.message : "Capsule was rejected");
@@ -216,6 +235,7 @@ export function App() {
       setPlanningState("ready");
       setExecutionState("idle");
       setLiveEvents([]);
+      setSelectedExperimentId(null);
     } catch (error) {
       setInvestigation(null);
       setPlanningError(
@@ -264,7 +284,13 @@ export function App() {
           if (message.eventType === "complete") {
             completed = message.payload as InvestigationDetail;
           } else {
-            setLiveEvents((current) => [...current, message.eventType]);
+            setLiveEvents((current) => [
+              ...current,
+              {
+                eventType: message.eventType,
+                payload: isRecord(message.payload) ? message.payload : {},
+              },
+            ]);
           }
         }
         if (done) break;
@@ -283,7 +309,7 @@ export function App() {
     }
   }
 
-  const currentStep = investigation ? 3 : capsule ? 2 : 1;
+  const currentStep = selectedExperimentId ? 4 : investigation ? 3 : capsule ? 2 : 1;
 
   return (
     <div className="app-frame">
@@ -420,6 +446,26 @@ export function App() {
               </ol>
             </div>
           </section>
+        ) : selectedExperimentId && investigation ? (
+          <ExperimentInspector
+            capsule={capsule}
+            investigation={investigation}
+            selectedExperimentId={selectedExperimentId}
+            headingRef={inspectorHeadingRef}
+            onSelectExperiment={setSelectedExperimentId}
+            onReturn={() => setSelectedExperimentId(null)}
+          />
+        ) : investigation ? (
+          <HypothesisMap
+            investigation={investigation}
+            executionState={executionState}
+            liveEvents={liveEvents}
+            headingRef={hypothesisHeadingRef}
+            onInspect={setSelectedExperimentId}
+            onExecute={() =>
+              void executeInvestigation(investigation.investigation_id)
+            }
+          />
         ) : (
           <section className="screen overview-screen" aria-labelledby="overview-title">
             <div className="screen-heading">
@@ -457,17 +503,6 @@ export function App() {
             <strong>Execution stopped</strong>
             <span>{executionError}</span>
           </div>
-        )}
-
-        {investigation && (
-          <InvestigationPlan
-            investigation={investigation}
-            executionState={executionState}
-            liveEvents={liveEvents}
-            onExecute={() =>
-              void executeInvestigation(investigation.investigation_id)
-            }
-          />
         )}
 
         <footer className="foundation-status" aria-label="Local product status">
@@ -679,30 +714,39 @@ function CapsuleDetails({
   );
 }
 
-function InvestigationPlan({
+function HypothesisMap({
   investigation,
   executionState,
   liveEvents,
+  headingRef,
+  onInspect,
   onExecute,
 }: {
   investigation: InvestigationDetail;
   executionState: ExecutionState;
-  liveEvents: string[];
+  liveEvents: LiveEvent[];
+  headingRef: RefObject<HTMLHeadingElement | null>;
+  onInspect: (experimentId: string) => void;
   onExecute: () => void;
 }) {
   const execution = investigation.execution;
+  const checkpointId = investigation.experiments[0]?.checkpoint_id;
   const supportedHypothesis = investigation.hypotheses.find(
     (item) => item.hypothesis_id === execution?.supported_hypothesis_id,
   );
+  const latestEvent = liveEvents.at(-1);
+
   return (
-    <section className="investigation" aria-labelledby="investigation-title">
-      <div className="investigation-heading">
+    <section className="screen hypothesis-screen" aria-labelledby="hypothesis-map-title">
+      <div className="screen-heading">
         <div>
-          <p className="section-label">Investigation ready</p>
-          <h2 id="investigation-title">Three causal alternatives</h2>
+          <p className="screen-kicker">03 · Hypothesis map</p>
+          <h1 id="hypothesis-map-title" ref={headingRef} tabIndex={-1}>
+            What is suspected, tested, eliminated, or reproduced?
+          </h1>
           <p>
-            Each hypothesis cites accepted evidence and maps to one bounded,
-            app-owned experiment from the same clean checkpoint.
+            Three mutually exclusive explanations branch from one immutable
+            checkpoint. Experimental result and hypothesis disposition remain separate.
           </p>
         </div>
         <div className="investigation-identity">
@@ -711,79 +755,115 @@ function InvestigationPlan({
         </div>
       </div>
 
-      <div className="hypothesis-grid">
+      <div className="checkpoint-card">
+        <span className="checkpoint-symbol" aria-hidden="true">◎</span>
+        <div>
+          <p className="section-label">Common clean checkpoint</p>
+          <strong>{checkpointId}</strong>
+          <small>Every branch receives the same accepted evidence and isolated starting state.</small>
+        </div>
+        <span className="checkpoint-status">Immutable</span>
+      </div>
+
+      <div className="branch-connector" aria-hidden="true" />
+      <div className="hypothesis-grid" role="list" aria-label="Causal alternatives">
         {investigation.hypotheses.map((hypothesis, index) => {
           const experiment = investigation.experiments.find(
             (item) => item.hypothesis_id === hypothesis.hypothesis_id,
           );
+          if (!experiment) return null;
           const outcome = execution?.outcomes.find(
             (item) => item.hypothesis_id === hypothesis.hypothesis_id,
           );
+          const liveProgress = executionState === "running"
+            ? branchProgress(liveEvents, experiment.experiment_id)
+            : undefined;
+          const state = branchState(outcome, liveProgress);
           return (
             <article
-              className={`hypothesis-card ${
-                outcome ? `hypothesis-${outcome.hypothesis_disposition}` : ""
-              }`}
+              className={`hypothesis-card branch-${state.key}`}
               key={hypothesis.hypothesis_id}
+              role="listitem"
             >
               <div className="hypothesis-topline">
                 <span>H{index + 1}</span>
-                <strong>{Math.round(hypothesis.confidence * 100)}%</strong>
+                <span className={`state-label state-${state.key}`}>
+                  <span aria-hidden="true">{state.symbol}</span> {state.label}
+                </span>
               </div>
-              <h3>{hypothesis.title}</h3>
-              <div className="hypothesis-copy">
-                <span>Proposed mechanism</span>
-                <p>{hypothesis.mechanism}</p>
-              </div>
-              <div className="hypothesis-copy">
-                <span>Inference from evidence</span>
-                <p>{hypothesis.rationale}</p>
-              </div>
+              <h2>{hypothesis.title}</h2>
+              <p className="branch-mechanism">{hypothesis.mechanism}</p>
               <div className="prediction">
                 <span>Testable prediction</span>
                 <p>{hypothesis.testable_prediction}</p>
               </div>
-              <div className="evidence-links" aria-label="Evidence links">
-                {hypothesis.evidence_ids.map((evidenceId) => (
-                  <span key={evidenceId}>{evidenceId}</span>
-                ))}
-              </div>
-              {experiment && (
-                <div className="experiment-plan">
-                  <span>{outcome ? "Branch result" : "Queued experiment"}</span>
-                  <strong>{formatVariant(experiment.variant)}</strong>
-                  <small>
-                    limit: {experiment.operation_limit} operations · {experiment.timeout_seconds}s
-                  </small>
-                  {outcome && (
-                    <div className="outcome-row">
-                      <strong>
-                        {formatDisposition(outcome.hypothesis_disposition)}
-                      </strong>
-                      <span>{formatVariant(outcome.verdict)}</span>
-                    </div>
-                  )}
+              <div className="branch-evidence">
+                <span>Accepted evidence</span>
+                <div className="evidence-links" aria-label={`Evidence for ${hypothesis.title}`}>
+                  {hypothesis.evidence_ids.map((evidenceId) => (
+                    <span key={evidenceId}>{evidenceId}</span>
+                  ))}
                 </div>
-              )}
+              </div>
+              <dl className="branch-plan">
+                <div>
+                  <dt>Experiment</dt>
+                  <dd>{formatVariant(experiment.variant)}</dd>
+                </div>
+                <div>
+                  <dt>Budget</dt>
+                  <dd>{experiment.operation_limit} ops, {experiment.timeout_seconds}s</dd>
+                </div>
+                <div>
+                  <dt>Confidence</dt>
+                  <dd>{Math.round(hypothesis.confidence * 100)}%</dd>
+                </div>
+              </dl>
+              <div className="branch-result">
+                <strong>{state.detail}</strong>
+                {outcome && (
+                  <span>{formatDisposition(outcome.hypothesis_disposition)}</span>
+                )}
+                {!outcome && state.disposition && <span>{state.disposition}</span>}
+              </div>
+              <button
+                className="inspect-action"
+                type="button"
+                onClick={() => onInspect(experiment.experiment_id)}
+              >
+                Inspect branch H{index + 1}
+                <span aria-hidden="true">→</span>
+              </button>
             </article>
           );
         })}
       </div>
 
-      <div className="planning-footer">
-        <div>
-          <p className="section-label">Persisted timeline</p>
+      <div className="map-footer">
+        <section className="timeline-panel" aria-labelledby="timeline-title">
+          <div className="panel-heading compact-heading">
+            <div>
+              <p className="section-label">Persisted timeline</p>
+              <h2 id="timeline-title">Investigation events</h2>
+            </div>
+            <span>{investigation.events.length} stored</span>
+          </div>
           <ol>
             {investigation.events.map((event) => (
-              <li key={event.sequence}>{event.event_type.replaceAll(".", " ")}</li>
+              <li key={event.sequence}>
+                <span>{String(event.sequence).padStart(2, "0")}</span>
+                {formatVariant(event.event_type)}
+              </li>
             ))}
           </ol>
-        </div>
+        </section>
+
         {execution ? (
-          <div className="execution-result">
+          <aside className="execution-result map-result" aria-labelledby="result-title">
             <span aria-hidden="true">✓</span>
             <div>
-              <strong>Supported cause</strong>
+              <p className="section-label">Deterministic evaluation</p>
+              <h2 id="result-title">Supported cause</h2>
               <p>{supportedHypothesis?.title ?? "No single supported cause"}</p>
               <small>
                 {execution.isolation_verified ? "Isolation verified" : "Isolation unverified"}
@@ -795,17 +875,18 @@ function InvestigationPlan({
                 href={`/api/investigations/${investigation.investigation_id}/reproduction.zip`}
                 download="scully-proxy-identity-collapse.zip"
               >
-                Download reproduction
+                Download current reproduction
                 <span aria-hidden="true">↓</span>
               </a>
             </div>
-          </div>
+          </aside>
         ) : (
-          <div className="execution-lock">
+          <aside className="execution-lock map-execution" aria-labelledby="execution-title">
             <span aria-hidden="true">◇</span>
             <div>
-              <strong>Local execution ready</strong>
-              <p>Run all three allowlisted branches from one clean checkpoint.</p>
+              <p className="section-label">Bounded execution</p>
+              <h2 id="execution-title">Run from one checkpoint</h2>
+              <p>Execute all three allowlisted branches with no network access.</p>
               <button
                 className="primary-action execution-action"
                 type="button"
@@ -815,18 +896,265 @@ function InvestigationPlan({
                 {executionState === "running" ? "Running branches" : "Run 3 branches"}
                 <span aria-hidden="true">→</span>
               </button>
-              {executionState === "running" && liveEvents.length > 0 && (
-                <div className="live-progress" role="status">
+              {executionState === "running" && latestEvent && (
+                <div className="live-progress" role="status" aria-live="polite">
                   <span className="live-pulse" aria-hidden="true" />
                   <div>
-                    <strong>{formatVariant(liveEvents.at(-1) ?? "execution started")}</strong>
-                    <small>{liveEvents.length} live events received</small>
+                    <strong>{formatVariant(latestEvent.eventType)}</strong>
+                    <small>{liveEvents.length} execution events received</small>
                   </div>
                 </div>
               )}
             </div>
-          </div>
+          </aside>
         )}
+      </div>
+    </section>
+  );
+}
+
+function ExperimentInspector({
+  capsule,
+  investigation,
+  selectedExperimentId,
+  headingRef,
+  onSelectExperiment,
+  onReturn,
+}: {
+  capsule: CapsuleSummary;
+  investigation: InvestigationDetail;
+  selectedExperimentId: string;
+  headingRef: RefObject<HTMLHeadingElement | null>;
+  onSelectExperiment: (experimentId: string) => void;
+  onReturn: () => void;
+}) {
+  const experiment = investigation.experiments.find(
+    (item) => item.experiment_id === selectedExperimentId,
+  );
+  const fallbackComparison = investigation.experiments.find(
+    (item) => item.experiment_id !== selectedExperimentId,
+  );
+  const [comparisonExperimentId, setComparisonExperimentId] = useState(
+    fallbackComparison?.experiment_id ?? "",
+  );
+  useEffect(() => {
+    if (
+      comparisonExperimentId === selectedExperimentId ||
+      !investigation.experiments.some(
+        (item) => item.experiment_id === comparisonExperimentId,
+      )
+    ) {
+      setComparisonExperimentId(fallbackComparison?.experiment_id ?? "");
+    }
+  }, [comparisonExperimentId, fallbackComparison?.experiment_id, investigation.experiments, selectedExperimentId]);
+  const hypothesis = investigation.hypotheses.find(
+    (item) => item.hypothesis_id === experiment?.hypothesis_id,
+  );
+  if (!experiment || !hypothesis) return null;
+
+  const outcome = investigation.execution?.outcomes.find(
+    (item) => item.experiment_id === experiment.experiment_id,
+  );
+  const otherExperiments = investigation.experiments.filter(
+    (item) => item.experiment_id !== experiment.experiment_id,
+  );
+  const comparison = otherExperiments.find(
+    (item) => item.experiment_id === comparisonExperimentId,
+  ) ?? otherExperiments[0];
+  const comparisonHypothesis = investigation.hypotheses.find(
+    (item) => item.hypothesis_id === comparison?.hypothesis_id,
+  );
+  const state = branchState(outcome);
+  const evidence = hypothesis.evidence_ids
+    .map((evidenceId) => capsule.evidence.find((item) => item.evidence_id === evidenceId))
+    .filter((item): item is EvidenceReference => Boolean(item));
+
+  return (
+    <section className="screen inspector-screen" aria-labelledby="inspector-title">
+      <button className="back-action" type="button" onClick={onReturn}>
+        <span aria-hidden="true">←</span> Return to hypothesis map
+      </button>
+      <div className="screen-heading inspector-heading">
+        <div>
+          <p className="screen-kicker">04 · Experiment inspector</p>
+          <h1 id="inspector-title" ref={headingRef} tabIndex={-1}>
+            What exactly happened in this branch?
+          </h1>
+          <p>
+            Inspect the bounded change, retained output, deterministic matchers,
+            and accepted evidence for one isolated experiment.
+          </p>
+        </div>
+        <span className={`state-label state-${state.key}`}>
+          <span aria-hidden="true">{state.symbol}</span> {state.label}
+        </span>
+      </div>
+
+      <section className="inspector-summary" aria-labelledby="inspected-hypothesis-title">
+        <div>
+          <p className="section-label">Inspected hypothesis</p>
+          <h2 id="inspected-hypothesis-title">{hypothesis.title}</h2>
+          <p>{hypothesis.testable_prediction}</p>
+        </div>
+        <dl>
+          <div><dt>Experiment</dt><dd>{experiment.experiment_id}</dd></div>
+          <div><dt>Checkpoint</dt><dd>{experiment.checkpoint_id}</dd></div>
+          <div><dt>Result</dt><dd>{outcome ? formatVariant(outcome.status) : "Not run"}</dd></div>
+          <div><dt>Hypothesis</dt><dd>{outcome ? formatDisposition(outcome.hypothesis_disposition) : "Untested"}</dd></div>
+        </dl>
+      </section>
+
+      <div className="inspector-grid">
+        <section className="inspector-panel comparison-panel" aria-labelledby="comparison-title">
+          <div className="panel-heading compact-heading">
+            <div>
+              <p className="section-label">Branch comparison</p>
+              <h2 id="comparison-title">Selected and nearest alternative</h2>
+            </div>
+            <label>
+              Compare with
+              <select
+                value={comparison?.experiment_id ?? ""}
+                onChange={(event) => setComparisonExperimentId(event.currentTarget.value)}
+              >
+                {otherExperiments.map((item) => {
+                  const itemHypothesis = investigation.hypotheses.find(
+                    (candidate) => candidate.hypothesis_id === item.hypothesis_id,
+                  );
+                  return <option value={item.experiment_id} key={item.experiment_id}>{itemHypothesis?.title}</option>;
+                })}
+              </select>
+            </label>
+            <button
+              className="comparison-action"
+              type="button"
+              disabled={!comparison}
+              onClick={() => comparison && onSelectExperiment(comparison.experiment_id)}
+            >
+              Inspect comparison
+            </button>
+          </div>
+          <div className="table-scroll" tabIndex={0} aria-label="Scrollable branch comparison">
+            <table>
+              <thead>
+                <tr><th scope="col">Field</th><th scope="col">Selected</th><th scope="col">Alternative</th></tr>
+              </thead>
+              <tbody>
+                <tr><th scope="row">Hypothesis</th><td>{hypothesis.title}</td><td>{comparisonHypothesis?.title}</td></tr>
+                <tr><th scope="row">Variant</th><td>{formatVariant(experiment.variant)}</td><td>{comparison ? formatVariant(comparison.variant) : "None"}</td></tr>
+                <tr><th scope="row">Change</th><td>{formatParameters(experiment.parameters)}</td><td>{comparison ? formatParameters(comparison.parameters) : "None"}</td></tr>
+                <tr><th scope="row">Status</th><td>{state.label}</td><td>{comparison ? branchState(investigation.execution?.outcomes.find((item) => item.experiment_id === comparison.experiment_id)).label : "None"}</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="inspector-panel plan-panel" aria-labelledby="plan-title">
+          <div className="panel-heading compact-heading">
+            <div><p className="section-label">Experiment plan</p><h2 id="plan-title">Bounded operation</h2></div>
+            <span>{experiment.operation_limit} ops max</span>
+          </div>
+          <dl className="plan-facts">
+            <div><dt>Adapter</dt><dd>{formatVariant(experiment.adapter)}</dd></div>
+            <div><dt>Variant</dt><dd>{formatVariant(experiment.variant)}</dd></div>
+            <div><dt>Timeout</dt><dd>{experiment.timeout_seconds} seconds</dd></div>
+            <div><dt>Network</dt><dd>Disabled</dd></div>
+          </dl>
+          <code className="operation-code">apply_allowlisted_variant {experiment.variant}</code>
+        </section>
+
+        <section className="inspector-panel diff-panel" aria-labelledby="input-diff-title">
+          <div className="panel-heading compact-heading">
+            <div><p className="section-label">Input diff</p><h2 id="input-diff-title">Accepted inputs unchanged</h2></div>
+            <span className="unchanged-label">0 changes</span>
+          </div>
+          <div className="linear-diff">
+            <div><span>Before</span><p>Accepted capsule evidence from the common checkpoint</p></div>
+            <div><span>After</span><p>Same evidence IDs, request sequence, and checkpoint</p></div>
+          </div>
+        </section>
+
+        <section className="inspector-panel diff-panel" aria-labelledby="environment-diff-title">
+          <div className="panel-heading compact-heading">
+            <div><p className="section-label">Environment diff</p><h2 id="environment-diff-title">Allowlisted branch change</h2></div>
+            <span>{Object.keys(experiment.parameters).length} change</span>
+          </div>
+          <div className="diff-rows">
+            {Object.entries(experiment.parameters).map(([name, value]) => (
+              <div key={name}>
+                <strong>{formatVariant(name)}</strong>
+                <span className="diff-before">− {baselineValue(name)}</span>
+                <span className="diff-after">+ {String(value)}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="inspector-panel output-panel" aria-labelledby="output-title">
+          <div className="panel-heading compact-heading">
+            <div><p className="section-label">Retained command output</p><h2 id="output-title">Bounded operation result</h2></div>
+            <span>{outcome ? `${outcome.duration_ms.toFixed(2)} ms` : "Pending"}</span>
+          </div>
+          {outcome ? (
+            <>
+              <dl className="output-facts">
+                <div><dt>Exit status</dt><dd>{terminalExitStatus(outcome.status)}</dd></div>
+                <div><dt>Verdict</dt><dd>{formatVariant(outcome.verdict)}</dd></div>
+                <div><dt>Observation digest</dt><dd><code>{outcome.observation_digest}</code></dd></div>
+              </dl>
+              <p className="retention-note">Raw stdout is not retained. The digest and deterministic matcher results are the inspectable output boundary.</p>
+            </>
+          ) : (
+            <p className="empty-inspector-state">This branch has not run. The plan and expected diff remain inspectable.</p>
+          )}
+        </section>
+
+        <section className="inspector-panel matcher-panel" aria-labelledby="matcher-title">
+          <div className="panel-heading compact-heading">
+            <div><p className="section-label">Deterministic evaluation</p><h2 id="matcher-title">Signature matchers</h2></div>
+            <span>{outcome?.matcher_results.length ?? 0} results</span>
+          </div>
+          {outcome?.matcher_results.length ? (
+            <div className="table-scroll" tabIndex={0} aria-label="Scrollable matcher results">
+              <table>
+                <thead><tr><th scope="col">Matcher</th><th scope="col">Required</th><th scope="col">Result</th><th scope="col">Reason</th></tr></thead>
+                <tbody>
+                  {outcome.matcher_results.map((matcher) => (
+                    <tr key={matcher.matcher_id}>
+                      <th scope="row">{formatVariant(matcher.matcher_id)}</th>
+                      <td>{matcher.required ? "Yes" : "No"}</td>
+                      <td>{matcher.passed ? "Passed" : "Did not pass"}</td>
+                      <td>{formatVariant(matcher.reason)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="empty-inspector-state">Matcher results appear after branch execution.</p>
+          )}
+          {outcome?.elimination_reasons.length ? (
+            <div className="disposition-reason">
+              <strong>Why the hypothesis changed state</strong>
+              <ul>{outcome.elimination_reasons.map((reason) => <li key={reason}>{formatVariant(reason)}</li>)}</ul>
+            </div>
+          ) : null}
+        </section>
+
+        <section className="inspector-panel lineage-panel" aria-labelledby="lineage-title">
+          <div className="panel-heading compact-heading">
+            <div><p className="section-label">Source evidence</p><h2 id="lineage-title">Accepted lineage</h2></div>
+            <span>{evidence.length} linked</span>
+          </div>
+          <ul>
+            {evidence.map((item) => (
+              <li key={item.evidence_id}>
+                <span aria-hidden="true">●</span>
+                <div><strong>{item.evidence_id}</strong><p>{item.provenance}</p><code>{item.relative_path}</code></div>
+              </li>
+            ))}
+          </ul>
+        </section>
       </div>
     </section>
   );
@@ -837,13 +1165,135 @@ function formatBytes(bytes: number) {
 }
 
 function formatVariant(variant: string) {
-  return variant.replaceAll("-", " ").replaceAll("_", " ");
+  return variant.replaceAll("-", " ").replaceAll("_", " ").replaceAll(".", " ");
 }
 
 function formatDisposition(disposition: ExperimentOutcome["hypothesis_disposition"]) {
   if (disposition === "supported") return "Supports hypothesis";
   if (disposition === "eliminated") return "Hypothesis eliminated";
   return "Inconclusive";
+}
+
+function branchState(
+  outcome: ExperimentOutcome | undefined,
+  liveProgress?: { status?: string; disposition?: string; started: boolean },
+) {
+  const liveStatus = liveProgress?.status;
+  const liveDisposition = liveProgress?.disposition;
+  if (!outcome && liveStatus === "reproduced") {
+    return {
+      key: "reproduced",
+      symbol: "✓",
+      label: "Reproduced",
+      detail: "Failure reproduced; completed sibling retained.",
+      disposition: liveDisposition ? formatVariant(liveDisposition) : "Evaluation pending",
+    } as const;
+  }
+  if (!outcome && liveStatus === "eliminated") {
+    return {
+      key: "eliminated",
+      symbol: "×",
+      label: "Failure eliminated",
+      detail: "Failure did not reproduce; completed sibling retained.",
+      disposition: liveDisposition ? formatVariant(liveDisposition) : "Evaluation pending",
+    } as const;
+  }
+  if (
+    !outcome &&
+    (liveStatus === "failed" || liveStatus === "timed_out" || liveStatus === "inconclusive")
+  ) {
+    return {
+      key: "inconclusive",
+      symbol: "?",
+      label: "Inconclusive",
+      detail: "The branch completed without a causal conclusion.",
+      disposition: liveDisposition ? formatVariant(liveDisposition) : "Evaluation pending",
+    } as const;
+  }
+  if (liveProgress?.started && !outcome) {
+    return {
+      key: "testing",
+      symbol: "▶",
+      label: "Testing",
+      detail: "The allowlisted operation is running.",
+      disposition: undefined,
+    } as const;
+  }
+  if (!outcome) {
+    return {
+      key: "inferred",
+      symbol: "◇",
+      label: "Hypothesis",
+      detail: "Untested causal alternative.",
+      disposition: undefined,
+    } as const;
+  }
+  if (outcome.status === "reproduced") {
+    return {
+      key: "reproduced",
+      symbol: "✓",
+      label: "Reproduced",
+      detail: "Failure reproduced; intervention hypothesis eliminated.",
+      disposition: undefined,
+    } as const;
+  }
+  if (outcome.hypothesis_disposition === "supported") {
+    return {
+      key: "eliminated",
+      symbol: "×",
+      label: "Failure eliminated",
+      detail: "Failure did not reproduce; hypothesis supported.",
+      disposition: undefined,
+    } as const;
+  }
+  return {
+    key: "inconclusive",
+    symbol: "?",
+    label: "Inconclusive",
+    detail: "Current evidence does not support a causal conclusion.",
+    disposition: undefined,
+  } as const;
+}
+
+function branchProgress(events: LiveEvent[], experimentId: string) {
+  const branchEvents = events.filter(
+    (event) => event.payload.experiment_id === experimentId,
+  );
+  const result = [...branchEvents]
+    .reverse()
+    .find((event) => event.eventType === "experiment.result");
+  const evaluation = [...branchEvents]
+    .reverse()
+    .find((event) => event.eventType === "evaluation.completed");
+  return {
+    started: branchEvents.some((event) => event.eventType === "experiment.started"),
+    status: typeof result?.payload.status === "string" ? result.payload.status : undefined,
+    disposition:
+      typeof evaluation?.payload.hypothesis_disposition === "string"
+        ? evaluation.payload.hypothesis_disposition
+        : undefined,
+  };
+}
+
+function formatParameters(parameters: Record<string, string | number | boolean>) {
+  return Object.entries(parameters)
+    .map(([name, value]) => `${formatVariant(name)}: ${String(value)}`)
+    .join(", ");
+}
+
+function baselineValue(name: string) {
+  if (name === "trust_proxy") return "false";
+  if (name === "limiter_key") return "identity";
+  if (name === "proxy_mode") return "default chain";
+  return "not set";
+}
+
+function terminalExitStatus(status: string) {
+  return status === "eliminated" || status === "reproduced" ? "0" : "Unavailable";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function parseSseFrame(frame: string) {
