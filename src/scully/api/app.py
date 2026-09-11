@@ -16,10 +16,14 @@ from scully.application.capsule_import import (
     CapsuleImporter,
     CapsuleImportError,
 )
+from scully.application.investigations import InvestigationError, InvestigationService
+from scully.application.planning import LocalPlanningAdapter
 from scully.application.settings import ProductSettings
-from scully.domain.contracts import CapsuleSummary
+from scully.domain.capsules import CapsuleIdentifier
+from scully.domain.contracts import CapsuleSummary, InvestigationDetail
 from scully.infrastructure.capsules import CapsuleRepository
 from scully.infrastructure.database import Database
+from scully.infrastructure.investigations import InvestigationRepository
 
 
 SEED_CAPSULES = frozenset({"proxy-identity-collapse"})
@@ -37,6 +41,14 @@ class HealthResponse(BaseModel):
     live_providers_enabled: bool
 
 
+class CreateInvestigationRequest(BaseModel):
+    """Strict request to plan one accepted capsule."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    capsule_id: CapsuleIdentifier
+
+
 def create_app(settings: ProductSettings | None = None) -> FastAPI:
     """Construct an application without contacting a provider."""
 
@@ -44,6 +56,12 @@ def create_app(settings: ProductSettings | None = None) -> FastAPI:
     database = Database(product_settings.database_path)
     capsules = CapsuleRepository(database)
     capsule_importer = CapsuleImporter(product_settings.artifact_dir, capsules)
+    investigations = InvestigationRepository(database)
+    investigation_service = InvestigationService(
+        capsules,
+        investigations,
+        LocalPlanningAdapter(),
+    )
 
     @asynccontextmanager
     async def lifespan(unused_app: FastAPI) -> AsyncIterator[None]:
@@ -62,6 +80,16 @@ def create_app(settings: ProductSettings | None = None) -> FastAPI:
     async def capsule_import_error(
         unused_request: Request,
         error: CapsuleImportError,
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=error.status_code,
+            content={"detail": {"code": error.code, "message": error.message}},
+        )
+
+    @application.exception_handler(InvestigationError)
+    async def investigation_error(
+        unused_request: Request,
+        error: InvestigationError,
     ) -> JSONResponse:
         return JSONResponse(
             status_code=error.status_code,
@@ -139,11 +167,30 @@ def create_app(settings: ProductSettings | None = None) -> FastAPI:
             )
         return capsule
 
+    @router.post(
+        "/investigations",
+        response_model=InvestigationDetail,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def create_investigation(
+        request: CreateInvestigationRequest,
+    ) -> InvestigationDetail:
+        return investigation_service.create(request.capsule_id)
+
+    @router.get(
+        "/investigations/{investigation_id}",
+        response_model=InvestigationDetail,
+    )
+    def get_investigation(investigation_id: str) -> InvestigationDetail:
+        return investigation_service.get(investigation_id)
+
     application.include_router(router)
     application.state.product_settings = product_settings
     application.state.database = database
     application.state.capsules = capsules
     application.state.capsule_importer = capsule_importer
+    application.state.investigations = investigations
+    application.state.investigation_service = investigation_service
 
     if (product_settings.web_dist / "index.html").is_file():
         application.mount(

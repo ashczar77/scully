@@ -27,8 +27,46 @@ type CapsuleSummary = {
   evidence: EvidenceReference[];
 };
 
+type Hypothesis = {
+  hypothesis_id: string;
+  title: string;
+  mechanism: string;
+  rationale: string;
+  testable_prediction: string;
+  alternative_group: string;
+  evidence_ids: string[];
+  confidence: number;
+};
+
+type ExperimentPlan = {
+  experiment_id: string;
+  hypothesis_id: string;
+  checkpoint_id: string;
+  adapter: string;
+  variant: string;
+  parameters: Record<string, string | number | boolean>;
+  operation_limit: number;
+  timeout_seconds: number;
+};
+
+type InvestigationEvent = {
+  sequence: number;
+  event_type: string;
+};
+
+type InvestigationDetail = {
+  investigation_id: string;
+  capsule_id: string;
+  status: string;
+  planning_source: "local" | "nemotron";
+  hypotheses: Hypothesis[];
+  experiments: ExperimentPlan[];
+  events: InvestigationEvent[];
+};
+
 type ConnectionState = "checking" | "ready" | "offline";
 type ImportState = "idle" | "importing" | "accepted" | "rejected";
+type PlanningState = "idle" | "planning" | "ready" | "rejected";
 
 export function App() {
   const [connection, setConnection] = useState<ConnectionState>("checking");
@@ -36,6 +74,9 @@ export function App() {
   const [importState, setImportState] = useState<ImportState>("idle");
   const [capsule, setCapsule] = useState<CapsuleSummary | null>(null);
   const [rejection, setRejection] = useState<string | null>(null);
+  const [planningState, setPlanningState] = useState<PlanningState>("idle");
+  const [investigation, setInvestigation] = useState<InvestigationDetail | null>(null);
+  const [planningError, setPlanningError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -75,6 +116,9 @@ export function App() {
       }
       setCapsule(payload as CapsuleSummary);
       setImportState("accepted");
+      setInvestigation(null);
+      setPlanningState("idle");
+      setPlanningError(null);
     } catch (error) {
       setCapsule(null);
       setRejection(error instanceof Error ? error.message : "Capsule was rejected");
@@ -87,6 +131,33 @@ export function App() {
       body: await file.arrayBuffer(),
       headers: { "content-type": "application/zip" },
     });
+  }
+
+  async function createInvestigation(capsuleId: string) {
+    setPlanningState("planning");
+    setPlanningError(null);
+    try {
+      const response = await fetch("/api/investigations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ capsule_id: capsuleId }),
+      });
+      const payload = (await response.json()) as
+        | InvestigationDetail
+        | ImportErrorResponse;
+      if (!response.ok) {
+        const detail = "detail" in payload ? payload.detail : null;
+        throw new Error(detail?.message ?? "Investigation planning failed");
+      }
+      setInvestigation(payload as InvestigationDetail);
+      setPlanningState("ready");
+    } catch (error) {
+      setInvestigation(null);
+      setPlanningError(
+        error instanceof Error ? error.message : "Investigation planning failed",
+      );
+      setPlanningState("rejected");
+    }
   }
 
   return (
@@ -174,7 +245,13 @@ export function App() {
           )}
 
           {capsule ? (
-            <CapsuleDetails capsule={capsule} />
+            <CapsuleDetails
+              capsule={capsule}
+              planningState={planningState}
+              onCreateInvestigation={() =>
+                void createInvestigation(capsule.capsule_id)
+              }
+            />
           ) : (
             <div className="signal-grid">
               <article className="signal-card">
@@ -197,6 +274,15 @@ export function App() {
               </article>
             </div>
           )}
+
+          {planningError && (
+            <div className="rejection" role="alert">
+              <strong>Planning stopped</strong>
+              <span>{planningError}</span>
+            </div>
+          )}
+
+          {investigation && <InvestigationPlan investigation={investigation} />}
 
           <div className="foundation-status">
             <div>
@@ -225,7 +311,15 @@ type ImportErrorResponse = {
   };
 };
 
-function CapsuleDetails({ capsule }: { capsule: CapsuleSummary }) {
+function CapsuleDetails({
+  capsule,
+  planningState,
+  onCreateInvestigation,
+}: {
+  capsule: CapsuleSummary;
+  planningState: PlanningState;
+  onCreateInvestigation: () => void;
+}) {
   return (
     <div className="capsule-details">
       <div className="capsule-summary">
@@ -244,6 +338,19 @@ function CapsuleDetails({ capsule }: { capsule: CapsuleSummary }) {
             <dd>{capsule.evidence.length} files</dd>
           </div>
         </dl>
+        <button
+          className="primary-action planning-action"
+          type="button"
+          disabled={planningState === "planning" || planningState === "ready"}
+          onClick={onCreateInvestigation}
+        >
+          {planningState === "planning"
+            ? "Planning investigation"
+            : planningState === "ready"
+              ? "Plan ready"
+              : "Create investigation"}
+          <span aria-hidden="true">→</span>
+        </button>
       </div>
       <div className="evidence-list" aria-label="Accepted evidence">
         {capsule.evidence.map((evidence) => (
@@ -264,6 +371,96 @@ function CapsuleDetails({ capsule }: { capsule: CapsuleSummary }) {
   );
 }
 
+function InvestigationPlan({
+  investigation,
+}: {
+  investigation: InvestigationDetail;
+}) {
+  return (
+    <section className="investigation" aria-labelledby="investigation-title">
+      <div className="investigation-heading">
+        <div>
+          <p className="section-label">Investigation ready</p>
+          <h2 id="investigation-title">Three causal alternatives</h2>
+          <p>
+            Each hypothesis cites accepted evidence and maps to one bounded,
+            app-owned experiment from the same clean checkpoint.
+          </p>
+        </div>
+        <div className="investigation-identity">
+          <span>{investigation.planning_source} plan</span>
+          <code>{investigation.investigation_id}</code>
+        </div>
+      </div>
+
+      <div className="hypothesis-grid">
+        {investigation.hypotheses.map((hypothesis, index) => {
+          const experiment = investigation.experiments.find(
+            (item) => item.hypothesis_id === hypothesis.hypothesis_id,
+          );
+          return (
+            <article className="hypothesis-card" key={hypothesis.hypothesis_id}>
+              <div className="hypothesis-topline">
+                <span>H{index + 1}</span>
+                <strong>{Math.round(hypothesis.confidence * 100)}%</strong>
+              </div>
+              <h3>{hypothesis.title}</h3>
+              <div className="hypothesis-copy">
+                <span>Proposed mechanism</span>
+                <p>{hypothesis.mechanism}</p>
+              </div>
+              <div className="hypothesis-copy">
+                <span>Inference from evidence</span>
+                <p>{hypothesis.rationale}</p>
+              </div>
+              <div className="prediction">
+                <span>Testable prediction</span>
+                <p>{hypothesis.testable_prediction}</p>
+              </div>
+              <div className="evidence-links" aria-label="Evidence links">
+                {hypothesis.evidence_ids.map((evidenceId) => (
+                  <span key={evidenceId}>{evidenceId}</span>
+                ))}
+              </div>
+              {experiment && (
+                <div className="experiment-plan">
+                  <span>Queued experiment</span>
+                  <strong>{formatVariant(experiment.variant)}</strong>
+                  <small>
+                    {experiment.operation_limit} operations · {experiment.timeout_seconds}s
+                  </small>
+                </div>
+              )}
+            </article>
+          );
+        })}
+      </div>
+
+      <div className="planning-footer">
+        <div>
+          <p className="section-label">Persisted timeline</p>
+          <ol>
+            {investigation.events.map((event) => (
+              <li key={event.sequence}>{event.event_type.replaceAll(".", " ")}</li>
+            ))}
+          </ol>
+        </div>
+        <div className="execution-lock">
+          <span aria-hidden="true">◇</span>
+          <div>
+            <strong>Execution remains locked</strong>
+            <p>Experiments become runnable only after the next review gate.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function formatBytes(bytes: number) {
   return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`;
+}
+
+function formatVariant(variant: string) {
+  return variant.replaceAll("-", " ");
 }

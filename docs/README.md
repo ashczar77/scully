@@ -15,8 +15,8 @@ customer data.
 - Completed gates: G0.1 through G2.2 and checkpoints G1.2a through G1.3f
 - Active step: Step 2.3, investigation and hypothesis planning
 - Next checkpoint: Gate G2.3, planning review
-- Implementation: Safe capsule import, normalized evidence lineage, SQLite,
-  and the working browser path verified
+- Implementation: Safe capsule import plus an offline investigation path with
+  three evidence-linked hypotheses and bounded experiment plans
 - Out-of-pocket cost limit: Zero
 - Submission deadline: 30 October 2026
 
@@ -72,6 +72,8 @@ customer data.
 | [Gate G2.1 review](gates/G2.1-foundation-review.md) | Evidence and decision record for the offline product foundation | Approved |
 | [Safe capsule ingestion](product/capsule-ingestion.md) | Schema, seed, validation boundaries, artifact storage, product behavior, and limitations | Implemented for G2.2 review |
 | [Gate G2.2 review](gates/G2.2-ingestion-safety-review.md) | Evidence and decision record for capsule ingestion safety | Approved |
+| [Hypothesis planning](product/hypothesis-planning.md) | Planning contracts, evidence links, experiment allowlist, persistence, UI, and limitations | Implemented for G2.3 review |
+| [Gate G2.3 review](gates/G2.3-planning-review.md) | Evidence and decision record for bounded hypothesis planning | In review |
 | [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol retained for later direct validation | Deferred evidence |
 | [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for later direct validation | Ready for future use |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |
@@ -85,5 +87,7 @@ technical debt, with provider command timeout plus local deadlines as the
 initial fallback. Gate G2.1 approved the offline product foundation and
 authorized Step 2.2 safe seeded capsule ingestion. Gate G2.2 approved that
 path and authorized Step 2.3 investigation and hypothesis planning only.
+Step 2.3 is now implemented and awaiting Gate G2.3 review. Execution remains
+locked.
 
 New documentation should support the active hackathon project.

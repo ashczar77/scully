@@ -100,3 +100,15 @@ class CapsuleRepository:
             return None
         manifest = CapsuleManifest.model_validate_json(str(row["manifest_json"]))
         return manifest.to_summary()
+
+    def get_manifest(self, capsule_id: str) -> CapsuleManifest | None:
+        """Load the validated canonical manifest for application services."""
+
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT manifest_json FROM capsules WHERE capsule_id = ?",
+                (capsule_id,),
+            ).fetchone()
+        if row is None or row["manifest_json"] is None:
+            return None
+        return CapsuleManifest.model_validate_json(str(row["manifest_json"]))

@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 EXPECTED_TABLES = frozenset(
     {
         "schema_metadata",
@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS investigations (
     investigation_id TEXT PRIMARY KEY,
     capsule_id TEXT NOT NULL REFERENCES capsules(capsule_id),
     status TEXT NOT NULL,
+    planning_source TEXT NOT NULL DEFAULT 'local',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -186,6 +187,26 @@ class Database:
                 INSERT OR IGNORE INTO schema_metadata(version, applied_at)
                 VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
                 """,
+                (3,),
+            )
+            investigation_columns = {
+                str(row["name"])
+                for row in connection.execute(
+                    "PRAGMA table_info(investigations)"
+                ).fetchall()
+            }
+            if "planning_source" not in investigation_columns:
+                connection.execute(
+                    """
+                    ALTER TABLE investigations
+                    ADD COLUMN planning_source TEXT NOT NULL DEFAULT 'local'
+                    """
+                )
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO schema_metadata(version, applied_at)
+                VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                """,
                 (SCHEMA_VERSION,),
             )
 
@@ -218,5 +239,6 @@ class Database:
         return EXPECTED_TABLES <= tables and [row["version"] for row in versions] == [
             1,
             2,
+            3,
             SCHEMA_VERSION,
         ]

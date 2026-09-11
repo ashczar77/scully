@@ -336,6 +336,12 @@ h2 {
   font-size: 0.82rem;
 }
 
+.planning-action {
+  width: 100%;
+  justify-content: space-between;
+  margin-top: 26px;
+}
+
 .evidence-list {
   overflow: hidden;
 }
@@ -421,6 +427,222 @@ h2 {
   font-size: 0.94rem;
 }
 
+.investigation {
+  margin-top: 64px;
+  padding-top: 28px;
+  border-top: 1px solid rgba(238, 243, 239, 0.14);
+}
+
+.investigation-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 32px;
+  align-items: flex-start;
+}
+
+.investigation-heading > div:first-child > p:last-child {
+  max-width: 680px;
+  margin: 14px 0 0;
+  color: #95a29b;
+  line-height: 1.55;
+}
+
+.investigation-identity {
+  display: flex;
+  align-items: flex-end;
+  flex-direction: column;
+  gap: 8px;
+  color: #77f2bf;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.investigation-identity code {
+  color: #8b9991;
+  font-size: 0.72rem;
+  text-transform: none;
+}
+
+.hypothesis-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 28px;
+}
+
+.hypothesis-card {
+  display: flex;
+  min-height: 480px;
+  padding: 24px;
+  border: 1px solid rgba(238, 243, 239, 0.12);
+  border-radius: 16px;
+  flex-direction: column;
+  background: rgba(12, 25, 20, 0.74);
+}
+
+.hypothesis-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #77f2bf;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+}
+
+.hypothesis-topline > span {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid rgba(119, 242, 191, 0.35);
+  border-radius: 8px;
+}
+
+.hypothesis-card h3 {
+  min-height: 58px;
+  margin: 22px 0 12px;
+  font-size: 1.2rem;
+  letter-spacing: -0.025em;
+  line-height: 1.25;
+}
+
+.hypothesis-copy {
+  margin-top: 14px;
+}
+
+.hypothesis-copy > span {
+  color: #75837b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hypothesis-copy > p {
+  margin: 6px 0 0;
+  color: #9eaaa3;
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+
+.prediction {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(238, 243, 239, 0.09);
+}
+
+.prediction > span,
+.experiment-plan > span {
+  color: #75837b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.prediction p {
+  margin: 8px 0 0;
+  color: #cad4ce;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.evidence-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 18px;
+}
+
+.evidence-links span {
+  padding: 5px 7px;
+  border: 1px solid rgba(238, 243, 239, 0.11);
+  border-radius: 6px;
+  color: #97a49d;
+  background: rgba(238, 243, 239, 0.035);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.62rem;
+}
+
+.experiment-plan {
+  display: flex;
+  margin-top: auto;
+  padding: 17px;
+  border: 1px solid rgba(231, 194, 106, 0.18);
+  border-radius: 10px;
+  flex-direction: column;
+  background: rgba(231, 194, 106, 0.05);
+}
+
+.experiment-plan strong {
+  margin-top: 7px;
+  color: #e8d18f;
+  font-size: 0.85rem;
+  text-transform: capitalize;
+}
+
+.experiment-plan small {
+  margin-top: 5px;
+  color: #857c61;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.64rem;
+}
+
+.planning-footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr);
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.planning-footer > div {
+  padding: 20px;
+  border: 1px solid rgba(238, 243, 239, 0.1);
+  border-radius: 12px;
+  background: rgba(12, 25, 20, 0.45);
+}
+
+.planning-footer ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 13px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.planning-footer li {
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: #839088;
+  background: rgba(238, 243, 239, 0.045);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.63rem;
+}
+
+.execution-lock {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+
+.execution-lock > span {
+  color: #e7c26a;
+  font-size: 1.6rem;
+}
+
+.execution-lock strong {
+  font-size: 0.9rem;
+}
+
+.execution-lock p {
+  margin: 5px 0 0;
+  color: #85928a;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
 @media (max-width: 760px) {
   .app-shell {
     width: min(100% - 24px, 1180px);
@@ -450,8 +672,26 @@ h2 {
 
   .signal-grid,
   .foundation-status,
-  .capsule-details {
+  .capsule-details,
+  .hypothesis-grid,
+  .planning-footer {
     grid-template-columns: 1fr;
+  }
+
+  .investigation-heading {
+    flex-direction: column;
+  }
+
+  .investigation-identity {
+    align-items: flex-start;
+  }
+
+  .hypothesis-card {
+    min-height: auto;
+  }
+
+  .experiment-plan {
+    margin-top: 24px;
   }
 
   .signal-card + .signal-card {

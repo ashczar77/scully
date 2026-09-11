@@ -3,9 +3,9 @@
 Scully turns sanitized production-incident evidence into a minimal executable
 reproduction without giving AI unrestricted production access.
 
-The project has completed its feasibility gates and now includes the first
-working product path: safe import and normalization of a seeded incident
-capsule. See the
+The project has completed its feasibility gates and now includes a working
+offline product path from safe capsule import to a persisted, evidence-linked
+investigation plan. See the
 [hackathon project plan](docs/HACKATHON_PROJECT_PLAN.md) and
 [project documentation](docs/README.md) for its status and roadmap.
 
@@ -36,7 +36,7 @@ The API listens on `http://127.0.0.1:8000` and the frontend listens on
 `http://127.0.0.1:5173`. Local application state is written under the ignored
 `.scully/` directory.
 
-## Try capsule ingestion
+## Try the investigation path
 
 Build the browser application and start the local product:
 
@@ -47,7 +47,10 @@ make dev-api
 
 Open `http://127.0.0.1:8000`, then select **Load seed capsule**. Scully validates
 the capsule before storing its evidence and displays the accepted provenance,
-redaction status, and deterministic signature ID.
+redaction status, and deterministic signature ID. Select **Create
+investigation** to persist and display three evidence-linked causal
+alternatives with bounded experiment plans. Execution remains locked pending
+its review gate.
 
 The public capsule contract is
 [`schemas/capsule-v1.0.schema.json`](schemas/capsule-v1.0.schema.json). The

@@ -59,9 +59,10 @@ Accepted evidence is written with mode `0600` under
 `.scully/artifacts/<hash-prefix>/<sha256>`. Existing content must still match
 its expected size and digest before it can be reused.
 
-SQLite schema version `3` stores the canonical manifest and scopes evidence
+SQLite schema version `4` stores the canonical manifest and scopes evidence
 identifiers and paths to their capsule. The migration preserves evidence from
-the earlier foundation schema.
+the earlier foundation schema. Version `4` also adds the investigation
+planning source without changing capsule storage.
 
 The public read model includes only capsule metadata and evidence lineage. It
 does not return evidence contents, environment values, matcher expectations,
@@ -126,6 +127,6 @@ Tests cover:
    for trusted local application sources such as the included seed.
 3. Artifact retention and deletion policy remain technical debt before broader
    use.
-4. The accepted capsule does not start an investigation yet. Planning begins
-   in Step 2.3.
+4. An accepted capsule starts an investigation only when the user selects the
+   planning action.
 5. Live provider access remains disabled and was not required for this step.

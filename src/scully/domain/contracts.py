@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Annotated
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 Identifier = Annotated[str, Field(min_length=1, max_length=128)]
@@ -97,8 +97,11 @@ class Hypothesis(ContractModel):
     schema_version: SchemaVersion = "1.0"
     hypothesis_id: Identifier
     title: Annotated[str, Field(min_length=1, max_length=160)]
+    mechanism: Annotated[str, Field(min_length=1, max_length=1_000)]
     rationale: Annotated[str, Field(min_length=1, max_length=2_000)]
-    evidence_ids: tuple[Identifier, ...]
+    testable_prediction: Annotated[str, Field(min_length=1, max_length=1_000)]
+    alternative_group: Identifier
+    evidence_ids: Annotated[tuple[Identifier, ...], Field(min_length=1, max_length=16)]
     confidence: Annotated[float, Field(ge=0, le=1)]
 
 
@@ -110,6 +113,8 @@ class ExperimentPlan(ContractModel):
     hypothesis_id: Identifier
     checkpoint_id: Identifier
     adapter: Annotated[str, Field(min_length=1, max_length=64)]
+    variant: Identifier
+    parameters: dict[str, str | int | bool]
     operation_limit: Annotated[int, Field(ge=1, le=16)]
     timeout_seconds: Annotated[int, Field(ge=1, le=300)]
 
@@ -142,3 +147,42 @@ class ReproductionResult(ContractModel):
     experiment_id: Identifier | None = None
     matched_evidence_ids: tuple[Identifier, ...] = ()
     limitations: tuple[Annotated[str, Field(max_length=500)], ...] = ()
+
+
+class InvestigationDetail(ContractModel):
+    """Current persisted investigation planning state."""
+
+    schema_version: SchemaVersion = "1.0"
+    investigation_id: Identifier
+    capsule_id: Identifier
+    status: InvestigationStatus
+    planning_source: Literal["local", "nemotron"]
+    created_at: datetime
+    hypotheses: Annotated[tuple[Hypothesis, ...], Field(min_length=1, max_length=8)]
+    experiments: Annotated[tuple[ExperimentPlan, ...], Field(min_length=1, max_length=8)]
+    events: Annotated[tuple[InvestigationEvent, ...], Field(min_length=1, max_length=64)]
+
+    @field_validator("created_at")
+    @classmethod
+    def require_created_timezone(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("Investigation timestamps must include a timezone")
+        return value
+
+    @model_validator(mode="after")
+    def validate_plan_links(self) -> InvestigationDetail:
+        hypothesis_ids = [item.hypothesis_id for item in self.hypotheses]
+        experiment_hypothesis_ids = [
+            item.hypothesis_id for item in self.experiments
+        ]
+        if (
+            len(hypothesis_ids) != len(set(hypothesis_ids))
+            or len(experiment_hypothesis_ids) != len(set(experiment_hypothesis_ids))
+            or set(hypothesis_ids) != set(experiment_hypothesis_ids)
+        ):
+            raise ValueError("Every hypothesis must have exactly one experiment plan")
+        if any(event.investigation_id != self.investigation_id for event in self.events):
+            raise ValueError("Every event must belong to the investigation")
+        if [event.sequence for event in self.events] != list(range(1, len(self.events) + 1)):
+            raise ValueError("Investigation event sequence must be contiguous")
+        return self
