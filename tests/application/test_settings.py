@@ -21,6 +21,10 @@ class ProductSettingsTests(unittest.TestCase):
 
             self.assertEqual(settings.data_dir, (root / "state").resolve())
             self.assertEqual(settings.web_dist, (root / "ui").resolve())
+            self.assertEqual(
+                settings.seed_capsules_dir,
+                (root / "fixtures/capsules").resolve(),
+            )
 
     def test_blank_path_fails_closed(self) -> None:
         with self.assertRaisesRegex(ValueError, "must not be blank"):

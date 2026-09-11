@@ -1,0 +1,15 @@
+{
+  "requests": [
+    {
+      "client": "198.51.100.10",
+      "method": "GET",
+      "path": "/limited"
+    },
+    {
+      "client": "198.51.100.11",
+      "method": "GET",
+      "path": "/limited"
+    }
+  ],
+  "source": "synthetic"
+}

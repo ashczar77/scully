@@ -1,0 +1,132 @@
+{
+  "schema_version": "1.0",
+  "capsule_id": "proxy-identity-collapse-v1",
+  "title": "Proxy identity collapse",
+  "observed_summary": "Two synthetic clients pass through one controlled reverse proxy. With proxy trust disabled, both requests resolve to one internal identity and the second request receives HTTP 429.",
+  "failure_signature": {
+    "signature_id": "proxy-identity-collapse-v1",
+    "matchers": [
+      {
+        "matcher_id": "response-sequence",
+        "kind": "equals",
+        "path": ["payload", "responses"],
+        "required": true,
+        "expected": [200, 429]
+      },
+      {
+        "matcher_id": "rejection-event",
+        "kind": "equals",
+        "path": ["payload", "events", 1],
+        "required": true,
+        "expected": "rate_limit_rejected"
+      },
+      {
+        "matcher_id": "collapsed-identity",
+        "kind": "same_value",
+        "path": ["payload", "identity_digests", 0],
+        "comparison_path": ["payload", "identity_digests", 1],
+        "required": true
+      },
+      {
+        "matcher_id": "second-forwarded-client",
+        "kind": "equals",
+        "path": ["payload", "forwarded_clients", 1],
+        "required": true,
+        "expected": "198.51.100.11"
+      },
+      {
+        "matcher_id": "process-exit",
+        "kind": "equals",
+        "path": ["exit_code"],
+        "required": true,
+        "expected": 0
+      }
+    ]
+  },
+  "known_good": {
+    "description": "Trust only the controlled loopback proxy. The two forwarded clients resolve to distinct identities and both requests return HTTP 200.",
+    "observation_evidence_id": "known-good-observation",
+    "expected_verdict": "not_reproduced"
+  },
+  "environment": [
+    {
+      "name": "runtime",
+      "incident_value": "Node.js 22.22.2",
+      "known_good_value": "Node.js 22.22.2"
+    },
+    {
+      "name": "framework",
+      "incident_value": "Express 5.2.1",
+      "known_good_value": "Express 5.2.1"
+    },
+    {
+      "name": "proxy-topology",
+      "incident_value": "One controlled loopback proxy hop",
+      "known_good_value": "One controlled loopback proxy hop"
+    },
+    {
+      "name": "trust-proxy",
+      "incident_value": "false",
+      "known_good_value": "loopback"
+    }
+  ],
+  "evidence": [
+    {
+      "evidence_id": "environment",
+      "path": "evidence/environment.json",
+      "sha256": "061813d34eb71950894218f4265a166dda3f894603bf7ee58bfe6c314eb6610a",
+      "byte_size": 236,
+      "media_type": "application/json",
+      "provenance": "Project-created synthetic environment facts",
+      "redaction_status": "clean"
+    },
+    {
+      "evidence_id": "incident-observation",
+      "path": "evidence/incident-observation.json",
+      "sha256": "e91c01477c5f9672eec752530351be66b7564b5f8e4fd6906258536f012b793f",
+      "byte_size": 290,
+      "media_type": "application/json",
+      "provenance": "Project-created synthetic incident observation",
+      "redaction_status": "clean"
+    },
+    {
+      "evidence_id": "known-good-observation",
+      "path": "evidence/known-good-observation.json",
+      "sha256": "aa87c80a8eba3392ffafd577f87b005cf5d77a49aaf410c17206cff4bd7715e1",
+      "byte_size": 293,
+      "media_type": "application/json",
+      "provenance": "Project-created synthetic comparison observation",
+      "redaction_status": "clean"
+    },
+    {
+      "evidence_id": "requests",
+      "path": "evidence/requests.json",
+      "sha256": "bb3d078ef9c517e39be289f26aa085bf701487fe6c6127aa1bc149d65cdae4d8",
+      "byte_size": 236,
+      "media_type": "application/json",
+      "provenance": "Project-created synthetic request sequence",
+      "redaction_status": "clean"
+    },
+    {
+      "evidence_id": "sources",
+      "path": "evidence/sources.json",
+      "sha256": "d4aee9699ae5da2728f866c11677c5e656edc00232613e923a4bd7ab160217fe",
+      "byte_size": 406,
+      "media_type": "application/json",
+      "provenance": "Public documentation URLs with project-created purpose labels",
+      "redaction_status": "clean"
+    }
+  ],
+  "execution_requirements": {
+    "runtime": "nodejs",
+    "runtime_version": "22.22.2",
+    "network_access": false,
+    "max_duration_seconds": 60
+  },
+  "exclusions": [
+    "No production credentials or provider keys",
+    "No customer or employee data",
+    "No production hostnames or network access",
+    "No copied third-party application source"
+  ]
+}

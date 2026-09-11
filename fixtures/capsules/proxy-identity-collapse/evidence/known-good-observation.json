@@ -1,0 +1,19 @@
+{
+  "events": [
+    "request_accepted",
+    "request_accepted"
+  ],
+  "exit_code": 0,
+  "forwarded_clients": [
+    "198.51.100.10",
+    "198.51.100.11"
+  ],
+  "identity_digests": [
+    "identity:test-net-client-a",
+    "identity:test-net-client-b"
+  ],
+  "responses": [
+    200,
+    200
+  ]
+}

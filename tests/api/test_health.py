@@ -17,6 +17,7 @@ class HealthEndpointTests(unittest.TestCase):
             settings = ProductSettings(
                 data_dir=root / "data",
                 web_dist=root / "missing-web-dist",
+                seed_capsules_dir=root / "fixtures",
             )
             with TestClient(create_app(settings)) as client:
                 response = client.get("/api/health")
@@ -47,6 +48,7 @@ class HealthEndpointTests(unittest.TestCase):
             settings = ProductSettings(
                 data_dir=root / "data",
                 web_dist=web_dist,
+                seed_capsules_dir=root / "fixtures",
             )
 
             with TestClient(create_app(settings)) as client:

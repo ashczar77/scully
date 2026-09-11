@@ -1,6 +1,6 @@
 # Safe Incident Reproduction: Hackathon Project Plan
 
-**Status:** Active, Phase 1 feasibility
+**Status:** Active, Phase 2 thin vertical proof
 
 **Date:** 2026-09-04
 
@@ -599,19 +599,22 @@ Deliverables:
 
 - evolve the Phase 1 feasibility scaffold into the product foundation with
   repeatable local development commands;
-- versioned schemas for capsules, normalized evidence, hypotheses,
-  experiments, events, and reproduction results;
-- fixture conventions and a seeded simple incident;
-- baseline unit, integration, and schema validation checks.
+- add the local API application, SQLite schema, and internal versioned
+  contracts for the complete investigation path;
+- add the browser application shell and typed API boundary;
+- add baseline unit, integration, type, build, and startup checks.
 
 **Gate G2.1, foundation review:** Approve only if a clean checkout can install,
-run checks, and load the seeded fixture, and the contracts cover the complete
-vertical path without hidden production dependencies.
+run checks, start the local product, and exercise its readiness boundary, and
+the internal contracts cover the complete vertical path without hidden
+production dependencies.
 
 #### Step 2.2: Implement safe capsule ingestion
 
 Deliverables:
 
+- publish capsule schema version `1.0` and add the seeded proxy-identity
+  incident;
 - capsule import and manifest validation;
 - path, size, type, and malformed-input controls;
 - secret scanning and fail-closed behavior;

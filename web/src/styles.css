@@ -143,8 +143,48 @@ h1 {
   color: #07100d;
   background: #77f2bf;
   font-weight: 760;
+  cursor: pointer;
+  transition: transform 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
+}
+
+.primary-action:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 32px rgba(119, 242, 191, 0.14);
+}
+
+.primary-action:disabled,
+.secondary-action:disabled {
   cursor: not-allowed;
-  opacity: 0.64;
+  opacity: 0.5;
+}
+
+.import-actions {
+  display: flex;
+  min-width: 212px;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.secondary-action {
+  padding: 12px 18px;
+  border: 1px solid rgba(238, 243, 239, 0.18);
+  border-radius: 10px;
+  color: #d7e1db;
+  background: rgba(12, 25, 20, 0.7);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .workspace {
@@ -176,6 +216,28 @@ h2 {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.72rem;
   text-transform: uppercase;
+}
+
+.phase-accepted {
+  border-color: rgba(119, 242, 191, 0.4);
+  color: #77f2bf;
+  background: rgba(119, 242, 191, 0.09);
+}
+
+.rejection {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 24px;
+  padding: 16px 18px;
+  border: 1px solid rgba(255, 123, 114, 0.35);
+  border-radius: 12px;
+  color: #f7c1bd;
+  background: rgba(255, 123, 114, 0.08);
+}
+
+.rejection span {
+  color: #c99e9a;
 }
 
 .signal-grid {
@@ -222,6 +284,123 @@ h2 {
   line-height: 1.5;
 }
 
+.capsule-details {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.82fr) minmax(0, 1.4fr);
+  gap: 18px;
+  margin-top: 30px;
+}
+
+.capsule-summary,
+.evidence-list {
+  border: 1px solid rgba(238, 243, 239, 0.12);
+  border-radius: 16px;
+  background: rgba(12, 25, 20, 0.72);
+}
+
+.capsule-summary {
+  padding: 26px;
+}
+
+.capsule-summary > p {
+  margin: 0;
+  color: #b2beb7;
+  line-height: 1.65;
+}
+
+.capsule-summary dl {
+  display: grid;
+  gap: 14px;
+  margin: 28px 0 0;
+}
+
+.capsule-summary dl > div {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr);
+  gap: 12px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(238, 243, 239, 0.09);
+}
+
+.capsule-summary dt {
+  color: #75837b;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.capsule-summary dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #dbe4df;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82rem;
+}
+
+.evidence-list {
+  overflow: hidden;
+}
+
+.evidence-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 17px 20px;
+}
+
+.evidence-row + .evidence-row {
+  border-top: 1px solid rgba(238, 243, 239, 0.09);
+}
+
+.evidence-status {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 999px;
+  color: #07100d;
+  background: #77f2bf;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.evidence-row > div:nth-child(2) {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.evidence-row strong {
+  font-size: 0.9rem;
+}
+
+.evidence-row > div:nth-child(2) span {
+  overflow: hidden;
+  color: #829088;
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.evidence-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: #8d9b93;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+}
+
+.evidence-meta span:last-child {
+  padding: 5px 7px;
+  border: 1px solid rgba(119, 242, 191, 0.22);
+  border-radius: 6px;
+  color: #77f2bf;
+  background: rgba(119, 242, 191, 0.06);
+}
+
 .foundation-status {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -265,14 +444,27 @@ h2 {
     justify-self: start;
   }
 
+  .import-actions {
+    min-width: min(100%, 320px);
+  }
+
   .signal-grid,
-  .foundation-status {
+  .foundation-status,
+  .capsule-details {
     grid-template-columns: 1fr;
   }
 
   .signal-card + .signal-card {
     border-top: 1px solid rgba(238, 243, 239, 0.12);
     border-left: 0;
+  }
+
+  .evidence-row {
+    grid-template-columns: 28px minmax(0, 1fr);
+  }
+
+  .evidence-meta {
+    grid-column: 2;
   }
 }
 

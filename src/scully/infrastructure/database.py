@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3
 EXPECTED_TABLES = frozenset(
     {
         "schema_metadata",
@@ -37,18 +37,21 @@ CREATE TABLE IF NOT EXISTS capsules (
     title TEXT NOT NULL,
     observed_summary TEXT NOT NULL,
     signature_id TEXT NOT NULL,
-    imported_at TEXT NOT NULL
+    imported_at TEXT NOT NULL,
+    manifest_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS evidence (
-    evidence_id TEXT PRIMARY KEY,
+    evidence_id TEXT NOT NULL,
     capsule_id TEXT NOT NULL REFERENCES capsules(capsule_id),
     relative_path TEXT NOT NULL,
     sha256 TEXT NOT NULL,
     byte_size INTEGER NOT NULL,
     media_type TEXT NOT NULL,
     provenance TEXT NOT NULL,
-    redaction_status TEXT NOT NULL
+    redaction_status TEXT NOT NULL,
+    PRIMARY KEY (capsule_id, evidence_id),
+    UNIQUE (capsule_id, relative_path)
 );
 
 CREATE TABLE IF NOT EXISTS investigations (
@@ -111,6 +114,78 @@ class Database:
                 INSERT OR IGNORE INTO schema_metadata(version, applied_at)
                 VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
                 """,
+                (1,),
+            )
+            capsule_columns = {
+                str(row["name"])
+                for row in connection.execute("PRAGMA table_info(capsules)").fetchall()
+            }
+            if "manifest_json" not in capsule_columns:
+                connection.execute("ALTER TABLE capsules ADD COLUMN manifest_json TEXT")
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO schema_metadata(version, applied_at)
+                VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                """,
+                (2,),
+            )
+            evidence_primary_key = [
+                str(row["name"])
+                for row in sorted(
+                    (
+                        row
+                        for row in connection.execute(
+                            "PRAGMA table_info(evidence)"
+                        ).fetchall()
+                        if row["pk"]
+                    ),
+                    key=lambda row: row["pk"],
+                )
+            ]
+            if evidence_primary_key != ["capsule_id", "evidence_id"]:
+                connection.executescript(
+                    """
+                    CREATE TABLE evidence_v3 (
+                        evidence_id TEXT NOT NULL,
+                        capsule_id TEXT NOT NULL REFERENCES capsules(capsule_id),
+                        relative_path TEXT NOT NULL,
+                        sha256 TEXT NOT NULL,
+                        byte_size INTEGER NOT NULL,
+                        media_type TEXT NOT NULL,
+                        provenance TEXT NOT NULL,
+                        redaction_status TEXT NOT NULL,
+                        PRIMARY KEY (capsule_id, evidence_id),
+                        UNIQUE (capsule_id, relative_path)
+                    );
+                    INSERT INTO evidence_v3(
+                        evidence_id,
+                        capsule_id,
+                        relative_path,
+                        sha256,
+                        byte_size,
+                        media_type,
+                        provenance,
+                        redaction_status
+                    )
+                    SELECT
+                        evidence_id,
+                        capsule_id,
+                        relative_path,
+                        sha256,
+                        byte_size,
+                        media_type,
+                        provenance,
+                        redaction_status
+                    FROM evidence;
+                    DROP TABLE evidence;
+                    ALTER TABLE evidence_v3 RENAME TO evidence;
+                    """
+                )
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO schema_metadata(version, applied_at)
+                VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                """,
                 (SCHEMA_VERSION,),
             )
 
@@ -137,9 +212,11 @@ class Database:
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             ).fetchall()
             versions = connection.execute(
-                "SELECT version FROM schema_metadata"
+                "SELECT version FROM schema_metadata ORDER BY version"
             ).fetchall()
         tables = {str(row["name"]) for row in rows}
         return EXPECTED_TABLES <= tables and [row["version"] for row in versions] == [
-            SCHEMA_VERSION
+            1,
+            2,
+            SCHEMA_VERSION,
         ]

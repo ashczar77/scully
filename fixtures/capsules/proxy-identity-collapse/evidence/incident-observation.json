@@ -1,0 +1,19 @@
+{
+  "events": [
+    "request_accepted",
+    "rate_limit_rejected"
+  ],
+  "exit_code": 0,
+  "forwarded_clients": [
+    "198.51.100.10",
+    "198.51.100.11"
+  ],
+  "identity_digests": [
+    "identity:loopback-proxy",
+    "identity:loopback-proxy"
+  ],
+  "responses": [
+    200,
+    429
+  ]
+}

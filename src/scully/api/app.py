@@ -5,13 +5,24 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
 from scully import __version__
+from scully.application.capsule_import import (
+    MAX_ARCHIVE_BYTES,
+    CapsuleImporter,
+    CapsuleImportError,
+)
 from scully.application.settings import ProductSettings
+from scully.domain.contracts import CapsuleSummary
+from scully.infrastructure.capsules import CapsuleRepository
 from scully.infrastructure.database import Database
+
+
+SEED_CAPSULES = frozenset({"proxy-identity-collapse"})
 
 
 class HealthResponse(BaseModel):
@@ -31,6 +42,8 @@ def create_app(settings: ProductSettings | None = None) -> FastAPI:
 
     product_settings = settings or ProductSettings.from_environment()
     database = Database(product_settings.database_path)
+    capsules = CapsuleRepository(database)
+    capsule_importer = CapsuleImporter(product_settings.artifact_dir, capsules)
 
     @asynccontextmanager
     async def lifespan(unused_app: FastAPI) -> AsyncIterator[None]:
@@ -45,6 +58,16 @@ def create_app(settings: ProductSettings | None = None) -> FastAPI:
     )
     router = APIRouter(prefix="/api")
 
+    @application.exception_handler(CapsuleImportError)
+    async def capsule_import_error(
+        unused_request: Request,
+        error: CapsuleImportError,
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=error.status_code,
+            content={"detail": {"code": error.code, "message": error.message}},
+        )
+
     @router.get("/health", response_model=HealthResponse)
     def health() -> HealthResponse:
         ready = database.is_ready()
@@ -56,9 +79,71 @@ def create_app(settings: ProductSettings | None = None) -> FastAPI:
             live_providers_enabled=False,
         )
 
+    @router.post(
+        "/capsules/import",
+        response_model=CapsuleSummary,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def import_capsule(
+        request: Request,
+        seed: str | None = Query(default=None, max_length=64),
+    ) -> CapsuleSummary:
+        if seed is not None:
+            if seed not in SEED_CAPSULES:
+                raise CapsuleImportError("seed_unknown", "Requested seed capsule is not available")
+            return capsule_importer.import_path(product_settings.seed_capsules_dir / seed)
+
+        media_type = request.headers.get("content-type", "").split(";", 1)[0].strip()
+        if media_type not in {"application/zip", "application/x-zip-compressed"}:
+            raise CapsuleImportError(
+                "import_type_unsupported",
+                "Upload a ZIP archive with application/zip content type",
+            )
+        declared_length = request.headers.get("content-length")
+        if declared_length is not None:
+            try:
+                parsed_length = int(declared_length)
+            except ValueError as error:
+                raise CapsuleImportError(
+                    "content_length_invalid",
+                    "Content-Length must be a non-negative integer",
+                ) from error
+            if parsed_length < 0:
+                raise CapsuleImportError(
+                    "content_length_invalid",
+                    "Content-Length must be a non-negative integer",
+                )
+            if parsed_length > MAX_ARCHIVE_BYTES:
+                raise CapsuleImportError(
+                    "archive_too_large",
+                    "Capsule archive exceeds the size limit",
+                )
+
+        content = bytearray()
+        async for chunk in request.stream():
+            content.extend(chunk)
+            if len(content) > MAX_ARCHIVE_BYTES:
+                raise CapsuleImportError(
+                    "archive_too_large",
+                    "Capsule archive exceeds the size limit",
+                )
+        return capsule_importer.import_zip_bytes(bytes(content))
+
+    @router.get("/capsules/{capsule_id}", response_model=CapsuleSummary)
+    def get_capsule(capsule_id: str) -> CapsuleSummary:
+        capsule = capsules.get(capsule_id)
+        if capsule is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "capsule_not_found", "message": "Capsule was not found"},
+            )
+        return capsule
+
     application.include_router(router)
     application.state.product_settings = product_settings
     application.state.database = database
+    application.state.capsules = capsules
+    application.state.capsule_importer = capsule_importer
 
     if (product_settings.web_dist / "index.html").is_file():
         application.mount(

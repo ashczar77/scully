@@ -1,0 +1,16 @@
+{
+  "sources": [
+    {
+      "purpose": "Reverse-proxy trust behavior",
+      "url": "https://expressjs.com/en/guide/behind-proxies.html"
+    },
+    {
+      "purpose": "Express trust proxy setting",
+      "url": "https://expressjs.com/en/5x/api.html#app.settings.table"
+    },
+    {
+      "purpose": "Documentation-only client addresses",
+      "url": "https://www.rfc-editor.org/info/rfc5737"
+    }
+  ]
+}

@@ -14,6 +14,7 @@ class ProductSettings:
 
     data_dir: Path
     web_dist: Path
+    seed_capsules_dir: Path
 
     @property
     def database_path(self) -> Path:
@@ -40,7 +41,15 @@ class ProductSettings:
         root = (working_directory or Path.cwd()).resolve()
         data_dir = _resolve_path(values.get("SCULLY_DATA_DIR", ".scully"), root)
         web_dist = _resolve_path(values.get("SCULLY_WEB_DIST", "web/dist"), root)
-        return cls(data_dir=data_dir, web_dist=web_dist)
+        seed_capsules_dir = _resolve_path(
+            values.get("SCULLY_SEED_CAPSULES_DIR", "fixtures/capsules"),
+            root,
+        )
+        return cls(
+            data_dir=data_dir,
+            web_dist=web_dist,
+            seed_capsules_dir=seed_capsules_dir,
+        )
 
 
 def _resolve_path(value: str, root: Path) -> Path:

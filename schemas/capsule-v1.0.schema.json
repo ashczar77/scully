@@ -1,0 +1,315 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scully.dev/schemas/capsule-v1.0.schema.json",
+  "title": "Scully Incident Capsule 1.0",
+  "description": "A sanitized, bounded incident capsule for deterministic reproduction.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "capsule_id",
+    "title",
+    "observed_summary",
+    "failure_signature",
+    "known_good",
+    "environment",
+    "evidence",
+    "execution_requirements",
+    "exclusions"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "capsule_id": {
+      "$ref": "#/$defs/identifier"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "observed_summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "failure_signature": {
+      "$ref": "#/$defs/failureSignature"
+    },
+    "known_good": {
+      "$ref": "#/$defs/knownGood"
+    },
+    "environment": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "$ref": "#/$defs/environmentFact"
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 31,
+      "items": {
+        "$ref": "#/$defs/evidence"
+      }
+    },
+    "execution_requirements": {
+      "$ref": "#/$defs/executionRequirements"
+    },
+    "exclusions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 2000
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "path": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {
+        "oneOf": [
+          {
+            "type": "string",
+            "minLength": 1
+          },
+          {
+            "type": "integer",
+            "minimum": 0
+          }
+        ]
+      }
+    },
+    "matcher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "matcher_id",
+        "kind",
+        "path"
+      ],
+      "properties": {
+        "matcher_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "kind": {
+          "enum": [
+            "equals",
+            "same_value"
+          ]
+        },
+        "path": {
+          "$ref": "#/$defs/path"
+        },
+        "required": {
+          "type": "boolean",
+          "default": true
+        },
+        "expected": true,
+        "comparison_path": {
+          "$ref": "#/$defs/path"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "same_value"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "comparison_path"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "equals"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "expected"
+            ],
+            "not": {
+              "required": [
+                "comparison_path"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "failureSignature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "signature_id",
+        "matchers"
+      ],
+      "properties": {
+        "signature_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "matchers": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/matcher"
+          }
+        }
+      }
+    },
+    "knownGood": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "description",
+        "observation_evidence_id",
+        "expected_verdict"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "observation_evidence_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "expected_verdict": {
+          "const": "not_reproduced"
+        }
+      }
+    },
+    "environmentFact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "incident_value"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/identifier"
+        },
+        "incident_value": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "known_good_value": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_id",
+        "path",
+        "sha256",
+        "byte_size",
+        "media_type",
+        "provenance",
+        "redaction_status"
+      ],
+      "properties": {
+        "evidence_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "byte_size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 524288
+        },
+        "media_type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "provenance": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "redaction_status": {
+          "enum": [
+            "clean",
+            "redacted"
+          ]
+        }
+      }
+    },
+    "executionRequirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runtime",
+        "runtime_version",
+        "network_access",
+        "max_duration_seconds"
+      ],
+      "properties": {
+        "runtime": {
+          "$ref": "#/$defs/identifier"
+        },
+        "runtime_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "network_access": {
+          "const": false
+        },
+        "max_duration_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300
+        }
+      }
+    }
+  }
+}
