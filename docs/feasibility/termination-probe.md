@@ -1,6 +1,6 @@
 # Step 1.3 Termination Probe
 
-**Status:** Corrective live proposal in review at checkpoint G1.3e
+**Status:** Corrective live result in review at checkpoint G1.3f
 
 **Review date:** 2026-09-08
 
@@ -219,12 +219,54 @@ preparation of a correction. The corrected runner now:
 - preserves every previously reviewed timeout, status, cancellation, cleanup,
   retry, duration, and evidence limit.
 
-The failed result for attempt 001 remains unchanged. No corrective provider
-request or Sandbox operation occurred during this implementation.
+The failed result for attempt 001 remains unchanged.
+
+## Corrective live result
+
+Checkpoint G1.3e approved exactly one execution of
+`g1.3-termination-002`. Its redacted preflight passed, and the attempt ran once
+with no retry. The timeout path passed and allowed the cancellation path to
+start. The cancellation path then stopped with `ProviderContractError` after
+the primary cancellation request and after a terminal response was observed.
+
+The redacted result records:
+
+- two attempted spawn calls and two confirmed operation identifiers;
+- five status reads across both paths;
+- one primary cancellation request;
+- zero cleanup cancellation requests;
+- eight application client calls;
+- zero retries;
+- 4.923579 seconds of local wall time;
+- no provider-reported cost.
+
+The durable record is
+`validation/results/g1.3-termination-probe-002.json`. It contains no operation
+identifier, command output, provider message, credential, or project ID.
+
+## Offline failure localization
+
+The counters and control flow prove that the timeout observation passed every
+required check: remote `SUCCESS`, `timed_out=true`, disposable execution, no
+result image, and a valid duration. They also prove that the explicit cancel
+request was accepted and a terminal cancellation-path response was returned.
+No unexplained active operation remained, so cleanup was neither required nor
+sent.
+
+The current redaction is too coarse to identify which post-terminal invariant
+failed. The remaining possibilities are limited to:
+
+1. the terminal status was not `CANCELLED`;
+2. disposable or no-result-image retention facts did not match the contract;
+3. the reported duration did not satisfy the numeric contract.
+
+No additional provider call is needed to improve this diagnosis. A future
+offline correction can assign non-sensitive reason codes to these individual
+checks and test their redaction before any new execution proposal.
 
 ## Decision requested
 
-Approve exactly one execution of `g1.3-termination-002` within the existing
-reviewed bounds. Approval does not authorize another attempt, a Nemotron
-request, or a Tavily search. Submit the redacted result at checkpoint G1.3f
-before deciding Gate G1.3.
+Accept the failed corrective result at checkpoint G1.3f. Do not approve Gate
+G1.3 yet. Authorize offline addition of bounded, non-sensitive failure reason
+codes and fixture coverage, without provider use. Any further live attempt
+would require a separate reviewed proposal.
