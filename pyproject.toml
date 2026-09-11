@@ -12,8 +12,11 @@ license = "Apache-2.0"
 dependencies = [
     "contree-client==0.4.0",
     "contree-sdk==0.3.3",
+    "fastapi==0.141.1",
     "openai==3.8.0",
+    "pydantic==2.13.5",
     "tavily-python==0.8.1",
+    "uvicorn==0.52.4",
 ]
 
 [project.scripts]
@@ -23,6 +26,7 @@ scully-probe-tavily = "scully.probes.tavily:main"
 scully-probe-sandbox = "scully.probes.sandbox:main"
 scully-probe-integrity = "scully.probes.integrity:main"
 scully-probe-termination = "scully.probes.termination:main"
+scully-app = "scully.api.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

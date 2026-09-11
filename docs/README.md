@@ -13,9 +13,10 @@ customer data.
 
 - Phase: Thin vertical proof
 - Completed gates: G0.1 through G1.4 and checkpoints G1.2a through G1.3f
-- Active step: Step 2.1, product foundation and contracts
+- Active step: Gate G2.1, product foundation review
 - Next checkpoint: Gate G2.1, foundation review
-- Implementation: Backend, SQLite, frontend shell, and development commands
+- Implementation: Offline backend, SQLite, frontend shell, and development
+  workflow verified
 - Out-of-pocket cost limit: Zero
 - Submission deadline: 30 October 2026
 
@@ -67,6 +68,8 @@ customer data.
 | [Gate G1.3 review](gates/G1.3-execution-integrity-review.md) | Accepted evidence, cancellation limitation, and timeout fallback | Accepted with limitation |
 | [Implementation architecture](product/implementation-architecture.md) | Product stack, boundaries, data flow, capsule direction, and first build backlog | Approved at G1.4 |
 | [Gate G1.4 review](gates/G1.4-phase-1-exit-review.md) | Phase 1 exit and Step 2.1 product-foundation decision | Approved |
+| [Product foundation](product/product-foundation.md) | Implemented backend, SQLite, contracts, browser shell, commands, and verification | Implemented for G2.1 review |
+| [Gate G2.1 review](gates/G2.1-foundation-review.md) | Evidence and decision record for the offline product foundation | In review |
 | [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol retained for later direct validation | Deferred evidence |
 | [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for later direct validation | Ready for future use |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |
@@ -77,7 +80,8 @@ The Apache License 2.0 in the repository root remains the project license.
 
 No further termination probe is approved. Explicit cancellation is tracked as
 technical debt, with provider command timeout plus local deadlines as the
-initial fallback. Gate G1.4 approved the implementation architecture and
-authorized the offline Step 2.1 product foundation.
+initial fallback. The offline Step 2.1 product foundation is implemented and
+awaiting Gate G2.1 approval. Approval authorizes Step 2.2 safe seeded capsule
+ingestion only.
 
 New documentation should support the active hackathon project.

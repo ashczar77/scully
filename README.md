@@ -11,19 +11,30 @@ harness into the working product. See the
 
 ## Development
 
-Create an isolated environment and install the reviewed dependency lock:
+Install the backend and frontend dependencies:
 
 ```shell
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.lock
-.venv/bin/python -m pip install --no-build-isolation --no-deps -e .
+make install
 ```
 
-Run the offline tests without loading local credentials:
+Run the complete offline test suite and build the frontend:
 
 ```shell
-PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
+make test
+make typecheck
+make build
 ```
+
+Start the API and frontend development servers in separate terminals:
+
+```shell
+make dev-api
+make dev-web
+```
+
+The API listens on `http://127.0.0.1:8000` and the frontend listens on
+`http://127.0.0.1:5173`. Local application state is written under the ignored
+`.scully/` directory.
 
 Inspect local execution readiness without contacting a provider:
 
