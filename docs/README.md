@@ -12,10 +12,10 @@ customer data.
 ## Current status
 
 - Phase: Sponsor-stack and architecture feasibility
-- Completed gates: G0.1 through G1.2 and checkpoints G1.2a through G1.3e
-- Active step: Checkpoint G1.3f, corrective termination result review
-- Next checkpoint: Gate G1.3f decision
-- Implementation: Corrected direct image source and operation accounting
+- Completed gates: G0.1 through G1.2 and checkpoints G1.2a through G1.3f
+- Active step: Offline termination diagnostic correction
+- Next checkpoint: Checkpoint G1.3g, diagnostic correction review
+- Implementation: Bounded termination failure reason codes and fixtures
 - Out-of-pocket cost limit: Zero
 - Submission deadline: 30 October 2026
 
@@ -62,7 +62,7 @@ customer data.
 | [Checkpoint G1.3c review](gates/G1.3c-termination-test-review.md) | Offline evidence and execution decision for the termination probe | Approved |
 | [Checkpoint G1.3d review](gates/G1.3d-termination-result-review.md) | Failure evidence, root cause, and corrective preparation decision | Approved |
 | [Checkpoint G1.3e review](gates/G1.3e-corrective-termination-review.md) | Corrected image-source contract, accounting, and execution decision | Approved |
-| [Checkpoint G1.3f review](gates/G1.3f-corrective-termination-result-review.md) | Evidence and decision record for the corrected termination attempt | In review |
+| [Checkpoint G1.3f review](gates/G1.3f-corrective-termination-result-review.md) | Evidence and decision record for the corrected termination attempt | Approved for offline correction |
 | [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol retained for later direct validation | Deferred evidence |
 | [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for later direct validation | Ready for future use |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |
@@ -74,7 +74,7 @@ The Apache License 2.0 in the repository root remains the project license.
 The corrected attempt ran exactly once. Its timeout path passed, but its
 cancellation path returned a terminal response that failed a post-terminal
 contract check. The redacted result is safe but does not distinguish status,
-retention, and duration mismatches. Checkpoint G1.3f requests approval for an
-offline diagnostic correction only. No further live attempt is authorized.
+retention, and duration mismatches. Checkpoint G1.3f authorizes an offline
+diagnostic correction only. No further live attempt is authorized.
 
 New documentation should support the active hackathon project.
