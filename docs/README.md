@@ -13,8 +13,8 @@ customer data.
 
 - Phase: Trust UI and visual system
 - Completed gates: G0.1 through G2.5 and checkpoints G1.2a through G1.3f
-- Active step: Step 3.4, reproduction proof experience
-- Next checkpoint: Gate G3.4, proof and accessibility review
+- Active step: Step 3.5, comprehension validation
+- Next checkpoint: Gate G3.5, Phase 3 exit review
 - Implementation: Working offline path from safe capsule import through
   progressive branch execution and a runnable reproduction download
 - Out-of-pocket cost limit: Zero
@@ -85,7 +85,7 @@ customer data.
 | [Hypothesis map and experiment inspector](product/hypothesis-map-inspector.md) | Branch states, progressive results, comparison, diffs, output boundary, matcher results, and evidence lineage | Implemented for G3.3 review |
 | [Gate G3.3 review](gates/G3.3-investigation-legibility-review.md) | Evidence and decision record for investigation legibility | Approved |
 | [Reproduction proof experience](product/reproduction-proof-experience.md) | Signature comparison, causal delta, evidence chain, runnable test, export, limitations, and proof states | Implemented for G3.4 review |
-| [Gate G3.4 review](gates/G3.4-proof-accessibility-review.md) | Evidence and decision record for the reproduction proof and accessibility | In review |
+| [Gate G3.4 review](gates/G3.4-proof-accessibility-review.md) | Evidence and decision record for the reproduction proof and accessibility | Approved |
 | [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol retained for later direct validation | Deferred evidence |
 | [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for later direct validation | Ready for future use |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |
@@ -108,6 +108,7 @@ Gate G2.5 approved the complete vertical proof and authorized Step 3.1 only.
 Gate G3.1 approved the experience foundation and authorized Step 3.2 only.
 Gate G3.2 approved intake and incident orientation and authorized Step 3.3 only.
 Gate G3.3 approved investigation legibility and authorized Step 3.4 only.
+Gate G3.4 approved the reproduction proof and authorized Step 3.5 only.
 Live provider product paths remain disabled and separately gated.
 
 New documentation should support the active hackathon project.
