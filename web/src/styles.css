@@ -705,11 +705,69 @@ h2 {
   font-size: 0.63rem;
 }
 
+.reproduction-download {
+  display: inline-flex;
+  gap: 18px;
+  align-items: center;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid rgba(119, 242, 191, 0.35);
+  border-radius: 8px;
+  color: #77f2bf;
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.reproduction-download:hover {
+  border-color: #77f2bf;
+  background: rgba(119, 242, 191, 0.08);
+}
+
 .execution-action {
   margin-top: 14px;
   padding: 10px 12px;
   gap: 18px;
   font-size: 0.76rem;
+}
+
+.live-progress {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  margin-top: 12px;
+  color: #b8c5be;
+}
+
+.live-progress strong {
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.65rem;
+  font-weight: 650;
+  text-transform: capitalize;
+}
+
+.live-progress small {
+  display: block;
+  margin-top: 3px;
+  color: #748179;
+  font-size: 0.6rem;
+}
+
+.live-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #77f2bf;
+  box-shadow: 0 0 0 5px rgba(119, 242, 191, 0.1);
+  animation: live-pulse 900ms ease-in-out infinite alternate;
+}
+
+@keyframes live-pulse {
+  to {
+    opacity: 0.45;
+    transform: scale(0.8);
+  }
 }
 
 @media (max-width: 760px) {
@@ -778,6 +836,10 @@ h2 {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .live-pulse {
+    animation: none;
+  }
+
   *,
   *::before,
   *::after {

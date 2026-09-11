@@ -48,6 +48,8 @@ CLIENT_IDENTITIES = {
     "198.51.100.10": "identity:test-net-client-a",
     "198.51.100.11": "identity:test-net-client-b",
 }
+ProgressPayload = dict[str, str | int | float | bool | None]
+ProgressCallback = Callable[[str, ProgressPayload], None]
 SANDBOX_BASE_IMAGE = "python:3.12-slim"
 SANDBOX_EXECUTABLE = "/usr/local/bin/python"
 SANDBOX_SCRIPT = """import json
@@ -90,6 +92,8 @@ class ExecutionAdapter(Protocol):
         investigation_id: str,
         capsule: CapsuleManifest,
         plans: tuple[ExperimentPlan, ...],
+        *,
+        progress: ProgressCallback | None = None,
     ) -> ExecutionReport:
         """Run all allowed plans and return deterministic evaluation results."""
 
@@ -125,6 +129,8 @@ class LocalExecutionAdapter:
         investigation_id: str,
         capsule: CapsuleManifest,
         plans: tuple[ExperimentPlan, ...],
+        *,
+        progress: ProgressCallback | None = None,
     ) -> ExecutionReport:
         """Execute three isolated variants from one immutable checkpoint."""
 
@@ -133,6 +139,12 @@ class LocalExecutionAdapter:
         requests = _load_json_evidence(capsule, "requests", self.artifact_dir)
         checkpoint = _build_checkpoint(environment, requests)
         signature = _failure_signature(capsule)
+        _emit(progress, "execution.started", {"source": "local"})
+        _emit(
+            progress,
+            "checkpoint.created",
+            {"checkpoint_id": plans[0].checkpoint_id},
+        )
         global_started = self.timer()
         deadline = global_started + min(plan.timeout_seconds for plan in plans)
         outcomes: list[ExperimentOutcome] = []
@@ -144,9 +156,19 @@ class LocalExecutionAdapter:
             branch_started = self.timer()
             if branch_started >= deadline:
                 deadline_reached = True
-                outcomes.append(_timeout_outcome(plan, signature, 0.0))
+                timed_out = _timeout_outcome(plan, signature, 0.0)
+                outcomes.append(timed_out)
+                _emit_branch_result(progress, plan, timed_out)
                 continue
 
+            _emit(
+                progress,
+                "experiment.started",
+                {
+                    "experiment_id": plan.experiment_id,
+                    "hypothesis_id": plan.hypothesis_id,
+                },
+            )
             branch = deepcopy(checkpoint)
             markers = branch["markers"]
             if not isinstance(markers, set):
@@ -156,6 +178,15 @@ class LocalExecutionAdapter:
                     status_code=500,
                 )
             markers.add(plan.variant)
+            _emit(
+                progress,
+                "experiment.operation",
+                {
+                    "experiment_id": plan.experiment_id,
+                    "operation": "apply_allowlisted_variant",
+                    "variant": plan.variant,
+                },
+            )
             _apply_variant(branch, plan)
             observation = _simulate_proxy_incident(branch)
             operation_count += 1
@@ -163,7 +194,9 @@ class LocalExecutionAdapter:
             duration_ms = max(0.0, (branch_ended - branch_started) * 1_000)
             if branch_ended > deadline or duration_ms > plan.timeout_seconds * 1_000:
                 deadline_reached = True
-                outcomes.append(_timeout_outcome(plan, signature, duration_ms))
+                timed_out = _timeout_outcome(plan, signature, duration_ms)
+                outcomes.append(timed_out)
+                _emit_branch_result(progress, plan, timed_out)
                 continue
 
             evaluation = evaluate_signature(
@@ -176,7 +209,9 @@ class LocalExecutionAdapter:
                     payload=observation,
                 ),
             )
-            outcomes.append(_completed_outcome(plan, evaluation, duration_ms))
+            completed = _completed_outcome(plan, evaluation, duration_ms)
+            outcomes.append(completed)
+            _emit_branch_result(progress, plan, completed)
             snapshots.append(
                 BranchSnapshot(
                     experiment_id=plan.experiment_id,
@@ -203,7 +238,7 @@ class LocalExecutionAdapter:
             )
         if len(supported) != 1:
             limitations.append("Execution did not support exactly one causal alternative")
-        return ExecutionReport(
+        report = ExecutionReport(
             investigation_id=investigation_id,
             checkpoint_id=plans[0].checkpoint_id,
             status=(
@@ -221,6 +256,19 @@ class LocalExecutionAdapter:
             outcomes=tuple(outcomes),
             limitations=tuple(limitations),
         )
+        _emit(progress, "isolation.verified", {"passed": isolation_verified})
+        _emit(
+            progress,
+            "investigation.completed"
+            if report.status is InvestigationStatus.COMPLETED
+            else "investigation.timed_out",
+            {
+                "status": report.status.value,
+                "operation_count": report.operation_count,
+                "retry_count": report.retry_count,
+            },
+        )
+        return report
 
 
 class SandboxExecutionAdapter:
@@ -234,11 +282,19 @@ class SandboxExecutionAdapter:
         investigation_id: str,
         capsule: CapsuleManifest,
         plans: tuple[ExperimentPlan, ...],
+        *,
+        progress: ProgressCallback | None = None,
     ) -> ExecutionReport:
         """Map the fixed Sandbox branch lifecycle into the product contract."""
 
         _validate_plans(plans)
         signature = _failure_signature(capsule)
+        _emit(progress, "execution.started", {"source": "sandbox"})
+        _emit(
+            progress,
+            "checkpoint.created",
+            {"checkpoint_id": plans[0].checkpoint_id},
+        )
         outcome = self.runner.run_branches(
             investigation_id=investigation_id,
             base_image=SANDBOX_BASE_IMAGE,
@@ -270,6 +326,23 @@ class SandboxExecutionAdapter:
         )
         results = []
         for plan, branch in zip(plans, outcome.branches, strict=True):
+            _emit(
+                progress,
+                "experiment.started",
+                {
+                    "experiment_id": plan.experiment_id,
+                    "hypothesis_id": plan.hypothesis_id,
+                },
+            )
+            _emit(
+                progress,
+                "experiment.operation",
+                {
+                    "experiment_id": plan.experiment_id,
+                    "operation": "apply_allowlisted_variant",
+                    "variant": plan.variant,
+                },
+            )
             if branch.exit_code != 0:
                 evaluation = evaluate_signature(
                     signature,
@@ -280,14 +353,14 @@ class SandboxExecutionAdapter:
                         error_code="sandbox_branch_failed",
                     ),
                 )
-                results.append(
-                    _inconclusive_outcome(
-                        plan,
-                        evaluation,
-                        ExperimentStatus.FAILED,
-                        branch.elapsed_seconds * 1_000,
-                    )
+                failed_outcome = _inconclusive_outcome(
+                    plan,
+                    evaluation,
+                    ExperimentStatus.FAILED,
+                    branch.elapsed_seconds * 1_000,
                 )
+                results.append(failed_outcome)
+                _emit_branch_result(progress, plan, failed_outcome)
                 continue
             observation = _parse_sandbox_observation(branch.stdout)
             evaluation = evaluate_signature(
@@ -300,20 +373,20 @@ class SandboxExecutionAdapter:
                     payload=observation,
                 ),
             )
-            results.append(
-                _completed_outcome(
-                    plan,
-                    evaluation,
-                    branch.elapsed_seconds * 1_000,
-                )
+            completed_outcome = _completed_outcome(
+                plan,
+                evaluation,
+                branch.elapsed_seconds * 1_000,
             )
+            results.append(completed_outcome)
+            _emit_branch_result(progress, plan, completed_outcome)
         supported = [
             item.hypothesis_id
             for item in results
             if item.hypothesis_disposition is HypothesisDisposition.SUPPORTED
         ]
         failed = any(item.status is ExperimentStatus.FAILED for item in results)
-        return ExecutionReport(
+        report = ExecutionReport(
             investigation_id=investigation_id,
             checkpoint_id=plans[0].checkpoint_id,
             status=(
@@ -329,6 +402,17 @@ class SandboxExecutionAdapter:
             outcomes=tuple(results),
             limitations=("Explicit remote cancellation remains unproven",),
         )
+        _emit(progress, "isolation.verified", {"passed": isolation_verified})
+        _emit(
+            progress,
+            "investigation.failed" if failed else "investigation.completed",
+            {
+                "status": report.status.value,
+                "operation_count": report.operation_count,
+                "retry_count": report.retry_count,
+            },
+        )
+        return report
 
 
 def _validate_plans(plans: tuple[ExperimentPlan, ...]) -> None:
@@ -603,3 +687,36 @@ def _isolation_plan(plans: Sequence[ExperimentPlan]) -> ExecutionIntegrityPlan:
 
 def _reject_json_constant(value: str) -> None:
     raise ValueError(f"Unsupported JSON constant: {value}")
+
+
+def _emit(
+    progress: ProgressCallback | None,
+    event_type: str,
+    payload: ProgressPayload,
+) -> None:
+    if progress is not None:
+        progress(event_type, payload)
+
+
+def _emit_branch_result(
+    progress: ProgressCallback | None,
+    plan: ExperimentPlan,
+    outcome: ExperimentOutcome,
+) -> None:
+    _emit(
+        progress,
+        "experiment.result",
+        {
+            "experiment_id": plan.experiment_id,
+            "status": outcome.status.value,
+            "verdict": outcome.verdict.value,
+        },
+    )
+    _emit(
+        progress,
+        "evaluation.completed",
+        {
+            "experiment_id": plan.experiment_id,
+            "hypothesis_disposition": outcome.hypothesis_disposition.value,
+        },
+    )

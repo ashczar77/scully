@@ -111,6 +111,7 @@ export function App() {
   const [planningError, setPlanningError] = useState<string | null>(null);
   const [executionState, setExecutionState] = useState<ExecutionState>("idle");
   const [executionError, setExecutionError] = useState<string | null>(null);
+  const [liveEvents, setLiveEvents] = useState<string[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -155,6 +156,7 @@ export function App() {
       setPlanningError(null);
       setExecutionState("idle");
       setExecutionError(null);
+      setLiveEvents([]);
     } catch (error) {
       setCapsule(null);
       setRejection(error instanceof Error ? error.message : "Capsule was rejected");
@@ -188,6 +190,7 @@ export function App() {
       setInvestigation(payload as InvestigationDetail);
       setPlanningState("ready");
       setExecutionState("idle");
+      setLiveEvents([]);
     } catch (error) {
       setInvestigation(null);
       setPlanningError(
@@ -200,20 +203,53 @@ export function App() {
   async function executeInvestigation(investigationId: string) {
     setExecutionState("running");
     setExecutionError(null);
+    setLiveEvents([]);
     try {
       const response = await fetch(
-        `/api/investigations/${investigationId}/execute`,
+        `/api/investigations/${investigationId}/execute/stream`,
         { method: "POST" },
       );
-      const payload = (await response.json()) as
-        | InvestigationDetail
-        | ImportErrorResponse;
       if (!response.ok) {
+        const payload = (await response.json()) as ImportErrorResponse;
         const detail = "detail" in payload ? payload.detail : null;
         throw new Error(detail?.message ?? "Branch execution failed");
       }
-      setInvestigation(payload as InvestigationDetail);
+      if (!response.body) {
+        setInvestigation((await response.json()) as InvestigationDetail);
+        setExecutionState("complete");
+        return;
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let completed: InvestigationDetail | null = null;
+      while (true) {
+        const { value, done } = await reader.read();
+        buffer += decoder.decode(value, { stream: !done });
+        const frames = buffer.split("\n\n");
+        buffer = frames.pop() ?? "";
+        for (const frame of frames) {
+          const message = parseSseFrame(frame);
+          if (!message) continue;
+          if (message.eventType === "error") {
+            const error = message.payload as { message?: string };
+            throw new Error(error.message ?? "Branch execution failed");
+          }
+          if (message.eventType === "complete") {
+            completed = message.payload as InvestigationDetail;
+          } else {
+            setLiveEvents((current) => [...current, message.eventType]);
+          }
+        }
+        if (done) break;
+      }
+      if (!completed) {
+        throw new Error("Execution stream ended before completion");
+      }
+      setInvestigation(completed);
       setExecutionState("complete");
+      setLiveEvents([]);
     } catch (error) {
       setExecutionError(
         error instanceof Error ? error.message : "Branch execution failed",
@@ -355,6 +391,7 @@ export function App() {
             <InvestigationPlan
               investigation={investigation}
               executionState={executionState}
+              liveEvents={liveEvents}
               onExecute={() =>
                 void executeInvestigation(investigation.investigation_id)
               }
@@ -451,10 +488,12 @@ function CapsuleDetails({
 function InvestigationPlan({
   investigation,
   executionState,
+  liveEvents,
   onExecute,
 }: {
   investigation: InvestigationDetail;
   executionState: ExecutionState;
+  liveEvents: string[];
   onExecute: () => void;
 }) {
   const execution = investigation.execution;
@@ -557,6 +596,14 @@ function InvestigationPlan({
                 {" · "}{execution.operation_count} operations{" · "}
                 {execution.retry_count} retries
               </small>
+              <a
+                className="reproduction-download"
+                href={`/api/investigations/${investigation.investigation_id}/reproduction.zip`}
+                download="scully-proxy-identity-collapse.zip"
+              >
+                Download reproduction
+                <span aria-hidden="true">↓</span>
+              </a>
             </div>
           </div>
         ) : (
@@ -574,6 +621,15 @@ function InvestigationPlan({
                 {executionState === "running" ? "Running branches" : "Run 3 branches"}
                 <span aria-hidden="true">→</span>
               </button>
+              {executionState === "running" && liveEvents.length > 0 && (
+                <div className="live-progress" role="status">
+                  <span className="live-pulse" aria-hidden="true" />
+                  <div>
+                    <strong>{formatVariant(liveEvents.at(-1) ?? "execution started")}</strong>
+                    <small>{liveEvents.length} live events received</small>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -594,4 +650,12 @@ function formatDisposition(disposition: ExperimentOutcome["hypothesis_dispositio
   if (disposition === "supported") return "Supports hypothesis";
   if (disposition === "eliminated") return "Hypothesis eliminated";
   return "Inconclusive";
+}
+
+function parseSseFrame(frame: string) {
+  const lines = frame.split("\n");
+  const eventType = lines.find((line) => line.startsWith("event: "))?.slice(7);
+  const data = lines.find((line) => line.startsWith("data: "))?.slice(6);
+  if (!eventType || !data) return null;
+  return { eventType, payload: JSON.parse(data) as unknown };
 }

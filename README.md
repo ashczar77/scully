@@ -4,8 +4,8 @@ Scully turns sanitized production-incident evidence into a minimal executable
 reproduction without giving AI unrestricted production access.
 
 The project has completed its feasibility gates and now includes a working
-offline product path from safe capsule import to a persisted, evidence-linked
-investigation plan. See the
+offline product path from safe capsule import to progressive branch execution,
+deterministic cause selection, and a downloadable runnable reproduction. See the
 [hackathon project plan](docs/HACKATHON_PROJECT_PLAN.md) and
 [project documentation](docs/README.md) for its status and roadmap.
 
@@ -52,6 +52,12 @@ investigation** to persist and display three evidence-linked causal
 alternatives with bounded experiment plans. Select **Run 3 branches** to test
 all three from one clean checkpoint and display the deterministically supported
 cause.
+
+Select **Download reproduction**, extract the ZIP, then run `npm ci` and
+`npm run verify` inside its directory. The included regression test is expected
+to fail with the reproduced `200,429` response sequence. Full clean-checkout
+instructions and measurements are in the
+[end-to-end proof](docs/product/end-to-end-proof.md).
 
 The public capsule contract is
 [`schemas/capsule-v1.0.schema.json`](schemas/capsule-v1.0.schema.json). The

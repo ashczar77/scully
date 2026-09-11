@@ -76,6 +76,8 @@ customer data.
 | [Gate G2.3 review](gates/G2.3-planning-review.md) | Evidence and decision record for bounded hypothesis planning | Approved |
 | [Branched execution](product/branched-execution.md) | Local branch isolation, signature evaluation, limits, event replay, UI, and Sandbox boundary | Implemented for G2.4 review |
 | [Gate G2.4 review](gates/G2.4-execution-review.md) | Evidence and decision record for deterministic branch execution | Approved |
+| [First end-to-end proof](product/end-to-end-proof.md) | Progressive execution, runnable reproduction, clean setup, measurements, and limitations | Implemented for G2.5 review |
+| [Gate G2.5 review](gates/G2.5-phase-2-exit-review.md) | Evidence and decision record for the Phase 2 vertical proof | In review |
 | [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol retained for later direct validation | Deferred evidence |
 | [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for later direct validation | Ready for future use |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |

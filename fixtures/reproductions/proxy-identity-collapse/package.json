@@ -1,0 +1,17 @@
+{
+  "name": "scully-proxy-identity-collapse-reproduction",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "22.22.2"
+  },
+  "scripts": {
+    "observe": "node scripts/observe.mjs",
+    "test": "node --test test/proxy-identity-collapse.test.mjs",
+    "verify": "node scripts/verify-reproduction.mjs"
+  },
+  "dependencies": {
+    "express": "5.2.1"
+  }
+}

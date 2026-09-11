@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -55,6 +57,15 @@ class InvestigationEndpointTests(unittest.TestCase):
         self.assertEqual(loaded.status_code, 200)
         self.assertEqual(loaded.json(), payload)
 
+        premature_package = self.client.get(
+            f"/api/investigations/{payload['investigation_id']}/reproduction.zip"
+        )
+        self.assertEqual(premature_package.status_code, 409)
+        self.assertEqual(
+            premature_package.json()["detail"]["code"],
+            "investigation_not_completed",
+        )
+
         executed = self.client.post(
             f"/api/investigations/{payload['investigation_id']}/execute"
         )
@@ -76,6 +87,43 @@ class InvestigationEndpointTests(unittest.TestCase):
         self.assertIn("text/event-stream", replay.headers["content-type"])
         self.assertIn("event: experiment.operation", replay.text)
         self.assertIn("event: investigation.completed", replay.text)
+
+        second = self.client.post(
+            "/api/investigations",
+            json={"capsule_id": "proxy-identity-collapse-v1"},
+        )
+        self.assertEqual(second.status_code, 201)
+        streamed = self.client.post(
+            f"/api/investigations/{second.json()['investigation_id']}/execute/stream"
+        )
+        self.assertEqual(streamed.status_code, 200)
+        self.assertIn("text/event-stream", streamed.headers["content-type"])
+        self.assertIn("event: execution.started", streamed.text)
+        self.assertEqual(streamed.text.count("event: experiment.result"), 3)
+        self.assertIn("event: complete", streamed.text)
+        event_types = [
+            line.removeprefix("event: ")
+            for line in streamed.text.splitlines()
+            if line.startswith("event: ")
+        ]
+        self.assertEqual(len(event_types), 17)
+        self.assertEqual(event_types[0], "execution.started")
+        self.assertEqual(event_types[-1], "complete")
+
+        package = self.client.get(
+            f"/api/investigations/{payload['investigation_id']}/reproduction.zip"
+        )
+        self.assertEqual(package.status_code, 200)
+        self.assertEqual(package.headers["content-type"], "application/zip")
+        self.assertEqual(
+            package.headers["content-disposition"],
+            "attachment; filename=scully-proxy-identity-collapse.zip",
+        )
+        with zipfile.ZipFile(io.BytesIO(package.content)) as archive:
+            self.assertIn(
+                "scully-proxy-identity-collapse/reproduction.json",
+                archive.namelist(),
+            )
 
     def test_missing_capsule_and_investigation_return_reason_codes(self) -> None:
         missing_capsule = self.client.post(

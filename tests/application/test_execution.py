@@ -42,10 +42,18 @@ class LocalExecutionAdapterTests(unittest.TestCase):
 
     def test_three_isolated_branches_select_one_supported_hypothesis(self) -> None:
         timer = iter([0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
+        progress = []
         report = LocalExecutionAdapter(
             self.artifact_dir,
             timer=lambda: next(timer),
-        ).execute("inv-execution", self.manifest, self.plans)
+        ).execute(
+            "inv-execution",
+            self.manifest,
+            self.plans,
+            progress=lambda event_type, payload: progress.append(
+                (event_type, payload)
+            ),
+        )
 
         self.assertEqual(report.status.value, "completed")
         self.assertTrue(report.isolation_verified)
@@ -66,6 +74,13 @@ class LocalExecutionAdapterTests(unittest.TestCase):
         self.assertEqual(
             report.outcomes[1].elimination_reasons,
             ("failure_signature_still_reproduced",),
+        )
+        self.assertEqual(len(progress), 16)
+        self.assertEqual(progress[0][0], "execution.started")
+        self.assertEqual(progress[-1][0], "investigation.completed")
+        self.assertEqual(
+            [item[0] for item in progress].count("experiment.result"),
+            3,
         )
 
     def test_local_deadline_stops_new_work_without_retry(self) -> None:

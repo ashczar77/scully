@@ -110,9 +110,11 @@ The 22-event sequence is contiguous. The API exposes the complete ordered
 history as a replayable `text/event-stream` response at
 `GET /api/investigations/{investigation_id}/events`.
 
-The synchronous local run finishes before the browser requests its completed
-state. Progressive event delivery during a running branch is deferred to the
-end-to-end work in Step 2.5.
+Step 2.5 added a separate live execution endpoint at
+`POST /api/investigations/{investigation_id}/execute/stream`. It emits progress
+as execution happens and terminates with the persisted investigation. The
+replay endpoint remains available for later audit. See the
+[end-to-end proof](end-to-end-proof.md).
 
 ## Browser behavior
 
@@ -145,16 +147,14 @@ Tests cover:
 
 ## Known limitations
 
-1. Local execution is a deterministic simulator for the seeded incident, not
-   the final runnable reproduction package.
-2. The event stream currently replays persisted events after the synchronous
-   run. It does not yet deliver progressive branch updates.
-3. Live Sandbox execution, timeout repeatability, and state cleanup remain
+1. Local branch execution is a deterministic model of the seeded incident. The
+   delivered Express package is the runnable witness.
+2. Live Sandbox execution, timeout repeatability, and state cleanup remain
    unproven in the product path.
-4. Explicit remote cancellation remains unproven and no further termination
+3. Explicit remote cancellation remains unproven and no further termination
    probe is approved.
-5. Sandbox retention policy and the provider-reported cost unit remain
+4. Sandbox retention policy and the provider-reported cost unit remain
    unresolved.
-6. Nemotron needs further product-path repeatability evidence.
-7. Tavily needs URL deduplication and an overage-status check before expanded
+5. Nemotron needs further product-path repeatability evidence.
+6. Tavily needs URL deduplication and an overage-status check before expanded
    use.

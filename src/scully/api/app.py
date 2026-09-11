@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
+from queue import Queue
+from threading import Thread
 from typing import AsyncIterator
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
@@ -21,6 +23,10 @@ from scully.application.capsule_import import (
 from scully.application.execution import LocalExecutionAdapter
 from scully.application.investigations import InvestigationError, InvestigationService
 from scully.application.planning import LocalPlanningAdapter
+from scully.application.reproduction import (
+    ReproductionPackageError,
+    ReproductionPackager,
+)
 from scully.application.settings import ProductSettings
 from scully.domain.capsules import CapsuleIdentifier
 from scully.domain.contracts import CapsuleSummary, InvestigationDetail
@@ -66,6 +72,9 @@ def create_app(settings: ProductSettings | None = None) -> FastAPI:
         LocalPlanningAdapter(),
         LocalExecutionAdapter(product_settings.artifact_dir),
     )
+    reproduction_packager = ReproductionPackager(
+        product_settings.seed_capsules_dir.parent / "reproductions"
+    )
 
     @asynccontextmanager
     async def lifespan(unused_app: FastAPI) -> AsyncIterator[None]:
@@ -94,6 +103,16 @@ def create_app(settings: ProductSettings | None = None) -> FastAPI:
     async def investigation_error(
         unused_request: Request,
         error: InvestigationError,
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=error.status_code,
+            content={"detail": {"code": error.code, "message": error.message}},
+        )
+
+    @application.exception_handler(ReproductionPackageError)
+    async def reproduction_package_error(
+        unused_request: Request,
+        error: ReproductionPackageError,
     ) -> JSONResponse:
         return JSONResponse(
             status_code=error.status_code,
@@ -195,6 +214,60 @@ def create_app(settings: ProductSettings | None = None) -> FastAPI:
     def execute_investigation(investigation_id: str) -> InvestigationDetail:
         return investigation_service.execute(investigation_id)
 
+    @router.post("/investigations/{investigation_id}/execute/stream")
+    def execute_investigation_stream(investigation_id: str) -> StreamingResponse:
+        messages: Queue[tuple[str, object]] = Queue()
+
+        def progress(event_type: str, payload: dict[str, object]) -> None:
+            messages.put((event_type, payload))
+
+        def run() -> None:
+            try:
+                completed = investigation_service.execute(
+                    investigation_id,
+                    progress=progress,
+                )
+            except InvestigationError as error:
+                messages.put(
+                    (
+                        "error",
+                        {"code": error.code, "message": error.message},
+                    )
+                )
+            except Exception:
+                messages.put(
+                    (
+                        "error",
+                        {
+                            "code": "execution_failed",
+                            "message": "Branch execution failed",
+                        },
+                    )
+                )
+            else:
+                messages.put(("complete", completed.model_dump(mode="json")))
+
+        worker = Thread(target=run, name="scully-local-execution", daemon=True)
+        worker.start()
+
+        def stream() -> Iterator[str]:
+            sequence = 0
+            while True:
+                event_type, payload = messages.get()
+                sequence += 1
+                yield _sse_message(sequence, event_type, payload)
+                if event_type in {"complete", "error"}:
+                    break
+
+        return StreamingResponse(
+            stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-store",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     @router.get("/investigations/{investigation_id}/events")
     def investigation_events(investigation_id: str) -> StreamingResponse:
         detail = investigation_service.get(investigation_id)
@@ -211,6 +284,21 @@ def create_app(settings: ProductSettings | None = None) -> FastAPI:
 
         return StreamingResponse(replay(), media_type="text/event-stream")
 
+    @router.get("/investigations/{investigation_id}/reproduction.zip")
+    def download_reproduction(investigation_id: str) -> Response:
+        detail = investigation_service.get(investigation_id)
+        content = reproduction_packager.build(detail)
+        return Response(
+            content=content,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": (
+                    "attachment; filename=scully-proxy-identity-collapse.zip"
+                ),
+                "Cache-Control": "no-store",
+            },
+        )
+
     application.include_router(router)
     application.state.product_settings = product_settings
     application.state.database = database
@@ -218,6 +306,7 @@ def create_app(settings: ProductSettings | None = None) -> FastAPI:
     application.state.capsule_importer = capsule_importer
     application.state.investigations = investigations
     application.state.investigation_service = investigation_service
+    application.state.reproduction_packager = reproduction_packager
 
     if (product_settings.web_dist / "index.html").is_file():
         application.mount(
@@ -229,3 +318,13 @@ def create_app(settings: ProductSettings | None = None) -> FastAPI:
 
 
 app = create_app()
+
+
+def _sse_message(sequence: int, event_type: str, payload: object) -> str:
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return f"id: {sequence}\nevent: {event_type}\ndata: {encoded}\n\n"

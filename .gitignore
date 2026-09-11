@@ -18,6 +18,7 @@ __pycache__/
 /web/node_modules/
 /web/dist/
 /web/coverage/
+/fixtures/reproductions/**/node_modules/
 
 # Local application state
 /.scully/

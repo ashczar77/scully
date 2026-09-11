@@ -6,7 +6,11 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from scully.application.execution import ExecutionAdapter, ExecutionError
+from scully.application.execution import (
+    ExecutionAdapter,
+    ExecutionError,
+    ProgressCallback,
+)
 from scully.application.planning import PlanningAdapter, PlanningError, PlanningSource
 from scully.domain.contracts import (
     ExecutionReport,
@@ -127,7 +131,12 @@ class InvestigationService:
             )
         return detail
 
-    def execute(self, investigation_id: str) -> InvestigationDetail:
+    def execute(
+        self,
+        investigation_id: str,
+        *,
+        progress: ProgressCallback | None = None,
+    ) -> InvestigationDetail:
         """Run the app-owned branches and persist deterministic results."""
 
         detail = self.get(investigation_id)
@@ -155,6 +164,7 @@ class InvestigationService:
                 detail.investigation_id,
                 manifest,
                 detail.experiments,
+                progress=progress,
             )
         except ExecutionError as error:
             raise InvestigationError(
