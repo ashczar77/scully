@@ -56,9 +56,11 @@ cause. The local branches execute the reviewed Node.js HTTP fixture without a
 shell or external network access.
 
 Select **Review reproduction proof**, then **Download reproduction**. Extract
-the ZIP, run `npm ci`, and run `npm run verify` inside its directory. The
-included regression test is expected to fail with the reproduced `200,429`
-response sequence. Full clean-checkout instructions and measurements are in the
+the ZIP, then run `npm ci`, `npm run minimize`, and `npm run verify` inside its
+directory. The minimizer reduces the proof from 11 observation fields to four
+while preserving the declared signature. The included regression test is
+expected to fail with the reproduced `200,429` response sequence. Full
+clean-checkout instructions and measurements are in the
 [end-to-end proof](docs/product/end-to-end-proof.md).
 
 The public capsule contract is

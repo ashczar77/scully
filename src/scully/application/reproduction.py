@@ -17,11 +17,36 @@ REPRODUCTION_FILES = (
     "README.md",
     "package.json",
     "package-lock.json",
-    "scripts/observe.mjs",
-    "scripts/run-branch.mjs",
+    "fixtures/requests.json",
+    "minimization.json",
+    "scripts/minimize.mjs",
     "scripts/verify-reproduction.mjs",
+    "signatures/proxy-identity-collapse-v1.json",
     "src/reproduction.mjs",
+    "src/trigger.mjs",
     "test/proxy-identity-collapse.test.mjs",
+)
+FULL_PAYLOAD_FIELDS = (
+    "events",
+    "forwarded_clients",
+    "identity_digests",
+    "limiter_bucket_counts",
+    "limiter_key",
+    "normalized_ips",
+    "proxy_hops",
+    "proxy_mode",
+    "responses",
+    "socket_addresses",
+    "trust_proxy",
+)
+MINIMIZED_PAYLOAD_FIELDS = (
+    "events",
+    "forwarded_clients",
+    "identity_digests",
+    "responses",
+)
+REMOVED_PAYLOAD_FIELDS = tuple(
+    field for field in FULL_PAYLOAD_FIELDS if field not in MINIMIZED_PAYLOAD_FIELDS
 )
 
 
@@ -114,6 +139,22 @@ class ReproductionPackager:
                 "proxy_writes_forwarded_header": True,
                 "loopback_only": True,
             },
+            "result": {
+                "verdict": "reproduced",
+                "incident_responses": [200, 429],
+                "known_good_responses": [200, 200],
+                "expected_regression_test_exit_code": 1,
+                "trigger_data": "fixtures/requests.json",
+                "signature": "signatures/proxy-identity-collapse-v1.json",
+            },
+            "minimization": {
+                "comparison": "minimization.json",
+                "command": "npm run minimize",
+                "equivalent_signature": True,
+                "full_payload_fields": list(FULL_PAYLOAD_FIELDS),
+                "minimized_payload_fields": list(MINIMIZED_PAYLOAD_FIELDS),
+                "removed_payload_fields": list(REMOVED_PAYLOAD_FIELDS),
+            },
             "files": [
                 {
                     "path": name,
@@ -155,7 +196,7 @@ class ReproductionPackager:
 def _write_file(archive: zipfile.ZipFile, relative_name: str, content: bytes) -> None:
     info = zipfile.ZipInfo(
         filename=f"{PACKAGE_ROOT}/{relative_name}",
-        date_time=(2026, 9, 11, 0, 0, 0),
+        date_time=(2026, 9, 12, 0, 0, 0),
     )
     info.compress_type = zipfile.ZIP_DEFLATED
     info.external_attr = 0o100644 << 16

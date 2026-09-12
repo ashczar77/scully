@@ -7,7 +7,7 @@
     "node": "22.22.2"
   },
   "scripts": {
-    "observe": "node scripts/observe.mjs",
+    "minimize": "node scripts/minimize.mjs",
     "test": "node --test test/proxy-identity-collapse.test.mjs",
     "verify": "node scripts/verify-reproduction.mjs"
   },

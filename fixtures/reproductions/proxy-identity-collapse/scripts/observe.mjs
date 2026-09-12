@@ -1,3 +1,7 @@
 import { runSequence } from "../src/reproduction.mjs";
+import { loadTrigger } from "../src/trigger.mjs";
 
-console.log(JSON.stringify(await runSequence({ variant: "incident" }), null, 2));
+const trigger = await loadTrigger();
+console.log(
+  JSON.stringify(await runSequence({ variant: "incident", trigger }), null, 2),
+);

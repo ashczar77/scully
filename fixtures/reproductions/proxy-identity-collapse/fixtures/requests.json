@@ -1,0 +1,9 @@
+{
+  "schema_version": "1.0",
+  "method": "GET",
+  "path": "/limited",
+  "clients": [
+    "198.51.100.10",
+    "198.51.100.11"
+  ]
+}

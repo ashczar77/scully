@@ -61,14 +61,18 @@ requests resolve to the same limiter identity and return `200,429`. With
 loopback proxy trust enabled, the same requests resolve separately and return
 `200,200`.
 
-The packager copies only seven allowlisted files, rejects symlinks or missing
+The packager copies only 11 allowlisted files, rejects symlinks or missing
 files, caps the archive at 2 MiB, records SHA-256 hashes, and uses fixed ZIP
 timestamps and permissions. Equal completed investigations therefore produce
 identical archive bytes. Dependencies and local state are excluded.
 
-The included regression test expects `200,200` and intentionally exits with
-status 1 against the reproduced incident. `npm run verify` proves the incident,
-the known-good comparison, and that exact failing-test exit code.
+The package includes a synthetic trigger, the declared target signature, and a
+reviewed full-versus-minimized comparison. `npm run minimize` removes every
+top-level observation field that is not required by the signature, reducing 11
+fields to four. The included regression test expects `200,200` and
+intentionally exits with status 1 against the reproduced incident. `npm run
+verify` proves the incident, the known-good comparison, the minimization result,
+and that exact failing-test exit code.
 
 ## Clean-checkout verification
 
@@ -101,7 +105,7 @@ Extract the downloaded ZIP, enter its
 
 ```shell
 npm ci
-npm run observe
+npm run minimize
 npm run verify
 npm test
 ```

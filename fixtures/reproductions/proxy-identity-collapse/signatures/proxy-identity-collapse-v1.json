@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.0",
+  "signature_id": "proxy-identity-collapse-v1",
+  "matchers": [
+    {
+      "matcher_id": "response-sequence",
+      "kind": "equals",
+      "path": ["payload", "responses"],
+      "required": true,
+      "expected": [200, 429]
+    },
+    {
+      "matcher_id": "rejection-event",
+      "kind": "equals",
+      "path": ["payload", "events", 1],
+      "required": true,
+      "expected": "rate_limit_rejected"
+    },
+    {
+      "matcher_id": "collapsed-identity",
+      "kind": "same_value",
+      "path": ["payload", "identity_digests", 0],
+      "comparison_path": ["payload", "identity_digests", 1],
+      "required": true
+    },
+    {
+      "matcher_id": "second-forwarded-client",
+      "kind": "equals",
+      "path": ["payload", "forwarded_clients", 1],
+      "required": true,
+      "expected": "198.51.100.11"
+    },
+    {
+      "matcher_id": "process-exit",
+      "kind": "equals",
+      "path": ["exit_code"],
+      "required": true,
+      "expected": 0
+    }
+  ]
+}

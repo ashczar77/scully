@@ -2187,6 +2187,93 @@ a:focus-visible,
   grid-column: span 5;
 }
 
+.minimization-panel {
+  grid-column: 1 / -1;
+  background:
+    linear-gradient(120deg, rgba(125, 183, 255, 0.07), transparent 42%),
+    rgba(12, 25, 20, 0.78);
+}
+
+.minimization-panel > p {
+  max-width: 78ch;
+  margin: 18px 0 0;
+  color: #9ba8a1;
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
+
+.minimization-comparison {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+  margin-top: 20px;
+}
+
+.minimization-comparison article {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid rgba(238, 243, 239, 0.09);
+  border-radius: 10px;
+  background: #07100d;
+}
+
+.minimization-comparison small {
+  display: block;
+  color: #7f8d85;
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.minimization-comparison strong {
+  display: block;
+  margin-top: 8px;
+  color: #e6eee9;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.3rem;
+}
+
+.minimization-comparison p {
+  margin: 8px 0 0;
+  color: #8e9c94;
+  font-size: 0.7rem;
+  line-height: 1.5;
+}
+
+.minimization-comparison > span {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid rgba(119, 242, 191, 0.32);
+  border-radius: 999px;
+  color: var(--state-reproduced);
+  background: rgba(119, 242, 191, 0.06);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+}
+
+.minimization-command {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-left: 3px solid var(--state-reproduced);
+  background: rgba(119, 242, 191, 0.04);
+}
+
+.minimization-command code {
+  color: var(--state-reproduced);
+  font-size: 0.72rem;
+}
+
+.minimization-command span {
+  color: #87958d;
+  font-size: 0.68rem;
+}
+
 .test-contract,
 .reproduction-steps {
   grid-column: span 6;
@@ -2440,6 +2527,10 @@ a:focus-visible,
     grid-column: span 6;
   }
 
+  .minimization-panel {
+    grid-column: 1 / -1;
+  }
+
   .plan-panel,
   .diff-panel {
     grid-column: span 6;
@@ -2604,8 +2695,18 @@ a:focus-visible,
   .test-contract dl,
   .export-panel dl,
   .proof-lineage ol,
+  .minimization-comparison,
   .proof-diff > div {
     grid-template-columns: 1fr;
+  }
+
+  .minimization-comparison > span {
+    transform: rotate(90deg);
+  }
+
+  .minimization-command {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .experiment-plan {

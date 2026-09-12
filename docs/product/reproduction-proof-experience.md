@@ -62,12 +62,15 @@ The displayed run contract matches the archive:
 
 ```shell
 npm ci
+npm run minimize
 npm run verify
 npm test
 ```
 
-`npm run verify` must exit 0 after proving the incident, known-good comparison,
-and failing-test behavior. `npm test` is intentionally expected to exit 1 while
+`npm run minimize` must preserve the declared signature while reducing the
+observation payload from 11 fields to four. `npm run verify` must exit 0 after
+proving the incident, known-good comparison, reviewed minimization result, and
+failing-test behavior. `npm test` is intentionally expected to exit 1 while
 showing observed responses `200,429` against the `200,200` expectation.
 
 ## Complete state model

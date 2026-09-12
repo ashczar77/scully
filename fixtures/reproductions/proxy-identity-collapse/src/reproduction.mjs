@@ -1,7 +1,6 @@
 import express from "express";
 import http from "node:http";
 
-const CLIENTS = ["198.51.100.10", "198.51.100.11"];
 const CLIENT_IDENTITIES = new Map([
   ["198.51.100.10", "identity:test-net-client-a"],
   ["198.51.100.11", "identity:test-net-client-b"],
@@ -106,10 +105,20 @@ async function close(server) {
   });
 }
 
-export async function runSequence({ variant = "incident" } = {}) {
+export async function runSequence({ variant = "incident", trigger } = {}) {
   const configuration = VARIANTS.get(variant);
   if (!configuration) {
     throw new Error("Unsupported reproduction variant");
+  }
+  if (
+    !trigger ||
+    trigger.method !== "GET" ||
+    trigger.path !== "/limited" ||
+    !Array.isArray(trigger.clients) ||
+    trigger.clients.length !== 2 ||
+    trigger.clients.some((client) => !CLIENT_IDENTITIES.has(client))
+  ) {
+    throw new Error("Synthetic trigger is outside the reproduction contract");
   }
   const application = http.createServer(createApp(configuration));
   const applicationPort = await listen(application);
@@ -120,8 +129,9 @@ export async function runSequence({ variant = "incident" } = {}) {
   const proxyPort = await listen(proxy);
   try {
     const records = [];
-    for (const client of CLIENTS) {
-      const response = await fetch(`http://127.0.0.1:${proxyPort}/limited`, {
+    for (const client of trigger.clients) {
+      const response = await fetch(`http://127.0.0.1:${proxyPort}${trigger.path}`, {
+        method: trigger.method,
         headers: { "x-scully-client-ip": client },
       });
       records.push({ status: response.status, ...(await response.json()) });

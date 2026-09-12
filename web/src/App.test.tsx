@@ -227,6 +227,11 @@ describe("App", () => {
     ).toHaveLength(2);
     expect(screen.getByRole("heading", { name: "One environment change" })).toBeTruthy();
     expect(screen.getByText("Input unchanged")).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { name: "Eleven diagnostic fields to four" }),
+    ).toBeTruthy();
+    expect(screen.getByLabelText("Seven fields removed").textContent).toBe("−7");
+    expect(screen.getAllByText("npm run minimize")).toHaveLength(2);
     expect(screen.getAllByText("npm test")).toHaveLength(2);
     expect(screen.getByText("Expected failure, not a setup error")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Run from a clean directory" })).toBeTruthy();

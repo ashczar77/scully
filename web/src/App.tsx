@@ -1158,6 +1158,42 @@ function ReproductionProof({
           </div>
         </section>
 
+        <section
+          className="proof-panel minimization-panel"
+          aria-labelledby="minimization-title"
+        >
+          <div className="panel-heading compact-heading">
+            <div>
+              <p className="section-label">Artifact minimization</p>
+              <h2 id="minimization-title">Eleven diagnostic fields to four</h2>
+            </div>
+            <span>Signature preserved</span>
+          </div>
+          <p>
+            The runnable core keeps Express, one loopback proxy, two synthetic
+            clients, and the rate limiter. Removing any of those changes the
+            incident. The automated minimizer removes seven informational fields
+            from the proof payload while every required matcher still passes.
+          </p>
+          <div className="minimization-comparison">
+            <article>
+              <small>Full incident observation</small>
+              <strong>11 fields</strong>
+              <p>Topology, configuration, bucket counts, identities, events, and responses.</p>
+            </article>
+            <span aria-label="Seven fields removed">−7</span>
+            <article>
+              <small>Minimized witness</small>
+              <strong>4 fields</strong>
+              <p>Responses, events, identity digests, and forwarded clients.</p>
+            </article>
+          </div>
+          <div className="minimization-command">
+            <code>npm run minimize</code>
+            <span>Recomputes and verifies the full-versus-minimized comparison.</span>
+          </div>
+        </section>
+
         <section className="proof-panel test-contract" aria-labelledby="test-contract-title">
           <div className="panel-heading compact-heading">
             <div><p className="section-label">Runnable regression test</p><h2 id="test-contract-title">An intentionally failing witness</h2></div>
@@ -1183,8 +1219,9 @@ function ReproductionProof({
             <li><span>1</span><code>unzip scully-proxy-identity-collapse.zip</code></li>
             <li><span>2</span><code>cd scully-proxy-identity-collapse</code></li>
             <li><span>3</span><code>npm ci</code></li>
-            <li><span>4</span><code>npm run verify</code></li>
-            <li><span>5</span><code>npm test</code></li>
+            <li><span>4</span><code>npm run minimize</code></li>
+            <li><span>5</span><code>npm run verify</code></li>
+            <li><span>6</span><code>npm test</code></li>
           </ol>
         </section>
 
@@ -1193,8 +1230,9 @@ function ReproductionProof({
             <p className="section-label">Export</p>
             <h2 id="export-title">Download the reproduction</h2>
             <p>
-              The deterministic ZIP includes setup instructions, locked
-              dependencies, source, a verifier, the failing test, and a hashed manifest.
+              The deterministic ZIP includes the synthetic trigger, target
+              signature, minimization comparison, locked source, verifier, failing
+              test, and hashed result manifest.
             </p>
           </div>
           <dl>

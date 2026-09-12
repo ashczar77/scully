@@ -1,0 +1,55 @@
+{
+  "schema_version": "1.0",
+  "signature_id": "proxy-identity-collapse-v1",
+  "equivalent_signature": true,
+  "full_payload_fields": [
+    "events",
+    "forwarded_clients",
+    "identity_digests",
+    "limiter_bucket_counts",
+    "limiter_key",
+    "normalized_ips",
+    "proxy_hops",
+    "proxy_mode",
+    "responses",
+    "socket_addresses",
+    "trust_proxy"
+  ],
+  "minimized_payload_fields": [
+    "events",
+    "forwarded_clients",
+    "identity_digests",
+    "responses"
+  ],
+  "removed_payload_fields": [
+    "limiter_bucket_counts",
+    "limiter_key",
+    "normalized_ips",
+    "proxy_hops",
+    "proxy_mode",
+    "socket_addresses",
+    "trust_proxy"
+  ],
+  "structural_reductions": [
+    {
+      "candidate": "remove-loopback-proxy",
+      "decision": "retain",
+      "reason": "The failure depends on the deployed proxy boundary."
+    },
+    {
+      "candidate": "remove-second-client",
+      "decision": "retain",
+      "reason": "Two clients are required to prove identity collapse."
+    },
+    {
+      "candidate": "remove-rate-limiter",
+      "decision": "retain",
+      "reason": "The HTTP 429 target response requires the limiter."
+    },
+    {
+      "candidate": "remove-informational-observation-fields",
+      "decision": "remove",
+      "reason": "Seven fields are useful for diagnosis but not required by the target signature."
+    }
+  ]
+}

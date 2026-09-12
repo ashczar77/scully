@@ -72,6 +72,17 @@ class ReproductionPackagerTests(unittest.TestCase):
             package = json.loads(
                 archive.read(f"{PACKAGE_ROOT}/package.json")
             )
+            minimization = json.loads(
+                archive.read(f"{PACKAGE_ROOT}/minimization.json")
+            )
+            signature = json.loads(
+                archive.read(
+                    f"{PACKAGE_ROOT}/signatures/proxy-identity-collapse-v1.json"
+                )
+            )
+            trigger = json.loads(
+                archive.read(f"{PACKAGE_ROOT}/fixtures/requests.json")
+            )
         self.assertEqual(metadata["investigation_id"], "inv-package")
         self.assertEqual(metadata["capsule_id"], "proxy-identity-collapse-v2")
         self.assertEqual(metadata["signature_id"], "proxy-identity-collapse-v1")
@@ -82,9 +93,27 @@ class ReproductionPackagerTests(unittest.TestCase):
         self.assertTrue(metadata["execution"]["isolation_verified"])
         self.assertEqual(metadata["incident_fidelity"]["proxy_hops"], 1)
         self.assertTrue(metadata["incident_fidelity"]["proxy_writes_forwarded_header"])
+        self.assertEqual(metadata["result"]["incident_responses"], [200, 429])
+        self.assertEqual(metadata["result"]["known_good_responses"], [200, 200])
+        self.assertEqual(metadata["result"]["expected_regression_test_exit_code"], 1)
+        self.assertTrue(metadata["minimization"]["equivalent_signature"])
+        self.assertEqual(len(metadata["minimization"]["full_payload_fields"]), 11)
+        self.assertEqual(len(metadata["minimization"]["minimized_payload_fields"]), 4)
+        self.assertEqual(len(metadata["minimization"]["removed_payload_fields"]), 7)
+        self.assertEqual(minimization["signature_id"], metadata["signature_id"])
+        self.assertTrue(minimization["equivalent_signature"])
+        self.assertEqual(len(signature["matchers"]), 5)
+        self.assertEqual(
+            trigger["clients"],
+            ["198.51.100.10", "198.51.100.11"],
+        )
         self.assertIn("200,429", readme)
         self.assertIn("200,200", readme)
         self.assertIn("expected to fail", readme)
+        self.assertEqual(
+            package["scripts"]["minimize"],
+            "node scripts/minimize.mjs",
+        )
         self.assertEqual(
             package["scripts"]["test"],
             "node --test test/proxy-identity-collapse.test.mjs",
@@ -94,6 +123,8 @@ class ReproductionPackagerTests(unittest.TestCase):
             "node scripts/verify-reproduction.mjs",
         )
         self.assertNotIn("node_modules", "\n".join(names))
+        self.assertNotIn(f"{PACKAGE_ROOT}/scripts/observe.mjs", names)
+        self.assertNotIn(f"{PACKAGE_ROOT}/scripts/run-branch.mjs", names)
 
     def test_planned_investigation_cannot_be_packaged(self) -> None:
         planned = self.service.create("proxy-identity-collapse-v2")

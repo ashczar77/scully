@@ -1,4 +1,5 @@
 import { runSequence } from "../src/reproduction.mjs";
+import { loadTrigger } from "../src/trigger.mjs";
 
 if (process.version !== "v22.22.2") {
   throw new Error("The reviewed fixture requires Node.js 22.22.2");
@@ -15,4 +16,5 @@ if (!allowed.has(variant)) {
   throw new Error("Branch variant is outside the local allowlist");
 }
 
-console.log(JSON.stringify(await runSequence({ variant })));
+const trigger = await loadTrigger();
+console.log(JSON.stringify(await runSequence({ variant, trigger })));
