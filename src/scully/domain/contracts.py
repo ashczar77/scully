@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import re
 from datetime import datetime
 from enum import Enum
 from typing import Annotated, Literal
@@ -11,6 +13,45 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 Identifier = Annotated[str, Field(min_length=1, max_length=128)]
 SchemaVersion = Annotated[str, Field(pattern=r"^1\.[0-9]+$")]
+EVENT_PAYLOAD_KEYS = {
+    "investigation.created": frozenset({"capsule_id"}),
+    "evidence.boundary.verified": frozenset(
+        {
+            "evidence_count",
+            "provenance_count",
+            "clean_count",
+            "redacted_count",
+            "secret_scan",
+        }
+    ),
+    "planning.started": frozenset({"source"}),
+    "hypothesis.created": frozenset(
+        {"hypothesis_id", "experiment_id", "confidence"}
+    ),
+    "planning.completed": frozenset({"source", "hypothesis_count"}),
+    "execution.started": frozenset({"source"}),
+    "checkpoint.created": frozenset({"checkpoint_id"}),
+    "experiment.started": frozenset({"experiment_id", "hypothesis_id"}),
+    "experiment.operation": frozenset(
+        {"experiment_id", "operation", "variant"}
+    ),
+    "experiment.result": frozenset({"experiment_id", "status", "verdict"}),
+    "evaluation.completed": frozenset(
+        {"experiment_id", "hypothesis_disposition"}
+    ),
+    "isolation.verified": frozenset({"passed"}),
+    "execution.blocked": frozenset({"reason_code", "retryable"}),
+    "investigation.completed": frozenset(
+        {"status", "operation_count", "retry_count"}
+    ),
+    "investigation.timed_out": frozenset(
+        {"status", "operation_count", "retry_count"}
+    ),
+    "investigation.failed": frozenset(
+        {"status", "operation_count", "retry_count"}
+    ),
+}
+MAX_EVENT_PAYLOAD_BYTES = 4_096
 
 
 class ContractModel(BaseModel):
@@ -166,6 +207,36 @@ class InvestigationEvent(ContractModel):
         if value.tzinfo is None or value.utcoffset() is None:
             raise ValueError("Event timestamps must include a timezone")
         return value
+
+    @model_validator(mode="after")
+    def validate_audit_shape(self) -> InvestigationEvent:
+        expected = EVENT_PAYLOAD_KEYS.get(self.event_type)
+        if expected is None:
+            raise ValueError("Event type is outside the audit allowlist")
+        if set(self.payload) != expected:
+            raise ValueError("Event payload does not match its audit schema")
+        if self.event_type == "execution.blocked":
+            reason_code = self.payload["reason_code"]
+            if (
+                not isinstance(reason_code, str)
+                or re.fullmatch(r"[a-z][a-z0-9_]{0,95}", reason_code) is None
+                or self.payload["retryable"] is not False
+            ):
+                raise ValueError("Blocked execution event is not safely bounded")
+        if (
+            self.event_type == "evidence.boundary.verified"
+            and self.payload["secret_scan"] != "passed"
+        ):
+            raise ValueError("Evidence boundary event must record a passed scan")
+        encoded = json.dumps(
+            self.payload,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        if len(encoded) > MAX_EVENT_PAYLOAD_BYTES:
+            raise ValueError("Event payload exceeds the audit size limit")
+        return self
 
 
 class ReproductionResult(ContractModel):

@@ -107,6 +107,28 @@ describe("App", () => {
     await waitFor(() => expect(document.activeElement).toBe(alert));
   });
 
+  it("blocks planning when required comparison evidence is missing", async () => {
+    const fetchMock = vi.mocked(fetch);
+    const incomplete = {
+      ...capsulePayload(),
+      missing_evidence: ["No known-good comparison is declared for runtime"],
+    };
+    fetchMock
+      .mockResolvedValueOnce(response(healthPayload()))
+      .mockResolvedValueOnce(response(incomplete));
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /load safe seed/i }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Investigation blocked" }),
+    ).toBeTruthy();
+    expect(screen.getByText("Evidence incomplete")).toBeTruthy();
+    const action = screen.getByRole("button", { name: /add required evidence/i });
+    expect(action.hasAttribute("disabled")).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("maps and inspects three bounded investigation alternatives", async () => {
     const fetchMock = vi.mocked(fetch);
     fetchMock
@@ -278,7 +300,7 @@ describe("App", () => {
     );
   });
 
-  it("keeps a bounded error visible and offers a retry", async () => {
+  it("closes a failed run and offers a fresh investigation", async () => {
     const fetchMock = vi.mocked(fetch);
     fetchMock
       .mockResolvedValueOnce(response(healthPayload()))
@@ -286,7 +308,9 @@ describe("App", () => {
       .mockResolvedValueOnce(response(investigationPayload()))
       .mockResolvedValueOnce(
         streamResponse([["error", { message: "Fixture execution failed" }]]),
-      );
+      )
+      .mockResolvedValueOnce(response(failedInvestigationPayload()))
+      .mockResolvedValueOnce(response(investigationPayload()));
     render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: /load safe seed/i }));
@@ -299,7 +323,19 @@ describe("App", () => {
       }),
     ).toBeTruthy();
     expect(screen.getAllByText("Fixture execution failed").length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: /retry 3 branches/i })).toBeTruthy();
+    expect(screen.getByText(/This run is closed/)).toBeTruthy();
+    expect(screen.getByText("execution blocked")).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: /start fresh investigation/i }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Run from one checkpoint" }),
+    ).toBeTruthy();
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/investigations", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ capsule_id: "proxy-identity-collapse-v2" }),
+    });
     expect(screen.queryByRole("link", { name: /download.*reproduction/i })).toBeNull();
   });
 });
@@ -456,6 +492,19 @@ function executedInvestigationPayload() {
       })),
       limitations: [],
     },
+  };
+}
+
+function failedInvestigationPayload() {
+  const planned = investigationPayload();
+  return {
+    ...planned,
+    status: "failed",
+    events: [
+      ...planned.events,
+      { sequence: 3, event_type: "execution.blocked" },
+      { sequence: 4, event_type: "investigation.failed" },
+    ],
   };
 }
 

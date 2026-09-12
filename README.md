@@ -68,6 +68,11 @@ The public capsule contract is
 included proxy-identity capsule is under
 [`fixtures/capsules/proxy-identity-collapse`](fixtures/capsules/proxy-identity-collapse).
 
+Capsule intake, structured planning output, and reproduction export share one
+sensitive-content policy. Unsafe execution failures close the affected run with
+bounded audit events. After correcting the cause, start a fresh investigation
+from the accepted capsule.
+
 Inspect local execution readiness without contacting a provider:
 
 ```shell

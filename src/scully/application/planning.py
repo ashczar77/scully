@@ -8,6 +8,7 @@ from typing import Annotated, Literal, Mapping, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from scully.application.safety import contains_sensitive_text
 from scully.domain.capsules import CapsuleManifest
 from scully.domain.contracts import ExperimentPlan, Hypothesis
 from scully.providers.nemotron import ToolCallOutcome, ToolDefinition
@@ -213,6 +214,11 @@ class NemotronPlanningAdapter:
                 "planner_contract_invalid",
                 "Planner output does not match the product contract",
             ) from error
+        if contains_sensitive_text(response.model_dump_json()):
+            raise PlanningError(
+                "planner_sensitive_output",
+                "Planner output failed the sensitive-content scan",
+            )
 
         hypotheses = tuple(
             Hypothesis(

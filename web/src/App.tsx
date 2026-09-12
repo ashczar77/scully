@@ -243,6 +243,7 @@ export function App() {
       setInvestigation(payload as InvestigationDetail);
       setPlanningState("ready");
       setExecutionState("idle");
+      setExecutionError(null);
       setLiveEvents([]);
       setSelectedExperimentId(null);
       setProofVisible(false);
@@ -314,9 +315,17 @@ export function App() {
       setExecutionState("complete");
       setLiveEvents([]);
     } catch (error) {
-      setExecutionError(
-        error instanceof Error ? error.message : "Branch execution failed",
-      );
+      const message =
+        error instanceof Error ? error.message : "Branch execution failed";
+      try {
+        const latest = await fetch(`/api/investigations/${investigationId}`);
+        if (latest.ok) {
+          setInvestigation((await latest.json()) as InvestigationDetail);
+        }
+      } catch {
+        // The bounded error remains useful when audit refresh is unavailable.
+      }
+      setExecutionError(message);
       setExecutionState("rejected");
     }
   }
@@ -525,6 +534,7 @@ export function App() {
             onExecute={() =>
               void executeInvestigation(investigation.investigation_id)
             }
+            onRecover={() => void createInvestigation(capsule.capsule_id)}
           />
         ) : (
           <section className="screen overview-screen" aria-labelledby="overview-title">
@@ -738,12 +748,23 @@ function CapsuleDetails({
 
       <aside className="readiness-panel" aria-labelledby="readiness-title">
         <div>
-          <span className="readiness-symbol" aria-hidden="true">✓</span>
-          <p className="section-label">Safety review passed</p>
-          <h2 id="readiness-title">Ready to investigate</h2>
+          <span className="readiness-symbol" aria-hidden="true">
+            {capsule.missing_evidence.length ? "?" : "✓"}
+          </span>
+          <p className="section-label">
+            {capsule.missing_evidence.length
+              ? "Evidence incomplete"
+              : "Safety review passed"}
+          </p>
+          <h2 id="readiness-title">
+            {capsule.missing_evidence.length
+              ? "Investigation blocked"
+              : "Ready to investigate"}
+          </h2>
           <p>
-            Schema, credential scan, file integrity, and evidence lineage passed.
-            Network access is disabled.
+            {capsule.missing_evidence.length
+              ? "Supply every required known-good comparison before planning begins."
+              : "Schema, credential scan, file integrity, and evidence lineage passed. Network access is disabled."}
           </p>
         </div>
         <div className={`missing-evidence ${capsule.missing_evidence.length ? "has-gaps" : ""}`}>
@@ -759,13 +780,19 @@ function CapsuleDetails({
         <button
           className="primary-action planning-action"
           type="button"
-          disabled={planningState === "planning" || planningState === "ready"}
+          disabled={
+            capsule.missing_evidence.length > 0 ||
+            planningState === "planning" ||
+            planningState === "ready"
+          }
           onClick={onCreateInvestigation}
         >
           {planningState === "planning"
             ? "Creating investigation"
             : planningState === "ready"
               ? "Investigation ready"
+              : capsule.missing_evidence.length
+                ? "Add required evidence"
               : "Create investigation"}
           <span aria-hidden="true">→</span>
         </button>
@@ -783,6 +810,7 @@ function HypothesisMap({
   onInspect,
   onOpenProof,
   onExecute,
+  onRecover,
 }: {
   investigation: InvestigationDetail;
   executionState: ExecutionState;
@@ -792,6 +820,7 @@ function HypothesisMap({
   onInspect: (experimentId: string) => void;
   onOpenProof: () => void;
   onExecute: () => void;
+  onRecover: () => void;
 }) {
   const execution = investigation.execution;
   const checkpointId = investigation.experiments[0]?.checkpoint_id;
@@ -988,7 +1017,7 @@ function HypothesisMap({
               </h2>
               <p>
                 {executionState === "rejected"
-                  ? executionError ?? "The bounded execution did not complete."
+                  ? `${executionError ?? "The bounded execution did not complete."} This run is closed. Start a fresh investigation after correcting the cause.`
                   : executionState === "running"
                     ? "Completed sibling results remain visible while the bounded run continues."
                     : "Proof unavailable until execution completes. Run all three allowlisted branches with no network access."}
@@ -997,12 +1026,12 @@ function HypothesisMap({
                 className="primary-action execution-action"
                 type="button"
                 disabled={executionState === "running"}
-                onClick={onExecute}
+                onClick={executionState === "rejected" ? onRecover : onExecute}
               >
                 {executionState === "running"
                   ? "Running branches"
                   : executionState === "rejected"
-                    ? "Retry 3 branches"
+                    ? "Start fresh investigation"
                     : "Run 3 branches"}
                 <span aria-hidden="true">→</span>
               </button>

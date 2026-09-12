@@ -84,6 +84,14 @@ class LocalExecutionAdapterTests(unittest.TestCase):
             3,
         )
 
+    def test_untrusted_execution_reason_code_fails_closed(self) -> None:
+        error = ExecutionError(
+            "NEBIUS_API_KEY=" + "synthetic-secret-value",
+            "provider detail",
+        )
+
+        self.assertEqual(error.code, "execution_failed")
+
     def test_reviewed_node_fixture_runs_a_real_loopback_proxy_hop(self) -> None:
         runner = NodeProxyFixtureRunner(
             REPOSITORY_ROOT

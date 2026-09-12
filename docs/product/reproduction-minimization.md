@@ -107,7 +107,7 @@ the package run did not need the Scully interface or a live provider.
 1. Automated minimization currently removes observation fields only. Structural
    reductions are explicit reviewed decisions.
 2. The package supports the selected Express proxy-trust incident only.
-3. General adversarial export coverage remains Step 4.3 work.
+3. Broader adversarial export checks were added in Step 4.3.
 4. Clean-checkout and sponsor-stack repeatability remain Step 4.4 work.
 5. Direct target-engineer validation remains pending.
 6. Previously recorded provider repeatability, Tavily deduplication and overage

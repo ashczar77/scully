@@ -49,7 +49,7 @@ class InvestigationEndpointTests(unittest.TestCase):
         self.assertEqual(payload["planning_source"], "local")
         self.assertEqual(len(payload["hypotheses"]), 3)
         self.assertEqual(len(payload["experiments"]), 3)
-        self.assertEqual(len(payload["events"]), 6)
+        self.assertEqual(len(payload["events"]), 7)
 
         loaded = self.client.get(
             f"/api/investigations/{payload['investigation_id']}"

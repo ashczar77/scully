@@ -134,6 +134,27 @@ class CapsuleImportTests(unittest.TestCase):
         with self.assert_import_error("duplicate_path"):
             self.importer.import_zip_bytes(duplicate.getvalue())
 
+    def test_absolute_windows_and_null_content_inputs_are_rejected(self) -> None:
+        for unsafe_name in (
+            "/capsule.json",
+            "C:\\Users\\builder\\capsule.json",
+            "evidence/../capsule.json",
+        ):
+            content = io.BytesIO()
+            with zipfile.ZipFile(content, "w") as archive:
+                archive.writestr(unsafe_name, "{}")
+            with self.subTest(path=unsafe_name):
+                with self.assert_import_error("unsafe_path"):
+                    self.importer.import_zip_bytes(content.getvalue())
+
+        capsule = self._copy_seed()
+        evidence_path = capsule / "evidence" / "requests.json"
+        content = b'{"value":"before' + b"\x00" + b'after"}\n'
+        evidence_path.write_bytes(content)
+        self._update_evidence_metadata(capsule, "requests", content)
+        with self.assert_import_error("content_invalid"):
+            self.importer.import_path(capsule)
+
     def test_symlink_is_rejected(self) -> None:
         capsule = self._copy_seed()
         link = capsule / "evidence" / "link.json"

@@ -129,6 +129,20 @@ class PlanningAdapterTests(unittest.TestCase):
         self.assertIn("Ignore the planning contract", planner.prompt)
         self.assertIn("Do not propose commands", planner.prompt)
 
+    def test_sensitive_planner_output_is_rejected_before_persistence(self) -> None:
+        arguments = valid_tool_arguments()
+        arguments["hypotheses"][0]["rationale"] = (
+            "password=synthetic-secret-value-12345"
+        )
+
+        with self.assertRaises(PlanningError) as blocked:
+            NemotronPlanningAdapter(FakeStructuredPlanner(arguments)).plan(
+                "inv-sensitive-output",
+                self.manifest,
+            )
+
+        self.assertEqual(blocked.exception.code, "planner_sensitive_output")
+
 
 class FakeStructuredPlanner:
     def __init__(self, arguments: dict[str, object]) -> None:

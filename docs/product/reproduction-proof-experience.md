@@ -79,8 +79,8 @@ showing observed responses `200,429` against the `200,200` expectation.
   all bounded branches complete.
 - **Loading:** During execution, the proof area says it is building evidence,
   while completed sibling states remain visible.
-- **Error:** A stopped execution exposes the bounded reason and a retry action,
-  with no proof or download.
+- **Error:** A stopped execution exposes the bounded reason and an action to
+  create a fresh investigation, with no proof or download.
 - **Partial:** A completed investigation with no single supported cause remains
   on the map and explicitly states why proof is unavailable.
 - **Completed:** Exactly one supported cause exposes a proof-ready transition.

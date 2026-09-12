@@ -12,6 +12,7 @@ from scully.application.execution import (
     ProgressCallback,
 )
 from scully.application.planning import PlanningAdapter, PlanningError, PlanningSource
+from scully.domain.capsules import CapsuleManifest
 from scully.domain.contracts import (
     ExecutionReport,
     ExperimentPlan,
@@ -19,6 +20,7 @@ from scully.domain.contracts import (
     InvestigationDetail,
     InvestigationEvent,
     InvestigationStatus,
+    RedactionStatus,
 )
 from scully.infrastructure.capsules import CapsuleRepository
 from scully.infrastructure.investigations import (
@@ -68,6 +70,13 @@ class InvestigationService:
                 "Accepted capsule was not found",
                 status_code=404,
             )
+        missing_evidence = manifest.to_summary().missing_evidence
+        if missing_evidence:
+            raise InvestigationError(
+                "insufficient_evidence",
+                "Accepted capsule is missing a required known-good comparison",
+                status_code=422,
+            )
         investigation_id = self.id_factory()
         if not investigation_id or len(investigation_id) > 128:
             raise InvestigationError(
@@ -93,7 +102,7 @@ class InvestigationService:
             )
         events = _planning_events(
             investigation_id,
-            capsule_id,
+            manifest,
             bundle.source,
             bundle.hypotheses,
             bundle.experiments,
@@ -167,10 +176,18 @@ class InvestigationService:
                 progress=progress,
             )
         except ExecutionError as error:
+            self._record_execution_failure(detail, error.code)
             raise InvestigationError(
                 error.code,
-                error.message,
+                "Execution was blocked by a safety or operational policy",
                 status_code=error.status_code,
+            ) from error
+        except Exception as error:
+            self._record_execution_failure(detail, "execution_failed")
+            raise InvestigationError(
+                "execution_failed",
+                "Execution was blocked by a safety or operational policy",
+                status_code=500,
             ) from error
         events = _execution_events(detail, report, self.clock())
         try:
@@ -182,10 +199,28 @@ class InvestigationService:
                 status_code=409,
             ) from error
 
+    def _record_execution_failure(
+        self,
+        detail: InvestigationDetail,
+        reason_code: str,
+    ) -> None:
+        events = _execution_failure_events(detail, reason_code, self.clock())
+        try:
+            self.investigations.fail_execution(
+                detail.investigation_id,
+                events,
+            )
+        except InvestigationStateError as error:
+            raise InvestigationError(
+                "investigation_state_conflict",
+                "Investigation state changed before failure was recorded",
+                status_code=409,
+            ) from error
+
 
 def _planning_events(
     investigation_id: str,
-    capsule_id: str,
+    capsule: CapsuleManifest,
     source: PlanningSource,
     hypotheses: tuple[Hypothesis, ...],
     experiments: tuple[ExperimentPlan, ...],
@@ -197,11 +232,34 @@ def _planning_events(
             sequence=1,
             event_type="investigation.created",
             occurred_at=occurred_at,
-            payload={"capsule_id": capsule_id},
+            payload={"capsule_id": capsule.capsule_id},
         ),
         InvestigationEvent(
             investigation_id=investigation_id,
             sequence=2,
+            event_type="evidence.boundary.verified",
+            occurred_at=occurred_at,
+            payload={
+                "evidence_count": len(capsule.evidence),
+                "provenance_count": sum(
+                    1 for item in capsule.evidence if item.provenance
+                ),
+                "clean_count": sum(
+                    1
+                    for item in capsule.evidence
+                    if item.redaction_status == RedactionStatus.CLEAN.value
+                ),
+                "redacted_count": sum(
+                    1
+                    for item in capsule.evidence
+                    if item.redaction_status == RedactionStatus.REDACTED.value
+                ),
+                "secret_scan": "passed",
+            },
+        ),
+        InvestigationEvent(
+            investigation_id=investigation_id,
+            sequence=3,
             event_type="planning.started",
             occurred_at=occurred_at,
             payload={"source": source},
@@ -231,6 +289,40 @@ def _planning_events(
         )
     )
     return tuple(events)
+
+
+def _execution_failure_events(
+    detail: InvestigationDetail,
+    reason_code: str,
+    occurred_at: datetime,
+) -> tuple[InvestigationEvent, ...]:
+    if occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
+        raise InvestigationError(
+            "clock_invalid",
+            "Investigation clock must provide a timezone",
+            status_code=500,
+        )
+    next_sequence = len(detail.events) + 1
+    return (
+        InvestigationEvent(
+            investigation_id=detail.investigation_id,
+            sequence=next_sequence,
+            event_type="execution.blocked",
+            occurred_at=occurred_at,
+            payload={"reason_code": reason_code, "retryable": False},
+        ),
+        InvestigationEvent(
+            investigation_id=detail.investigation_id,
+            sequence=next_sequence + 1,
+            event_type="investigation.failed",
+            occurred_at=occurred_at,
+            payload={
+                "status": InvestigationStatus.FAILED.value,
+                "operation_count": None,
+                "retry_count": 0,
+            },
+        ),
+    )
 
 
 def _execution_events(

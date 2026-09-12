@@ -8,6 +8,7 @@ import json
 import zipfile
 from pathlib import Path, PurePosixPath
 
+from scully.application.safety import contains_sensitive_text
 from scully.domain.contracts import InvestigationDetail, InvestigationStatus
 
 
@@ -111,6 +112,7 @@ class ReproductionPackager:
                     status_code=500,
                 )
             content = source.read_bytes()
+            _validate_export_text(content)
             total_size += len(content)
             if total_size > MAX_PACKAGE_BYTES:
                 raise ReproductionPackageError(
@@ -173,6 +175,7 @@ class ReproductionPackager:
             )
             + "\n"
         ).encode("utf-8")
+        _validate_export_text(metadata_bytes)
         archive = io.BytesIO()
         with zipfile.ZipFile(
             archive,
@@ -191,6 +194,29 @@ class ReproductionPackager:
                 status_code=500,
             )
         return value
+
+
+def _validate_export_text(content: bytes) -> None:
+    if b"\x00" in content:
+        raise ReproductionPackageError(
+            "package_content_invalid",
+            "Reproduction package source must contain text without null bytes",
+            status_code=500,
+        )
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ReproductionPackageError(
+            "package_content_invalid",
+            "Reproduction package source must use UTF-8 text",
+            status_code=500,
+        ) from error
+    if contains_sensitive_text(text):
+        raise ReproductionPackageError(
+            "package_sensitive_content",
+            "Reproduction package failed the sensitive-content scan",
+            status_code=500,
+        )
 
 
 def _write_file(archive: zipfile.ZipFile, relative_name: str, content: bytes) -> None:

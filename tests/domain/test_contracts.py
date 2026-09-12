@@ -48,6 +48,49 @@ class DomainContractTests(unittest.TestCase):
         self.assertEqual(result.schema_version, "1.0")
         self.assertEqual(result.model_dump(mode="json")["verdict"], "inconclusive")
 
+    def test_audit_events_require_allowlisted_types_and_exact_payloads(self) -> None:
+        values = {
+            "investigation_id": "investigation-1",
+            "sequence": 1,
+            "event_type": "execution.blocked",
+            "occurred_at": datetime(2026, 9, 11, 12, 0, tzinfo=UTC),
+            "payload": {
+                "reason_code": "command_policy_violation",
+                "retryable": False,
+            },
+        }
+        event = InvestigationEvent.model_validate(values)
+        self.assertEqual(event.payload["retryable"], False)
+
+        with self.assertRaises(ValidationError):
+            InvestigationEvent.model_validate(
+                {**values, "payload": {**values["payload"], "detail": "unsafe"}}
+            )
+        with self.assertRaises(ValidationError):
+            InvestigationEvent.model_validate(
+                {**values, "event_type": "provider.raw_output"}
+            )
+        with self.assertRaises(ValidationError):
+            InvestigationEvent.model_validate(
+                {
+                    **values,
+                    "payload": {
+                        "reason_code": "provider detail",
+                        "retryable": True,
+                    },
+                }
+            )
+        with self.assertRaises(ValidationError):
+            InvestigationEvent.model_validate(
+                {
+                    **values,
+                    "payload": {
+                        "reason_code": "x" * 5_000,
+                        "retryable": False,
+                    },
+                }
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

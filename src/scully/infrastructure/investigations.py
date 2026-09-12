@@ -295,3 +295,85 @@ class InvestigationRepository:
         if completed is None:
             raise InvestigationStateError("Completed investigation could not be loaded")
         return completed
+
+    def fail_execution(
+        self,
+        investigation_id: str,
+        events: tuple[InvestigationEvent, ...],
+    ) -> InvestigationDetail:
+        """Close one unsafe execution failure with bounded audit events."""
+
+        if [event.event_type for event in events] != [
+            "execution.blocked",
+            "investigation.failed",
+        ]:
+            raise InvestigationStateError("Failure requires the bounded terminal audit events")
+        if any(event.investigation_id != investigation_id for event in events):
+            raise InvestigationStateError("Failure events belong to another investigation")
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT status FROM investigations WHERE investigation_id = ?",
+                (investigation_id,),
+            ).fetchone()
+            if row is None:
+                raise InvestigationStateError("Investigation does not exist")
+            if str(row["status"]) != InvestigationStatus.READY.value:
+                raise InvestigationStateError("Investigation is not ready for execution")
+            existing_result = connection.execute(
+                "SELECT 1 FROM results WHERE investigation_id = ?",
+                (investigation_id,),
+            ).fetchone()
+            if existing_result is not None:
+                raise InvestigationStateError("Investigation already has a result")
+            maximum = connection.execute(
+                "SELECT MAX(sequence) AS value FROM events WHERE investigation_id = ?",
+                (investigation_id,),
+            ).fetchone()
+            next_sequence = int(maximum["value"] or 0) + 1
+            if [event.sequence for event in events] != list(
+                range(next_sequence, next_sequence + len(events))
+            ):
+                raise InvestigationStateError("Failure event sequence is not contiguous")
+
+            failed_at = events[-1].occurred_at.isoformat()
+            connection.execute(
+                """
+                UPDATE investigations
+                SET status = ?, updated_at = ?
+                WHERE investigation_id = ?
+                """,
+                (InvestigationStatus.FAILED.value, failed_at, investigation_id),
+            )
+            connection.execute(
+                """
+                UPDATE experiments SET status = ? WHERE investigation_id = ?
+                """,
+                ("failed", investigation_id),
+            )
+            connection.executemany(
+                """
+                INSERT INTO events(
+                    investigation_id,
+                    sequence,
+                    event_type,
+                    schema_version,
+                    occurred_at,
+                    payload_json
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        event.investigation_id,
+                        event.sequence,
+                        event.event_type,
+                        event.schema_version,
+                        event.occurred_at.isoformat(),
+                        event.model_dump_json(),
+                    )
+                    for event in events
+                ],
+            )
+        failed = self.get(investigation_id)
+        if failed is None:
+            raise InvestigationStateError("Failed investigation could not be loaded")
+        return failed

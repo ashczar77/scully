@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import shutil
 import tempfile
 import unittest
 import zipfile
@@ -12,6 +13,7 @@ from scully.application.execution import LocalExecutionAdapter
 from scully.application.investigations import InvestigationService
 from scully.application.planning import LocalPlanningAdapter
 from scully.application.reproduction import (
+    MAX_PACKAGE_BYTES,
     PACKAGE_ROOT,
     REPRODUCTION_FILES,
     ReproductionPackageError,
@@ -30,11 +32,11 @@ REPRODUCTIONS = REPOSITORY_ROOT / "fixtures" / "reproductions"
 class ReproductionPackagerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
-        root = Path(self.temporary.name)
-        database = Database(root / "scully.db")
+        self.root = Path(self.temporary.name)
+        database = Database(self.root / "scully.db")
         database.initialize()
         capsules = CapsuleRepository(database)
-        artifacts = root / "artifacts"
+        artifacts = self.root / "artifacts"
         CapsuleImporter(artifacts, capsules).import_path(SEED_CAPSULE)
         self.service = InvestigationService(
             capsules,
@@ -43,7 +45,9 @@ class ReproductionPackagerTests(unittest.TestCase):
             LocalExecutionAdapter(artifacts),
             id_factory=lambda: "inv-package",
         )
-        self.packager = ReproductionPackager(REPRODUCTIONS)
+        self.reproductions = self.root / "reproductions"
+        shutil.copytree(REPRODUCTIONS, self.reproductions)
+        self.packager = ReproductionPackager(self.reproductions)
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -126,11 +130,78 @@ class ReproductionPackagerTests(unittest.TestCase):
         self.assertNotIn(f"{PACKAGE_ROOT}/scripts/observe.mjs", names)
         self.assertNotIn(f"{PACKAGE_ROOT}/scripts/run-branch.mjs", names)
 
-    def test_planned_investigation_cannot_be_packaged(self) -> None:
+    def test_planned_and_inconclusive_investigations_cannot_be_packaged(self) -> None:
         planned = self.service.create("proxy-identity-collapse-v2")
 
         with self.assertRaisesRegex(ReproductionPackageError, "must complete"):
             self.packager.build(planned)
+
+        completed = self.service.execute(planned.investigation_id)
+        assert completed.execution is not None
+        inconclusive = completed.model_copy(
+            update={
+                "execution": completed.execution.model_copy(
+                    update={"supported_hypothesis_id": None}
+                )
+            }
+        )
+        with self.assertRaises(ReproductionPackageError) as blocked:
+            self.packager.build(inconclusive)
+        self.assertEqual(blocked.exception.code, "cause_not_selected")
+
+    def test_export_rejects_sensitive_invalid_and_oversized_source(self) -> None:
+        completed = self._completed()
+        readme = (
+            self.reproductions / "proxy-identity-collapse" / "README.md"
+        )
+        original = readme.read_bytes()
+
+        readme.write_bytes(b'api_key="synthetic-secret-value-12345"\n')
+        with self.assertRaises(ReproductionPackageError) as sensitive:
+            self.packager.build(completed)
+        self.assertEqual(sensitive.exception.code, "package_sensitive_content")
+
+        readme.write_bytes(original + b"\x00")
+        with self.assertRaises(ReproductionPackageError) as invalid:
+            self.packager.build(completed)
+        self.assertEqual(invalid.exception.code, "package_content_invalid")
+
+        readme.write_text("x" * (MAX_PACKAGE_BYTES + 1), encoding="utf-8")
+        with self.assertRaises(ReproductionPackageError) as oversized:
+            self.packager.build(completed)
+        self.assertEqual(oversized.exception.code, "package_too_large")
+
+    def test_export_rejects_symlink_and_sensitive_result_metadata(self) -> None:
+        completed = self._completed()
+        readme = (
+            self.reproductions / "proxy-identity-collapse" / "README.md"
+        )
+        original = readme.read_bytes()
+        readme.unlink()
+        try:
+            readme.symlink_to("package.json")
+        except (NotImplementedError, OSError):
+            self.skipTest("Symlinks are not available")
+        with self.assertRaises(ReproductionPackageError) as unsafe:
+            self.packager.build(completed)
+        self.assertEqual(unsafe.exception.code, "template_invalid")
+
+        readme.unlink()
+        readme.write_bytes(original)
+        hypotheses = list(completed.hypotheses)
+        hypotheses[0] = hypotheses[0].model_copy(
+            update={"title": "password=synthetic-secret-value-12345"}
+        )
+        sensitive_detail = completed.model_copy(
+            update={"hypotheses": tuple(hypotheses)}
+        )
+        with self.assertRaises(ReproductionPackageError) as sensitive:
+            self.packager.build(sensitive_detail)
+        self.assertEqual(sensitive.exception.code, "package_sensitive_content")
+
+    def _completed(self):
+        planned = self.service.create("proxy-identity-collapse-v2")
+        return self.service.execute(planned.investigation_id)
 
 
 if __name__ == "__main__":

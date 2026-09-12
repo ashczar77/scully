@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
@@ -82,7 +83,11 @@ class ExecutionError(ValueError):
 
     def __init__(self, code: str, message: str, *, status_code: int = 400) -> None:
         super().__init__(message)
-        self.code = code
+        self.code = (
+            code
+            if re.fullmatch(r"[a-z][a-z0-9_]{0,95}", code)
+            else "execution_failed"
+        )
         self.message = message
         self.status_code = status_code
 
