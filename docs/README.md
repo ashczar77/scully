@@ -12,9 +12,9 @@ customer data.
 ## Current status
 
 - Phase: Realistic investigation and artifact quality
-- Completed gates: G0.1 through G3.5 and checkpoints G1.2a through G1.3f
-- Active step: Step 4.2, reproduction minimization and packaging
-- Next checkpoint: Gate G4.2, artifact usefulness review
+- Completed gates: G0.1 through G4.2 and checkpoints G1.2a through G1.3f
+- Active step: Step 4.3, safety and operational hardening
+- Next checkpoint: Gate G4.3, safety review
 - Implementation: Working local path from a rights-cleared capsule through real
   loopback proxy branches and a runnable reproduction download
 - Out-of-pocket cost limit: Zero
@@ -91,7 +91,7 @@ customer data.
 | [Realistic incident integration](product/realistic-incident-integration.md) | Sanitized capsule, real loopback proxy execution, stable signature, alternatives, rights, and verification | Implemented for G4.1 review |
 | [Gate G4.1 review](gates/G4.1-incident-fidelity-review.md) | Evidence and decision record for realistic incident fidelity | Approved |
 | [Reproduction minimization and packaging](product/reproduction-minimization.md) | Automated field reduction, structural decisions, synthetic trigger, package manifest, and independent execution | Implemented for G4.2 review |
-| [Gate G4.2 review](gates/G4.2-artifact-usefulness-review.md) | Evidence and decision record for the minimized reproduction artifact | Ready for review |
+| [Gate G4.2 review](gates/G4.2-artifact-usefulness-review.md) | Evidence and decision record for the minimized reproduction artifact | Approved |
 | [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol retained for later direct validation | Deferred evidence |
 | [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for later direct validation | Ready for future use |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |
@@ -118,8 +118,8 @@ Gate G3.4 approved the reproduction proof and authorized Step 3.5 only.
 Gate G3.5 approved the Phase 3 exit with direct-validation debt and authorized
 Step 4.1 realistic incident integration only.
 Gate G4.1 approved the realistic incident and authorized Step 4.2 minimization
-and packaging only. Step 4.2 is implemented and awaits Gate G4.2 review. Step
-4.3 is not authorized.
+and packaging only. Gate G4.2 approved the minimized artifact and authorized
+Step 4.3 safety and operational hardening only.
 Live provider product paths remain disabled and separately gated.
 
 New documentation should support the active hackathon project.
