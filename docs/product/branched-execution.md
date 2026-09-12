@@ -11,8 +11,10 @@ local checkpoint, verify sibling isolation, evaluate every result against the
 capsule's fixed failure signature, persist the terminal state, and display the
 supported cause in the browser.
 
-The working path is deterministic and local. It does not start a shell, make a
-network request, construct a provider client, or spend credits.
+The working path is deterministic and local. It starts a reviewed Node.js
+process directly, without a shell, and binds one Express application plus one
+reverse proxy to temporary loopback ports. It makes no external network
+request, constructs no provider client, and spends no credits.
 
 ## Local execution model
 
@@ -27,7 +29,15 @@ parsing either file. The fixed checkpoint contains:
 
 Each experiment receives a deep copy of that checkpoint. The executor applies
 only the exact parameter map already approved during planning and adds one
-branch-specific marker. It never executes text from the capsule or planner.
+branch-specific marker. It then invokes one fixed, reviewed Node.js entry point
+with the allowlisted variant as its only argument. It never executes text from
+the capsule or planner.
+
+The entry point starts a separate loopback reverse proxy and Express
+application. Test clients send a project-defined identity marker to the proxy.
+The proxy validates that marker, writes `X-Forwarded-For`, and forwards the
+request to Express. This preserves the trusted-hop boundary instead of letting
+the test client inject the application-facing forwarding header.
 
 The three local variants produce these deterministic observations:
 
@@ -37,9 +47,9 @@ The three local variants produce these deterministic observations:
 | `preserve-forwarded-chain` | Both requests still resolve to the loopback identity and responses `200,429`; signature matches | Eliminated |
 | `per-request-identity` | The normalized request identity is still loopback and responses remain `200,429`; signature matches | Eliminated |
 
-This establishes one supported causal alternative for the seeded fixture. It
-does not claim that the same conclusion applies to an unsanitized production
-incident.
+This establishes one supported causal alternative for the sanitized realistic
+case. It does not claim that the same conclusion applies to an unsanitized
+production incident.
 
 ## Deterministic evaluation
 
@@ -147,8 +157,8 @@ Tests cover:
 
 ## Known limitations
 
-1. Local branch execution is a deterministic model of the seeded incident. The
-   delivered Express package is the runnable witness.
+1. Local branch execution covers the selected realistic Express incident only.
+   It is not a general executor for arbitrary capsule code.
 2. Live Sandbox execution, timeout repeatability, and state cleanup remain
    unproven in the product path.
 3. Explicit remote cancellation remains unproven and no further termination

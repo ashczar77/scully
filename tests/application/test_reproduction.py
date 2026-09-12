@@ -49,7 +49,7 @@ class ReproductionPackagerTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def test_completed_investigation_builds_a_repeatable_bounded_archive(self) -> None:
-        planned = self.service.create("proxy-identity-collapse-v1")
+        planned = self.service.create("proxy-identity-collapse-v2")
         completed = self.service.execute(planned.investigation_id)
 
         first = self.packager.build(completed)
@@ -73,13 +73,15 @@ class ReproductionPackagerTests(unittest.TestCase):
                 archive.read(f"{PACKAGE_ROOT}/package.json")
             )
         self.assertEqual(metadata["investigation_id"], "inv-package")
-        self.assertEqual(metadata["capsule_id"], "proxy-identity-collapse-v1")
+        self.assertEqual(metadata["capsule_id"], "proxy-identity-collapse-v2")
         self.assertEqual(metadata["signature_id"], "proxy-identity-collapse-v1")
         self.assertEqual(
             metadata["supported_cause"],
             "Proxy trust boundary is disabled",
         )
         self.assertTrue(metadata["execution"]["isolation_verified"])
+        self.assertEqual(metadata["incident_fidelity"]["proxy_hops"], 1)
+        self.assertTrue(metadata["incident_fidelity"]["proxy_writes_forwarded_header"])
         self.assertIn("200,429", readme)
         self.assertIn("200,200", readme)
         self.assertIn("expected to fail", readme)
@@ -94,7 +96,7 @@ class ReproductionPackagerTests(unittest.TestCase):
         self.assertNotIn("node_modules", "\n".join(names))
 
     def test_planned_investigation_cannot_be_packaged(self) -> None:
-        planned = self.service.create("proxy-identity-collapse-v1")
+        planned = self.service.create("proxy-identity-collapse-v2")
 
         with self.assertRaisesRegex(ReproductionPackageError, "must complete"):
             self.packager.build(planned)

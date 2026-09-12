@@ -1,6 +1,7 @@
 {
   "framework": "Express 5.2.1",
   "limiter": "Project-created in-memory limiter with one request per identity",
+  "proxy_header_boundary": "Only the controlled loopback proxy writes X-Forwarded-For",
   "proxy_topology": "One controlled loopback reverse-proxy hop",
   "runtime": "Node.js 22.22.2",
   "trust_proxy": false

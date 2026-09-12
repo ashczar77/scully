@@ -1,0 +1,23 @@
+{
+  "capsule_class": "Sanitized realistic reconstruction",
+  "restricted_material": [],
+  "review_date": "2026-09-12",
+  "rights": [
+    {
+      "artifact": "Application, proxy, limiter, harness, and observations",
+      "basis": "Project-created and distributed under the repository license"
+    },
+    {
+      "artifact": "Synthetic client addresses",
+      "basis": "RFC 5737 TEST-NET-2 documentation range"
+    },
+    {
+      "artifact": "Express 5.2.1 dependency",
+      "basis": "Installed from its public package and retained under its MIT license"
+    },
+    {
+      "artifact": "Public source references",
+      "basis": "URLs and project-authored purpose labels only"
+    }
+  ]
+}

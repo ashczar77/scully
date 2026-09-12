@@ -1,7 +1,10 @@
 # Proxy Identity Collapse Reproduction
 
 This package reproduces an Express proxy-trust failure using two synthetic
-TEST-NET-2 client addresses and a loopback-only local server.
+TEST-NET-2 client addresses, a loopback reverse proxy, and a separate loopback
+application server. The client sends a test-only identity marker to the proxy.
+Only the proxy writes `X-Forwarded-For` before forwarding the request to
+Express.
 
 ## Requirements
 
@@ -27,5 +30,7 @@ exit code:
 npm run verify
 ```
 
-The package binds only to `127.0.0.1` and makes no external network requests
-after dependency installation.
+The package binds both servers only to `127.0.0.1` and makes no external
+network requests after dependency installation. All application and proxy
+source in this archive is project-created and distributed under the repository
+license. Express remains subject to its own dependency license.

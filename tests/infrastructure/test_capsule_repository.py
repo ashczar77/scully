@@ -40,7 +40,7 @@ class CapsuleRepositoryTests(unittest.TestCase):
                 capsule_count = connection.execute("SELECT COUNT(*) FROM capsules").fetchone()[0]
                 evidence_count = connection.execute("SELECT COUNT(*) FROM evidence").fetchone()[0]
             self.assertEqual(capsule_count, 1)
-            self.assertEqual(evidence_count, 5)
+        self.assertEqual(evidence_count, 6)
 
     def test_evidence_identifiers_are_scoped_to_the_capsule(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -56,7 +56,7 @@ class CapsuleRepositoryTests(unittest.TestCase):
 
             with database.connect() as connection:
                 evidence_count = connection.execute("SELECT COUNT(*) FROM evidence").fetchone()[0]
-            self.assertEqual(evidence_count, 10)
+        self.assertEqual(evidence_count, 12)
 
 
 if __name__ == "__main__":

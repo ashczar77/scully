@@ -12,6 +12,7 @@ from scully.application.execution import (
     SANDBOX_EXECUTABLE,
     ExecutionError,
     LocalExecutionAdapter,
+    NodeProxyFixtureRunner,
     SandboxExecutionAdapter,
 )
 from scully.application.planning import LocalPlanningAdapter
@@ -32,7 +33,7 @@ class LocalExecutionAdapterTests(unittest.TestCase):
         repository = CapsuleRepository(database)
         self.artifact_dir = root / "artifacts"
         CapsuleImporter(self.artifact_dir, repository).import_path(SEED_CAPSULE)
-        manifest = repository.get_manifest("proxy-identity-collapse-v1")
+        manifest = repository.get_manifest("proxy-identity-collapse-v2")
         assert manifest is not None
         self.manifest = manifest
         self.plans = LocalPlanningAdapter().plan("inv-execution", manifest).experiments
@@ -83,6 +84,49 @@ class LocalExecutionAdapterTests(unittest.TestCase):
             3,
         )
 
+    def test_reviewed_node_fixture_runs_a_real_loopback_proxy_hop(self) -> None:
+        runner = NodeProxyFixtureRunner(
+            REPOSITORY_ROOT
+            / "fixtures"
+            / "reproductions"
+            / "proxy-identity-collapse"
+        )
+
+        clients = ("198.51.100.10", "198.51.100.11")
+        incident_runs = tuple(
+            runner.run(
+                variant="preserve-forwarded-chain",
+                clients=clients,
+                timeout_seconds=10,
+            )
+            for _ in range(3)
+        )
+        known_good_runs = tuple(
+            runner.run(
+                variant="trust-loopback",
+                clients=clients,
+                timeout_seconds=10,
+            )
+            for _ in range(3)
+        )
+        incident = incident_runs[0]
+        known_good = known_good_runs[0]
+
+        self.assertTrue(all(item == incident for item in incident_runs))
+        self.assertTrue(all(item == known_good for item in known_good_runs))
+        self.assertEqual(incident["responses"], [200, 429])
+        self.assertEqual(incident["proxy_hops"], 1)
+        self.assertEqual(incident["normalized_ips"], ["127.0.0.1", "127.0.0.1"])
+        self.assertEqual(known_good["responses"], [200, 200])
+        self.assertEqual(
+            known_good["normalized_ips"],
+            ["198.51.100.10", "198.51.100.11"],
+        )
+        self.assertEqual(
+            known_good["socket_addresses"],
+            ["127.0.0.1", "127.0.0.1"],
+        )
+
     def test_local_deadline_stops_new_work_without_retry(self) -> None:
         timer = iter([0.0, 0.1, 61.0, 62.0, 63.0])
         report = LocalExecutionAdapter(
@@ -111,6 +155,32 @@ class LocalExecutionAdapterTests(unittest.TestCase):
         ).execute("inv-execution", self.manifest, self.plans)
 
         self.assertEqual(first, second)
+
+    def test_signature_evaluation_is_not_a_capsule_id_lookup(self) -> None:
+        matchers = list(self.manifest.failure_signature.matchers)
+        matchers[0] = matchers[0].model_copy(update={"expected": [200, 503]})
+        signature = self.manifest.failure_signature.model_copy(
+            update={"matchers": tuple(matchers)}
+        )
+        changed_manifest = self.manifest.model_copy(
+            update={"failure_signature": signature}
+        )
+
+        report = LocalExecutionAdapter(self.artifact_dir).execute(
+            "inv-execution",
+            changed_manifest,
+            self.plans,
+        )
+
+        self.assertIsNone(report.supported_hypothesis_id)
+        self.assertEqual(
+            [item.hypothesis_disposition.value for item in report.outcomes],
+            ["supported", "supported", "supported"],
+        )
+        self.assertIn(
+            "Execution did not support exactly one causal alternative",
+            report.limitations,
+        )
 
     def test_unallowlisted_plan_and_tampered_evidence_fail_closed(self) -> None:
         invalid = self.plans[0].model_copy(update={"variant": "arbitrary-command"})

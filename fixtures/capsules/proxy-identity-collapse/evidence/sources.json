@@ -1,6 +1,14 @@
 {
   "sources": [
     {
+      "purpose": "Operational reports of proxy identity collapse in rate limiting",
+      "url": "https://github.com/kyma-project/busola/issues/4848"
+    },
+    {
+      "purpose": "Rate limiter proxy troubleshooting",
+      "url": "https://github.com/express-rate-limit/express-rate-limit/wiki/Troubleshooting-Proxy-Issues"
+    },
+    {
       "purpose": "Reverse-proxy trust behavior",
       "url": "https://expressjs.com/en/guide/behind-proxies.html"
     },

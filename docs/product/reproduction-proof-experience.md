@@ -100,7 +100,8 @@ showing observed responses `200,429` against the `200,200` expectation.
 
 ## Known limitations
 
-1. The working proof covers one synthetic Express proxy-trust incident.
+1. The working proof covers one sanitized realistic Express proxy-trust
+   incident.
 2. Raw standard output is not retained.
 3. Investigation and proof state is not yet represented by reloadable routes.
 4. Exact physical-device and assistive-technology validation remains pending.

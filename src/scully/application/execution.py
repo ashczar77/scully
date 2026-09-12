@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import shutil
+import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from pathlib import Path
@@ -43,13 +46,13 @@ from scully.providers.sandbox import SandboxCommand, SandboxOutcome
 
 
 BASELINE_MARKER = "checkpoint-baseline"
-LOOPBACK_IDENTITY = "identity:loopback-proxy"
 CLIENT_IDENTITIES = {
     "198.51.100.10": "identity:test-net-client-a",
     "198.51.100.11": "identity:test-net-client-b",
 }
 ProgressPayload = dict[str, str | int | float | bool | None]
 ProgressCallback = Callable[[str, ProgressPayload], None]
+MAX_LOCAL_OUTPUT_BYTES = 20_000
 SANDBOX_BASE_IMAGE = "python:3.12-slim"
 SANDBOX_EXECUTABLE = "/usr/local/bin/python"
 SANDBOX_SCRIPT = """import json
@@ -112,16 +115,134 @@ class SandboxBranchRunner(Protocol):
         """Run fixed child commands from one provider checkpoint."""
 
 
+class LocalBranchRunner(Protocol):
+    """Application-owned boundary for the reviewed local HTTP fixture."""
+
+    def run(
+        self,
+        *,
+        variant: str,
+        clients: tuple[str, ...],
+        timeout_seconds: int,
+    ) -> Mapping[str, object]:
+        """Run one fixed branch and return its observed payload."""
+
+
+class NodeProxyFixtureRunner:
+    """Run the reviewed Express and loopback-proxy fixture without a shell."""
+
+    def __init__(self, fixture_dir: Path, *, node_executable: str | None = None) -> None:
+        self.fixture_dir = fixture_dir.resolve()
+        self.node_executable = node_executable
+
+    def run(
+        self,
+        *,
+        variant: str,
+        clients: tuple[str, ...],
+        timeout_seconds: int,
+    ) -> Mapping[str, object]:
+        if variant not in EXPERIMENT_VARIANTS:
+            raise ExecutionError(
+                "local_variant_invalid",
+                "Local branch variant is outside the reviewed allowlist",
+            )
+        if clients != tuple(CLIENT_IDENTITIES):
+            raise ExecutionError(
+                "local_clients_invalid",
+                "Local branch clients are outside the reviewed fixture",
+            )
+        if self.fixture_dir.is_symlink() or not self.fixture_dir.is_dir():
+            raise ExecutionError(
+                "local_fixture_unavailable",
+                "Reviewed local execution fixture is unavailable",
+                status_code=503,
+            )
+        script = self.fixture_dir / "scripts" / "run-branch.mjs"
+        package = self.fixture_dir / "package.json"
+        if (
+            script.is_symlink()
+            or package.is_symlink()
+            or not script.is_file()
+            or not package.is_file()
+        ):
+            raise ExecutionError(
+                "local_fixture_unavailable",
+                "Reviewed local execution fixture is incomplete",
+                status_code=503,
+            )
+        node = self.node_executable or shutil.which("node")
+        if not node:
+            raise ExecutionError(
+                "local_runtime_unavailable",
+                "Node.js is required for the reviewed local fixture",
+                status_code=503,
+            )
+        try:
+            process = subprocess.run(
+                (node, str(script), variant),
+                cwd=self.fixture_dir,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="strict",
+                timeout=timeout_seconds,
+                check=False,
+                env={
+                    "LANG": "C",
+                    "LC_ALL": "C",
+                    "PATH": os.environ.get("PATH", ""),
+                },
+            )
+        except subprocess.TimeoutExpired as error:
+            raise ExecutionError(
+                "local_fixture_timeout",
+                "Reviewed local fixture exceeded its branch timeout",
+                status_code=504,
+            ) from error
+        except (OSError, UnicodeError) as error:
+            raise ExecutionError(
+                "local_fixture_failed",
+                "Reviewed local fixture could not be executed",
+                status_code=503,
+            ) from error
+        if process.returncode != 0:
+            raise ExecutionError(
+                "local_fixture_failed",
+                "Reviewed local fixture returned a non-zero exit status",
+                status_code=502,
+            )
+        if (
+            len(process.stdout.encode("utf-8")) > MAX_LOCAL_OUTPUT_BYTES
+            or len(process.stderr.encode("utf-8")) > MAX_LOCAL_OUTPUT_BYTES
+        ):
+            raise ExecutionError(
+                "local_output_invalid",
+                "Reviewed local fixture output exceeds the product limit",
+                status_code=502,
+            )
+        return _parse_local_observation(process.stdout, clients)
+
+
 class LocalExecutionAdapter:
-    """Run the proxy incident simulation without a shell or network access."""
+    """Run the reviewed proxy incident on loopback without a shell."""
 
     def __init__(
         self,
         artifact_dir: Path,
         *,
+        fixture_dir: Path | None = None,
+        runner: LocalBranchRunner | None = None,
         timer: Callable[[], float] | None = None,
     ) -> None:
         self.artifact_dir = artifact_dir
+        default_fixture = (
+            Path(__file__).resolve().parents[3]
+            / "fixtures"
+            / "reproductions"
+            / "proxy-identity-collapse"
+        )
+        self.runner = runner or NodeProxyFixtureRunner(fixture_dir or default_fixture)
         self.timer = timer or monotonic
 
     def execute(
@@ -188,7 +309,20 @@ class LocalExecutionAdapter:
                 },
             )
             _apply_variant(branch, plan)
-            observation = _simulate_proxy_incident(branch)
+            clients = branch.get("clients")
+            if not isinstance(clients, list) or not all(
+                isinstance(client, str) for client in clients
+            ):
+                raise ExecutionError(
+                    "checkpoint_invalid",
+                    "Local branch clients are invalid",
+                    status_code=500,
+                )
+            observation = self.runner.run(
+                variant=plan.variant,
+                clients=tuple(clients),
+                timeout_seconds=plan.timeout_seconds,
+            )
             operation_count += 1
             branch_ended = self.timer()
             duration_ms = max(0.0, (branch_ended - branch_started) * 1_000)
@@ -513,33 +647,56 @@ def _apply_variant(branch: dict[str, object], plan: ExperimentPlan) -> None:
         environment[name] = value
 
 
-def _simulate_proxy_incident(branch: Mapping[str, object]) -> dict[str, object]:
-    environment = branch.get("environment")
-    clients = branch.get("clients")
-    if not isinstance(environment, dict) or not isinstance(clients, list):
-        raise ExecutionError("checkpoint_invalid", "Local branch is invalid")
-    trust_proxy = environment.get("trust_proxy") == "loopback"
-    resolved = list(clients) if trust_proxy else ["loopback", "loopback"]
-    identities = [
-        CLIENT_IDENTITIES.get(value, LOOPBACK_IDENTITY) for value in resolved
-    ]
-    seen: set[str] = set()
-    responses = []
-    events = []
-    for identity in identities:
-        if identity in seen:
-            responses.append(429)
-            events.append("rate_limit_rejected")
-        else:
-            seen.add(identity)
-            responses.append(200)
-            events.append("request_accepted")
-    return {
-        "responses": responses,
-        "events": events,
-        "identity_digests": identities,
-        "forwarded_clients": list(clients),
-    }
+def _parse_local_observation(
+    value: str,
+    clients: tuple[str, ...],
+) -> Mapping[str, object]:
+    try:
+        parsed = json.loads(value, parse_constant=_reject_json_constant)
+    except (json.JSONDecodeError, ValueError) as error:
+        raise ExecutionError(
+            "local_output_invalid",
+            "Reviewed local fixture did not return valid JSON",
+            status_code=502,
+        ) from error
+    if not isinstance(parsed, dict) or parsed.get("exit_code") != 0:
+        raise ExecutionError(
+            "local_output_invalid",
+            "Reviewed local fixture returned an invalid result envelope",
+            status_code=502,
+        )
+    payload = parsed.get("payload")
+    if not isinstance(payload, dict):
+        raise ExecutionError(
+            "local_output_invalid",
+            "Reviewed local fixture result is missing its payload",
+            status_code=502,
+        )
+    required_lists = (
+        "responses",
+        "events",
+        "identity_digests",
+        "forwarded_clients",
+        "normalized_ips",
+        "socket_addresses",
+        "limiter_bucket_counts",
+    )
+    if any(
+        not isinstance(payload.get(name), list) or len(payload[name]) != len(clients)
+        for name in required_lists
+    ):
+        raise ExecutionError(
+            "local_output_invalid",
+            "Reviewed local fixture observation has an invalid shape",
+            status_code=502,
+        )
+    if payload.get("forwarded_clients") != list(clients) or payload.get("proxy_hops") != 1:
+        raise ExecutionError(
+            "local_output_invalid",
+            "Reviewed local fixture observation left the declared topology",
+            status_code=502,
+        )
+    return payload
 
 
 def _failure_signature(capsule: CapsuleManifest) -> FailureSignature:

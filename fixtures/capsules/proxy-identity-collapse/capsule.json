@@ -1,8 +1,8 @@
 {
   "schema_version": "1.0",
-  "capsule_id": "proxy-identity-collapse-v1",
-  "title": "Proxy identity collapse",
-  "observed_summary": "Two synthetic clients pass through one controlled reverse proxy. With proxy trust disabled, both requests resolve to one internal identity and the second request receives HTTP 429.",
+  "capsule_id": "proxy-identity-collapse-v2",
+  "title": "Reverse-proxy rate-limit identity collapse",
+  "observed_summary": "Two synthetic clients enter through a controlled loopback reverse proxy that writes distinct forwarded addresses. With Express proxy trust disabled, both requests still resolve to the proxy socket identity and the second client receives HTTP 429.",
   "failure_signature": {
     "signature_id": "proxy-identity-collapse-v1",
     "matchers": [
@@ -74,35 +74,35 @@
     {
       "evidence_id": "environment",
       "path": "evidence/environment.json",
-      "sha256": "061813d34eb71950894218f4265a166dda3f894603bf7ee58bfe6c314eb6610a",
-      "byte_size": 236,
+      "sha256": "5674a99a92e03a534542b62fa2e763e1603de85c906962da632e7b2ed8198222",
+      "byte_size": 324,
       "media_type": "application/json",
-      "provenance": "Project-created synthetic environment facts",
+      "provenance": "Project-created sanitized environment reconstruction",
       "redaction_status": "clean"
     },
     {
       "evidence_id": "incident-observation",
       "path": "evidence/incident-observation.json",
-      "sha256": "e91c01477c5f9672eec752530351be66b7564b5f8e4fd6906258536f012b793f",
-      "byte_size": 290,
+      "sha256": "5855d5b0076a18b268dfce200df24594eba38c26bcaeff6f0fcf51b4e47d71b0",
+      "byte_size": 563,
       "media_type": "application/json",
-      "provenance": "Project-created synthetic incident observation",
+      "provenance": "Observed from the project-created loopback proxy fixture",
       "redaction_status": "clean"
     },
     {
       "evidence_id": "known-good-observation",
       "path": "evidence/known-good-observation.json",
-      "sha256": "aa87c80a8eba3392ffafd577f87b005cf5d77a49aaf410c17206cff4bd7715e1",
-      "byte_size": 293,
+      "sha256": "2c7ef31099f83c44a728ce4761ecefd15181ed6bd8cc0a3e865bafdd90903d00",
+      "byte_size": 579,
       "media_type": "application/json",
-      "provenance": "Project-created synthetic comparison observation",
+      "provenance": "Observed from the one-variable known-good proxy fixture",
       "redaction_status": "clean"
     },
     {
       "evidence_id": "requests",
       "path": "evidence/requests.json",
-      "sha256": "bb3d078ef9c517e39be289f26aa085bf701487fe6c6127aa1bc149d65cdae4d8",
-      "byte_size": 236,
+      "sha256": "32a56aaac01c3d3258e431d3fe93bf0d71b2c3091926d76f1499853f8065afea",
+      "byte_size": 537,
       "media_type": "application/json",
       "provenance": "Project-created synthetic request sequence",
       "redaction_status": "clean"
@@ -110,10 +110,19 @@
     {
       "evidence_id": "sources",
       "path": "evidence/sources.json",
-      "sha256": "d4aee9699ae5da2728f866c11677c5e656edc00232613e923a4bd7ab160217fe",
-      "byte_size": 406,
+      "sha256": "6f11fb65931d0af9cfa35f378042bd82e3b2bdd091b1c431b342c25509297912",
+      "byte_size": 743,
       "media_type": "application/json",
       "provenance": "Public documentation URLs with project-created purpose labels",
+      "redaction_status": "clean"
+    },
+    {
+      "evidence_id": "rights",
+      "path": "evidence/rights.json",
+      "sha256": "7dc2a424297a40e6b5dee1e786f246e09a126381980e20c324f41808e715eb73",
+      "byte_size": 690,
+      "media_type": "application/json",
+      "provenance": "Project-created rights and restriction review",
       "redaction_status": "clean"
     }
   ],

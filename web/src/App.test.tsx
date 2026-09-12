@@ -1,4 +1,11 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
@@ -55,8 +62,14 @@ describe("App", () => {
     });
     expect(overviewHeading).toBeTruthy();
     expect(document.activeElement).toBe(overviewHeading);
-    expect(screen.getByRole("heading", { name: "Proxy identity collapse" })).toBeTruthy();
-    expect(screen.getByText("Project-created synthetic environment facts")).toBeTruthy();
+    expect(
+      screen.getByRole("heading", {
+        name: "Reverse-proxy rate-limit identity collapse",
+      }),
+    ).toBeTruthy();
+    expect(
+      screen.getByText("Project-created sanitized environment reconstruction"),
+    ).toBeTruthy();
     expect(screen.getByRole("heading", { name: "What changed?" })).toBeTruthy();
     expect(screen.getByText("Safety review passed")).toBeTruthy();
     expect(screen.getByText("No production credentials or provider keys")).toBeTruthy();
@@ -91,7 +104,7 @@ describe("App", () => {
     expect(alert.textContent).toContain(
       "Evidence failed the credential and local-path scan",
     );
-    expect(document.activeElement).toBe(alert);
+    await waitFor(() => expect(document.activeElement).toBe(alert));
   });
 
   it("maps and inspects three bounded investigation alternatives", async () => {
@@ -142,7 +155,7 @@ describe("App", () => {
     expect(fetchMock).toHaveBeenLastCalledWith("/api/investigations", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ capsule_id: "proxy-identity-collapse-v1" }),
+      body: JSON.stringify({ capsule_id: "proxy-identity-collapse-v2" }),
     });
 
     fireEvent.click(screen.getByRole("button", { name: /inspect branch h1/i }));
@@ -299,9 +312,10 @@ function healthPayload() {
 function capsulePayload() {
   return {
     schema_version: "1.0",
-    capsule_id: "proxy-identity-collapse-v1",
-    title: "Proxy identity collapse",
-    observed_summary: "Two clients collapse to one identity.",
+    capsule_id: "proxy-identity-collapse-v2",
+    title: "Reverse-proxy rate-limit identity collapse",
+    observed_summary:
+      "Two synthetic clients cross one loopback proxy and collapse to one identity.",
     signature_id: "proxy-identity-collapse-v1",
     signature_matcher_count: 5,
     known_good_summary:
@@ -325,7 +339,7 @@ function capsulePayload() {
         sha256: "a".repeat(64),
         byte_size: 236,
         media_type: "application/json",
-        provenance: "Project-created synthetic environment facts",
+        provenance: "Project-created sanitized environment reconstruction",
         redaction_status: "clean",
       },
     ],
@@ -373,7 +387,7 @@ function investigationPayload() {
   return {
     schema_version: "1.0",
     investigation_id: "inv-test",
-    capsule_id: "proxy-identity-collapse-v1",
+    capsule_id: "proxy-identity-collapse-v2",
     status: "ready",
     planning_source: "local",
     created_at: "2026-09-11T10:30:00Z",

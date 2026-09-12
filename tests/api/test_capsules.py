@@ -41,18 +41,18 @@ class CapsuleEndpointTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 201)
         payload = response.json()
-        self.assertEqual(payload["capsule_id"], "proxy-identity-collapse-v1")
+        self.assertEqual(payload["capsule_id"], "proxy-identity-collapse-v2")
         self.assertEqual(payload["signature_id"], "proxy-identity-collapse-v1")
         self.assertEqual(payload["signature_matcher_count"], 5)
         self.assertEqual(len(payload["environment"]), 4)
-        self.assertEqual(len(payload["evidence"]), 5)
+        self.assertEqual(len(payload["evidence"]), 6)
         self.assertEqual(len(payload["exclusions"]), 4)
         self.assertFalse(payload["execution_boundary"]["network_access"])
         self.assertEqual(payload["missing_evidence"], [])
         self.assertNotIn("failure_signature", payload)
         self.assertNotIn("expected", payload)
 
-        loaded = self.client.get("/api/capsules/proxy-identity-collapse-v1")
+        loaded = self.client.get("/api/capsules/proxy-identity-collapse-v2")
         self.assertEqual(loaded.status_code, 200)
         self.assertEqual(loaded.json(), payload)
 
@@ -64,7 +64,10 @@ class CapsuleEndpointTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.json()["title"], "Proxy identity collapse")
+        self.assertEqual(
+            response.json()["title"],
+            "Reverse-proxy rate-limit identity collapse",
+        )
 
     def test_invalid_requests_return_bounded_reason_codes(self) -> None:
         unknown = self.client.post(

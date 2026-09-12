@@ -7,6 +7,7 @@ install:
 	$(PYTHON_BIN) -m pip install -r requirements.lock
 	$(PYTHON_BIN) -m pip install --no-build-isolation --no-deps -e .
 	npm --prefix web ci
+	npm --prefix fixtures/reproductions/proxy-identity-collapse ci
 
 test: test-backend test-web
 

@@ -53,11 +53,13 @@ the final supported cause. This resolves the earlier replay-only limitation.
 
 ## Reproduction package
 
-The package uses Node.js 22.22.2 and Express 5.2.1. It binds to loopback and
-sends two local requests with distinct synthetic TEST-NET-2 forwarded client
-addresses. With Express proxy trust disabled, both requests resolve to the same
-limiter identity and return `200,429`. With loopback proxy trust enabled, the
-same requests resolve separately and return `200,200`.
+The package uses Node.js 22.22.2 and Express 5.2.1. It binds a reverse proxy and
+a separate application server to loopback. Two clients send distinct synthetic
+TEST-NET-2 identity markers to the proxy, and only the proxy writes the
+application-facing forwarding header. With Express proxy trust disabled, both
+requests resolve to the same limiter identity and return `200,429`. With
+loopback proxy trust enabled, the same requests resolve separately and return
+`200,200`.
 
 The packager copies only seven allowlisted files, rejects symlinks or missing
 files, caps the archive at 2 MiB, records SHA-256 hashes, and uses fixed ZIP
@@ -138,8 +140,8 @@ run and reports the current result as bounded JSON.
 ## Known limitations and retained work
 
 1. The product planner and branch executor are deterministic local
-   implementations for one seeded incident. Live Nemotron planning and live
-   Sandbox execution remain separately gated.
+   implementations for one selected realistic incident. Live Nemotron planning
+   and live Sandbox execution remain separately gated.
 2. Nemotron needs further product-path repeatability evidence.
 3. Tavily needs URL deduplication and an overage-status check before expanded
    use.

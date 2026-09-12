@@ -3,9 +3,10 @@
 Scully turns sanitized production-incident evidence into a minimal executable
 reproduction without giving AI unrestricted production access.
 
-The project has completed its feasibility gates and now includes a working
-offline product path from safe capsule import to progressive branch execution,
-deterministic cause selection, and a downloadable runnable reproduction. See the
+The project now includes a working local product path from safe capsule import
+to progressive branch execution, deterministic cause selection, and a
+downloadable runnable reproduction. The selected realistic incident runs an
+Express application behind a separate loopback reverse proxy. See the
 [hackathon project plan](docs/HACKATHON_PROJECT_PLAN.md) and
 [project documentation](docs/README.md) for its status and roadmap.
 
@@ -45,18 +46,19 @@ make build
 make dev-api
 ```
 
-Open `http://127.0.0.1:8000`, then select **Load seed capsule**. Scully validates
+Open `http://127.0.0.1:8000`, then select **Load safe seed**. Scully validates
 the capsule before storing its evidence and displays the accepted provenance,
 redaction status, and deterministic signature ID. Select **Create
 investigation** to persist and display three evidence-linked causal
 alternatives with bounded experiment plans. Select **Run 3 branches** to test
 all three from one clean checkpoint and display the deterministically supported
-cause.
+cause. The local branches execute the reviewed Node.js HTTP fixture without a
+shell or external network access.
 
-Select **Download reproduction**, extract the ZIP, then run `npm ci` and
-`npm run verify` inside its directory. The included regression test is expected
-to fail with the reproduced `200,429` response sequence. Full clean-checkout
-instructions and measurements are in the
+Select **Review reproduction proof**, then **Download reproduction**. Extract
+the ZIP, run `npm ci`, and run `npm run verify` inside its directory. The
+included regression test is expected to fail with the reproduced `200,429`
+response sequence. Full clean-checkout instructions and measurements are in the
 [end-to-end proof](docs/product/end-to-end-proof.md).
 
 The public capsule contract is

@@ -15,7 +15,7 @@ from scully.providers.nemotron import ToolCallOutcome, ToolDefinition
 
 PlanningSource = Literal["local", "nemotron"]
 ALTERNATIVE_GROUP = "primary-cause"
-SELECTED_CAPSULE_ID = "proxy-identity-collapse-v1"
+SELECTED_CAPSULE_ID = "proxy-identity-collapse-v2"
 EXPERIMENT_VARIANTS: Mapping[str, Mapping[str, str]] = {
     "trust-loopback": {"trust_proxy": "loopback"},
     "preserve-forwarded-chain": {"proxy_mode": "preserve"},

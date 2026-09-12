@@ -72,14 +72,15 @@ unrestricted provider data.
 
 ## Seeded incident
 
-The `proxy-identity-collapse-v1` capsule contains five small synthetic JSON
+The `proxy-identity-collapse-v2` capsule contains six small sanitized JSON
 evidence files:
 
 1. sanitized environment facts;
 2. the two-client request sequence;
 3. a failing observation with responses `200,429`;
 4. a known-good observation with responses `200,200`;
-5. public source URLs and their purpose labels.
+5. public source URLs and their purpose labels;
+6. a rights and restriction review.
 
 The addresses `198.51.100.10` and `198.51.100.11` are documentation-only
 TEST-NET-2 examples. The capsule contains no credentials, customer records,

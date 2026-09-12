@@ -42,7 +42,7 @@ class InvestigationServiceTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def test_create_persists_a_complete_ordered_planning_snapshot(self) -> None:
-        detail = self.service.create("proxy-identity-collapse-v1")
+        detail = self.service.create("proxy-identity-collapse-v2")
 
         self.assertEqual(detail.status.value, "ready")
         self.assertEqual(detail.planning_source, "local")
@@ -58,14 +58,14 @@ class InvestigationServiceTests(unittest.TestCase):
         self.assertEqual(missing.exception.code, "capsule_not_found")
         self.assertEqual(missing.exception.status_code, 404)
 
-        self.service.create("proxy-identity-collapse-v1")
+        self.service.create("proxy-identity-collapse-v2")
         with self.assertRaises(InvestigationError) as conflict:
-            self.service.create("proxy-identity-collapse-v1")
+            self.service.create("proxy-identity-collapse-v2")
         self.assertEqual(conflict.exception.code, "investigation_conflict")
         self.assertEqual(conflict.exception.status_code, 409)
 
     def test_execute_persists_results_and_terminal_events_once(self) -> None:
-        planned = self.service.create("proxy-identity-collapse-v1")
+        planned = self.service.create("proxy-identity-collapse-v2")
         completed = self.service.execute(planned.investigation_id)
 
         self.assertEqual(completed.status.value, "completed")

@@ -39,10 +39,10 @@ class CapsuleImportTests(unittest.TestCase):
         second = self.importer.import_path(SEED_CAPSULE)
 
         self.assertEqual(first, second)
-        self.assertEqual(first.capsule_id, "proxy-identity-collapse-v1")
-        self.assertEqual(len(first.evidence), 5)
+        self.assertEqual(first.capsule_id, "proxy-identity-collapse-v2")
+        self.assertEqual(len(first.evidence), 6)
         artifacts = [path for path in (self.root / "artifacts").rglob("*") if path.is_file()]
-        self.assertEqual(len(artifacts), 5)
+        self.assertEqual(len(artifacts), 6)
         for evidence in first.evidence:
             artifact = self.root / "artifacts" / evidence.sha256[:2] / evidence.sha256
             self.assertEqual(hashlib.sha256(artifact.read_bytes()).hexdigest(), evidence.sha256)
@@ -84,7 +84,7 @@ class CapsuleImportTests(unittest.TestCase):
 
         with self.assert_import_error("secret_detected"):
             self.importer.import_path(capsule)
-        self.assertIsNone(self.repository.get("proxy-identity-collapse-v1"))
+        self.assertIsNone(self.repository.get("proxy-identity-collapse-v2"))
 
     def test_undeclared_and_missing_files_are_rejected(self) -> None:
         capsule = self._copy_seed()

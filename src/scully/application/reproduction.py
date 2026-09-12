@@ -18,6 +18,7 @@ REPRODUCTION_FILES = (
     "package.json",
     "package-lock.json",
     "scripts/observe.mjs",
+    "scripts/run-branch.mjs",
     "scripts/verify-reproduction.mjs",
     "src/reproduction.mjs",
     "test/proxy-identity-collapse.test.mjs",
@@ -66,7 +67,7 @@ class ReproductionPackager:
                 "Supported cause is not part of the investigation",
                 status_code=409,
             )
-        if detail.capsule_id != "proxy-identity-collapse-v1":
+        if detail.capsule_id != "proxy-identity-collapse-v2":
             raise ReproductionPackageError(
                 "capsule_not_supported",
                 "Reproduction packaging supports the seeded proxy incident only",
@@ -106,6 +107,12 @@ class ReproductionPackager:
                 "isolation_verified": detail.execution.isolation_verified,
                 "operation_count": detail.execution.operation_count,
                 "retry_count": detail.execution.retry_count,
+            },
+            "incident_fidelity": {
+                "application": "Express 5.2.1",
+                "proxy_hops": 1,
+                "proxy_writes_forwarded_header": True,
+                "loopback_only": True,
             },
             "files": [
                 {

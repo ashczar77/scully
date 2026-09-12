@@ -25,8 +25,8 @@ class CapsuleContractTests(unittest.TestCase):
         manifest = CapsuleManifest.model_validate_json(MANIFEST_PATH.read_text())
 
         self.assertEqual(manifest.schema_version, "1.0")
-        self.assertEqual(manifest.capsule_id, "proxy-identity-collapse-v1")
-        self.assertEqual(len(manifest.evidence), 5)
+        self.assertEqual(manifest.capsule_id, "proxy-identity-collapse-v2")
+        self.assertEqual(len(manifest.evidence), 6)
         self.assertEqual(manifest.known_good.expected_verdict, "not_reproduced")
         self.assertFalse(manifest.execution_requirements.network_access)
 

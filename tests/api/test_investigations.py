@@ -41,7 +41,7 @@ class InvestigationEndpointTests(unittest.TestCase):
 
         created = self.client.post(
             "/api/investigations",
-            json={"capsule_id": "proxy-identity-collapse-v1"},
+            json={"capsule_id": "proxy-identity-collapse-v2"},
         )
         self.assertEqual(created.status_code, 201)
         payload = created.json()
@@ -90,7 +90,7 @@ class InvestigationEndpointTests(unittest.TestCase):
 
         second = self.client.post(
             "/api/investigations",
-            json={"capsule_id": "proxy-identity-collapse-v1"},
+            json={"capsule_id": "proxy-identity-collapse-v2"},
         )
         self.assertEqual(second.status_code, 201)
         streamed = self.client.post(

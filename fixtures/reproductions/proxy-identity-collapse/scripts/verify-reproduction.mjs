@@ -3,17 +3,22 @@ import { spawnSync } from "node:child_process";
 
 import { runSequence } from "../src/reproduction.mjs";
 
-const incident = await runSequence();
+const incident = await runSequence({ variant: "incident" });
 assert.deepEqual(incident.payload.responses, [200, 429]);
 assert.deepEqual(incident.payload.events, ["request_accepted", "rate_limit_rejected"]);
 assert.equal(incident.payload.identity_digests[0], incident.payload.identity_digests[1]);
 
-const knownGood = await runSequence({ trustProxy: "loopback" });
+assert.equal(incident.payload.proxy_hops, 1);
+assert.equal(incident.payload.trust_proxy, false);
+
+const knownGood = await runSequence({ variant: "trust-loopback" });
 assert.deepEqual(knownGood.payload.responses, [200, 200]);
 assert.notEqual(
   knownGood.payload.identity_digests[0],
   knownGood.payload.identity_digests[1],
 );
+assert.equal(knownGood.payload.proxy_hops, 1);
+assert.equal(knownGood.payload.trust_proxy, "loopback");
 
 const failingTest = spawnSync(
   process.execPath,

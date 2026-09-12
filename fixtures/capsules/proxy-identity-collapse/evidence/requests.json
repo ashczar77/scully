@@ -2,14 +2,19 @@
   "requests": [
     {
       "client": "198.51.100.10",
+      "ingress_header": "x-scully-client-ip",
       "method": "GET",
-      "path": "/limited"
+      "path": "/limited",
+      "route": "client -> loopback proxy -> Express application"
     },
     {
       "client": "198.51.100.11",
+      "ingress_header": "x-scully-client-ip",
       "method": "GET",
-      "path": "/limited"
+      "path": "/limited",
+      "route": "client -> loopback proxy -> Express application"
     }
   ],
-  "source": "synthetic"
+  "forwarded_header_writer": "controlled loopback proxy",
+  "source": "synthetic TEST-NET-2 traffic"
 }

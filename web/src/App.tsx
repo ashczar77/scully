@@ -422,7 +422,7 @@ export function App() {
                   <span className="state-label state-observed">● Controlled input</span>
                   <h2>Select an incident capsule</h2>
                   <p>
-                    Use the reviewed synthetic seed or provide a ZIP that follows
+                    Use the reviewed realistic seed or provide a ZIP that follows
                     capsule schema 1.0.
                   </p>
                 </div>
@@ -1056,7 +1056,7 @@ function ReproductionProof({
     .filter((item): item is EvidenceReference => Boolean(item));
   const limitations = [
     ...execution.limitations,
-    "The archive covers one synthetic Express proxy-trust incident.",
+    "The archive covers one sanitized realistic Express proxy-trust incident.",
     "Raw standard output is not retained; digests and matcher results are the audit boundary.",
     "Provider execution and remote cancellation are outside this local proof.",
   ];
@@ -1111,7 +1111,10 @@ function ReproductionProof({
         <article>
           <p className="section-label">Reproduced signature</p>
           <h2>{execution.signature_id}</h2>
-          <p>Two synthetic clients resolve to one limiter identity and return 200,429.</p>
+          <p>
+            Two synthetic clients cross one loopback proxy, resolve to one limiter
+            identity, and return 200,429.
+          </p>
           <small>
             {reproducedOutcome?.matcher_results.filter((item) => item.required && item.passed).length ?? 0}
             {" "}required matcher results passed

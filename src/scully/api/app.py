@@ -70,7 +70,14 @@ def create_app(settings: ProductSettings | None = None) -> FastAPI:
         capsules,
         investigations,
         LocalPlanningAdapter(),
-        LocalExecutionAdapter(product_settings.artifact_dir),
+        LocalExecutionAdapter(
+            product_settings.artifact_dir,
+            fixture_dir=(
+                product_settings.seed_capsules_dir.parent
+                / "reproductions"
+                / "proxy-identity-collapse"
+            ),
+        ),
     )
     reproduction_packager = ReproductionPackager(
         product_settings.seed_capsules_dir.parent / "reproductions"

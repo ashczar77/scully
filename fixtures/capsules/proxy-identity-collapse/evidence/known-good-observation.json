@@ -12,8 +12,24 @@
     "identity:test-net-client-a",
     "identity:test-net-client-b"
   ],
+  "limiter_bucket_counts": [
+    1,
+    2
+  ],
+  "limiter_key": "normalized_ip",
+  "normalized_ips": [
+    "198.51.100.10",
+    "198.51.100.11"
+  ],
+  "proxy_hops": 1,
+  "proxy_mode": "replace",
   "responses": [
     200,
     200
-  ]
+  ],
+  "socket_addresses": [
+    "127.0.0.1",
+    "127.0.0.1"
+  ],
+  "trust_proxy": "loopback"
 }
