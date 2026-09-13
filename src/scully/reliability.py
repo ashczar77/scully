@@ -107,7 +107,7 @@ def _run_once(repository_root: Path) -> dict:
     if detail["status"] != "completed" or detail["execution"] is None:
         raise RuntimeError("Investigation did not reach completed state")
 
-    fingerprint = _proof_fingerprint(
+    fingerprint = proof_fingerprint(
         package.content,
         expected_investigation_id=investigation_id,
         expected_signature_id=detail["execution"]["signature_id"],
@@ -127,7 +127,7 @@ def _run_once(repository_root: Path) -> dict:
     }
 
 
-def _proof_fingerprint(
+def proof_fingerprint(
     package: bytes,
     *,
     expected_investigation_id: str,

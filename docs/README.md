@@ -94,6 +94,7 @@ customer data.
 | [Gate G4.2 review](gates/G4.2-artifact-usefulness-review.md) | Evidence and decision record for the minimized reproduction artifact | Approved |
 | [Safety and operational hardening](product/safety-operational-hardening.md) | Shared secret policy, adversarial coverage, bounded audit events, terminal failures, recovery, and insufficient evidence | Implemented for G4.3 review |
 | [Gate G4.3 review](gates/G4.3-safety-review.md) | Evidence and decision record for the hardened product boundary | Approved |
+| [Reliability and clean setup](product/reliability-clean-setup.md) | Independent local proof runs, clean-checkout evidence, sponsor-path preflight, retention, and recovery | Step 4.4 in progress |
 | [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol retained for later direct validation | Deferred evidence |
 | [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for later direct validation | Ready for future use |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |

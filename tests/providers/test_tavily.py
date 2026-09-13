@@ -65,6 +65,10 @@ class TavilyAdapterTests(unittest.TestCase):
             outcome.sources[0].url,
             "https://expressjs.com/en/guide/behind-proxies.html",
         )
+        self.assertEqual(
+            outcome.sources[0].canonical_url,
+            "https://expressjs.com/en/guide/behind-proxies.html",
+        )
         self.assertEqual(outcome.measurement.tavily_credits, 1)
         query, options = client.requests[0]
         self.assertEqual(query, outcome.query)
@@ -119,6 +123,54 @@ class TavilyAdapterTests(unittest.TestCase):
                 investigation_id="provider-contract-001",
                 query="Express proxy documentation",
             )
+
+    def test_canonicalizes_and_deduplicates_equivalent_urls(self) -> None:
+        response = search_response()
+        duplicate = dict(response["results"][0])
+        duplicate["url"] = (
+            "http://EXPRESSJS.com:80/en/guide/behind-proxies.html/"
+            "?utm_source=test#configuration"
+        )
+        response["results"].append(duplicate)
+        adapter = TavilyAdapter(
+            FakeTavilyClient(response),
+            live_settings(),
+            clock=self.times.__next__,
+        )
+
+        outcome = adapter.search(
+            investigation_id="provider-contract-001",
+            query="Express proxy documentation",
+            include_domains=("expressjs.com",),
+        )
+
+        self.assertEqual(len(outcome.sources), 1)
+        self.assertEqual(
+            outcome.sources[0].canonical_url,
+            "https://expressjs.com/en/guide/behind-proxies.html",
+        )
+
+    def test_rejects_credential_bearing_and_invalid_port_urls(self) -> None:
+        for url in (
+            "https://user:password@expressjs.com/guide",
+            "https://expressjs.com:invalid/guide",
+        ):
+            with self.subTest(url=url):
+                response = search_response()
+                response["results"][0]["url"] = url
+                started = datetime(2026, 9, 7, 9, 0, tzinfo=UTC)
+                times = iter([started, started + timedelta(seconds=0.25)])
+                adapter = TavilyAdapter(
+                    FakeTavilyClient(response),
+                    live_settings(),
+                    clock=times.__next__,
+                )
+
+                with self.assertRaises(ProviderContractError):
+                    adapter.search(
+                        investigation_id="provider-contract-001",
+                        query="Express proxy documentation",
+                    )
 
     def test_rejects_query_over_400_characters_before_request(self) -> None:
         client = FakeTavilyClient(search_response())

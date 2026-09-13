@@ -10,7 +10,8 @@ from scully.config import Provider, Settings
 from scully.dependencies import LOCKED_PROVIDER_VERSIONS, installed_version
 
 
-MINIMUM_SANDBOX_BRANCH_OPERATIONS = 4
+SANDBOX_PROBE_OPERATIONS = 4
+SANDBOX_PRODUCT_OPERATIONS = 5
 NEMOTRON_PROBE_MAX_INPUT_TOKENS = 8_192
 NEMOTRON_PROBE_MAX_OUTPUT_TOKENS = 10_000
 NEMOTRON_PROBE_MAX_COST_USD = Decimal("0.01")
@@ -83,10 +84,10 @@ def build_preflight_report(settings: Settings) -> PreflightReport:
         settings.budget.max_tavily_credits == TAVILY_PROBE_MAX_CREDITS
         and settings.budget.timeout_seconds == TAVILY_PROBE_TIMEOUT_SECONDS
     )
-    sandbox_budget = (
-        settings.budget.max_sandbox_operations
-        == MINIMUM_SANDBOX_BRANCH_OPERATIONS
-    )
+    sandbox_budget = settings.budget.max_sandbox_operations in {
+        SANDBOX_PROBE_OPERATIONS,
+        SANDBOX_PRODUCT_OPERATIONS,
+    }
 
     providers = {
         "nemotron": _provider_preflight(

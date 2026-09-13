@@ -117,6 +117,26 @@ class PreflightTests(unittest.TestCase):
         self.assertFalse(report.providers["sandbox"].budget_valid)
         self.assertFalse(report.providers["sandbox"].live_gate_open)
 
+    def test_five_operation_product_sandbox_budget_opens_targeted_gate(self) -> None:
+        settings = Settings.from_environment(
+            {
+                "SCULLY_ENABLE_LIVE": "true",
+                "SCULLY_LIVE_PROVIDER": "sandbox",
+                "SCULLY_MAX_SANDBOX_OPERATIONS": "5",
+                "NEBIUS_API_KEY": "test-key",
+                "NEBIUS_PROJECT_ID": "test-project",
+            }
+        )
+
+        with patch(
+            "scully.preflight.installed_version",
+            side_effect=lambda package: LOCKED_PROVIDER_VERSIONS[package],
+        ):
+            report = build_preflight_report(settings)
+
+        self.assertTrue(report.providers["sandbox"].budget_valid)
+        self.assertTrue(report.providers["sandbox"].live_gate_open)
+
     def test_tavily_budget_requires_reviewed_timeout(self) -> None:
         settings = Settings.from_environment(
             {

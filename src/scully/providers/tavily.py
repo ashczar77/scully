@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from math import isfinite
 from typing import Protocol
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
 
 from scully.config import Provider, Settings
 from scully.measurement import Measurement, OperationStatus
@@ -37,6 +37,7 @@ class SearchSource:
 
     title: str
     url: str
+    canonical_url: str
     content: str
     score: float
 
@@ -103,7 +104,7 @@ class TavilyAdapter:
         credits = _read_credits(response)
         if credits > self._settings.budget.max_tavily_credits:
             raise ProviderContractError("Reported Tavily usage exceeds the credit cap")
-        sources = _read_sources(response)
+        sources = _deduplicate_sources(_read_sources(response))
         _require_allowed_source_domains(sources, normalized_domains)
 
         return SearchOutcome(
@@ -193,6 +194,8 @@ def _read_sources(response: Mapping[str, object]) -> tuple[SearchSource, ...]:
             parsed_url is None
             or parsed_url.scheme not in {"http", "https"}
             or not parsed_url.netloc
+            or parsed_url.username is not None
+            or parsed_url.password is not None
         ):
             raise ProviderContractError("Tavily result URL must use HTTP or HTTPS")
         if not isinstance(content, str):
@@ -208,8 +211,51 @@ def _read_sources(response: Mapping[str, object]) -> tuple[SearchSource, ...]:
             SearchSource(
                 title=title.strip(),
                 url=url,
+                canonical_url=_canonicalize_url(url),
                 content=content,
                 score=normalized_score,
             )
         )
     return tuple(sources)
+
+
+def _canonicalize_url(value: str) -> str:
+    parsed = urlsplit(value)
+    hostname = parsed.hostname
+    if hostname is None:
+        raise ProviderContractError("Tavily result URL must use HTTP or HTTPS")
+    try:
+        port = parsed.port
+    except ValueError as error:
+        raise ProviderContractError("Tavily result URL has an invalid port") from error
+    host = hostname.lower()
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    if port is not None and port not in {80, 443}:
+        host = f"{host}:{port}"
+    path = re.sub(r"/{2,}", "/", parsed.path or "/")
+    if path != "/":
+        path = path.rstrip("/")
+    query = urlencode(
+        sorted(
+            (name, value)
+            for name, value in parse_qsl(parsed.query, keep_blank_values=True)
+            if not name.lower().startswith("utm_")
+            and name.lower() not in {"fbclid", "gclid"}
+        ),
+        doseq=True,
+    )
+    return urlunsplit(("https", host, path, query, ""))
+
+
+def _deduplicate_sources(
+    sources: Sequence[SearchSource],
+) -> tuple[SearchSource, ...]:
+    unique: list[SearchSource] = []
+    observed: set[str] = set()
+    for source in sources:
+        if source.canonical_url in observed:
+            continue
+        observed.add(source.canonical_url)
+        unique.append(source)
+    return tuple(unique)

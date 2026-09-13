@@ -1,6 +1,6 @@
 PYTHON_BIN := .venv/bin/python
 
-.PHONY: install test test-backend test-web typecheck build verify-reliability dev-api dev-web
+.PHONY: install test test-backend test-web typecheck build verify-reliability sponsor-preflight dev-api dev-web
 
 install:
 	python3 -m venv .venv
@@ -25,6 +25,9 @@ build:
 
 verify-reliability:
 	PYTHONPATH=src $(PYTHON_BIN) scripts/verify-local-reliability.py
+
+sponsor-preflight:
+	PYTHONPATH=src $(PYTHON_BIN) scripts/verify-sponsor-path.py
 
 dev-api:
 	PYTHONPATH=src .venv/bin/uvicorn scully.api.app:app --reload --host 127.0.0.1 --port 8000

@@ -10,6 +10,7 @@ from scully.application.planning import (
     LocalPlanningAdapter,
     NemotronPlanningAdapter,
     PlanningError,
+    ResearchContextSource,
 )
 from scully.domain.capsules import CapsuleManifest
 
@@ -67,7 +68,17 @@ class PlanningAdapterTests(unittest.TestCase):
 
     def test_nemotron_boundary_maps_structured_output_to_app_owned_plans(self) -> None:
         planner = FakeStructuredPlanner(valid_tool_arguments())
-        bundle = NemotronPlanningAdapter(planner).plan("inv-model", self.manifest)
+        bundle = NemotronPlanningAdapter(
+            planner,
+            research_sources=(
+                ResearchContextSource(
+                    title="Express behind proxies",
+                    canonical_url=(
+                        "https://expressjs.com/en/guide/behind-proxies.html"
+                    ),
+                ),
+            ),
+        ).plan("inv-model", self.manifest)
 
         self.assertEqual(bundle.source, "nemotron")
         self.assertEqual(len(bundle.hypotheses), 3)
@@ -77,6 +88,8 @@ class PlanningAdapterTests(unittest.TestCase):
             {"trust_proxy": "loopback"},
         )
         self.assertIn("untrusted incident data", planner.prompt)
+        self.assertIn("current_public_sources", planner.prompt)
+        self.assertIn("https://expressjs.com/en/guide/behind-proxies.html", planner.prompt)
         self.assertEqual(planner.tool_name, "record_investigation_plan")
 
     def test_nemotron_boundary_rejects_unknown_fields_and_variants(self) -> None:
@@ -93,6 +106,14 @@ class PlanningAdapterTests(unittest.TestCase):
         with self.assertRaisesRegex(PlanningError, "product contract"):
             NemotronPlanningAdapter(FakeStructuredPlanner(arguments)).plan(
                 "inv-variant",
+                self.manifest,
+            )
+
+        arguments = valid_tool_arguments()
+        arguments["hypotheses"][1]["experiment_variant"] = "trust-loopback"
+        with self.assertRaisesRegex(PlanningError, "exactly once"):
+            NemotronPlanningAdapter(FakeStructuredPlanner(arguments)).plan(
+                "inv-duplicate-variant",
                 self.manifest,
             )
 
@@ -153,7 +174,7 @@ class FakeStructuredPlanner:
     def invoke_tool(self, *, investigation_id: str, prompt: str, tool: object) -> object:
         self.prompt = prompt
         self.tool_name = getattr(tool, "name")
-        return SimpleNamespace(arguments=self.arguments)
+        return SimpleNamespace(arguments=self.arguments, measurement=None)
 
 
 def valid_tool_arguments() -> dict[str, object]:

@@ -7,7 +7,7 @@ import unittest
 import zipfile
 
 from scully.application.reproduction import PACKAGE_ROOT
-from scully.reliability import _proof_fingerprint
+from scully.reliability import proof_fingerprint
 
 
 class ProofFingerprintTests(unittest.TestCase):
@@ -16,13 +16,13 @@ class ProofFingerprintTests(unittest.TestCase):
         second = _package("inv-second", "inv-second-h1", [200, 429])
 
         self.assertEqual(
-            _proof_fingerprint(
+            proof_fingerprint(
                 first,
                 expected_investigation_id="inv-first",
                 expected_signature_id="signature-v1",
                 expected_hypothesis_id="inv-first-h1",
             ),
-            _proof_fingerprint(
+            proof_fingerprint(
                 second,
                 expected_investigation_id="inv-second",
                 expected_signature_id="signature-v1",
@@ -35,13 +35,13 @@ class ProofFingerprintTests(unittest.TestCase):
         changed = _package("inv-second", "inv-second-h1", [200, 200])
 
         self.assertNotEqual(
-            _proof_fingerprint(
+            proof_fingerprint(
                 first,
                 expected_investigation_id="inv-first",
                 expected_signature_id="signature-v1",
                 expected_hypothesis_id="inv-first-h1",
             ),
-            _proof_fingerprint(
+            proof_fingerprint(
                 changed,
                 expected_investigation_id="inv-second",
                 expected_signature_id="signature-v1",
@@ -58,7 +58,7 @@ class ProofFingerprintTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(RuntimeError, "hashes"):
-            _proof_fingerprint(
+            proof_fingerprint(
                 package,
                 expected_investigation_id="inv-first",
                 expected_signature_id="signature-v1",

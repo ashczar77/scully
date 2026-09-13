@@ -24,6 +24,7 @@ Run the complete offline test suite and build the frontend:
 make test
 make typecheck
 make build
+make verify-reliability
 ```
 
 Start the API and frontend development servers in separate terminals:
@@ -82,6 +83,17 @@ PYTHONPATH=src .venv/bin/python -m scully.preflight
 Live provider access is disabled by default and remains subject to the review
 gates in the project plan. A reviewed execution must also target exactly one
 provider with `SCULLY_LIVE_PROVIDER`.
+
+Inspect the three-provider product-path preflight without constructing a client
+or making a provider request:
+
+```shell
+make sponsor-preflight
+```
+
+The execution command is intentionally separate from the Makefile and requires
+an exact approved run identifier plus manual cost confirmations. See the
+[reliability and clean-setup record](docs/product/reliability-clean-setup.md).
 
 ## License
 

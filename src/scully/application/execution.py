@@ -43,6 +43,7 @@ from scully.experiments import (
     ExperimentPlan as IsolationExperimentPlan,
     verify_sibling_isolation,
 )
+from scully.measurement import Measurement
 from scully.providers.sandbox import SandboxCommand, SandboxOutcome
 
 
@@ -415,6 +416,7 @@ class SandboxExecutionAdapter:
 
     def __init__(self, runner: SandboxBranchRunner) -> None:
         self.runner = runner
+        self.last_measurement: Measurement | None = None
 
     def execute(
         self,
@@ -450,6 +452,7 @@ class SandboxExecutionAdapter:
                 for plan in plans
             ),
         )
+        self.last_measurement = outcome.measurement
         if [branch.label for branch in outcome.branches] != [
             plan.variant for plan in plans
         ]:
