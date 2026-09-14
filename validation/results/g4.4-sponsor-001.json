@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "run_id": "g4.4-sponsor-001",
+  "execution_date": "2026-09-14",
+  "status": "blocked",
+  "reason_code": "nemotron_stage_failed",
+  "automatic_retries": 0,
+  "stages": {
+    "tavily": {
+      "status": "succeeded",
+      "searches": 1,
+      "credits": null,
+      "measurement_retained": false
+    },
+    "nemotron": {
+      "status": "failed",
+      "requests": null,
+      "input_tokens": null,
+      "output_tokens": null,
+      "model_cost_usd": null,
+      "measurement_retained": false
+    },
+    "sandbox": {
+      "status": "not_started",
+      "operations": 0
+    }
+  },
+  "limitations": [
+    "The original reason code identifies only the Nemotron planning stage.",
+    "The failed path did not retain the successful Tavily measurement.",
+    "The failed path did not establish whether a Nemotron response was received.",
+    "No provider response content or provider error message was retained."
+  ]
+}

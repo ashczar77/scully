@@ -2,7 +2,7 @@
 
 **Status:** Step 4.4 in progress
 
-**Verification date:** 2026-09-12
+**Verification date:** 2026-09-14
 
 ## Outcome so far
 
@@ -13,8 +13,9 @@ and frontend suites, type checking, production build, dependency integrity,
 closed provider preflight, and the same two-run proof check.
 
 The sponsor-backed product path is implemented and passes offline with injected
-provider boundaries. Live execution has not been approved or attempted. Gate
-G4.4 remains open until the reviewed live evidence is complete.
+provider boundaries. Approved live run `g4.4-sponsor-001` stopped at Nemotron
+planning without retrying or starting Sandbox execution. Gate G4.4 remains open
+until the corrected path produces reviewed live evidence.
 
 ## Independent local runs
 
@@ -88,9 +89,10 @@ The explicit sponsor path performs these stages in order:
    deduplicates equivalent sources.
 2. Canonical source titles and URLs are added to the Nemotron prompt as bounded,
    untrusted research context. Snippet content is not added.
-3. Nemotron makes one forced structured tool call. The result must contain three
-   evidence-linked hypotheses whose confidence sums to one and exactly one of
-   each approved experiment variant.
+3. Nemotron makes one forced structured tool call with three application-owned
+   experiment slots. Each slot accepts one evidence-linked hypothesis and a
+   confidence weight. The application fixes the variant mapping and normalizes
+   the weights into a valid distribution.
 4. Token Factory Sandboxes resolves one fixed base image, prepares one common
    parent, and runs three fixed Python branches. No shell, package installation,
    external sandbox network request, model-written command, production data, or
@@ -134,6 +136,34 @@ With pay-as-you-go disabled, Scully cannot create a Tavily charge after the free
 allowance is exhausted. The run has no automatic retry and must fail closed if
 Tavily rejects the single search.
 
+## Sponsor run 001 result and correction
+
+Approved run `g4.4-sponsor-001` executed once on 14 September 2026. Tavily
+completed its single bounded search and returned accepted sources. Nemotron
+planning then failed with the retained reason `nemotron_stage_failed`. The
+runner stopped immediately, made no automatic retry, and started no Sandbox
+operation.
+
+The retained reason proves the stage but is too broad to distinguish a provider
+request failure, response-shape failure, or product-planning validation failure.
+It also does not retain the successful Tavily measurement or any Nemotron usage
+that may have preceded local validation. The failed result therefore makes no
+exact latency or cost claim.
+
+Offline review found two product constraints that were validated locally but
+were not structurally guaranteed in the model response: using every experiment
+variant exactly once and making confidence values sum to one. The correction:
+
+1. defines three named experiment slots whose variant mapping is owned by the
+   application;
+2. accepts bounded confidence weights and normalizes them locally;
+3. limits evidence references in the tool schema to the accepted capsule IDs;
+4. maps provider, response-contract, planning-contract, rate-limit, timeout, and
+   configuration failures to distinct safe reason codes.
+
+Run 001 remains unchanged. Any corrective attempt requires a fresh run ID,
+another free-credit confirmation, a passing offline suite, and explicit review.
+
 ## Sandbox retention policy
 
 Each reviewed product run may create one parent and three untagged child states.
@@ -169,10 +199,11 @@ termination probe is authorized.
 
 ## Remaining Gate G4.4 evidence
 
-1. Confirm Tavily pay-as-you-go is disabled and at least one free credit remains.
-2. Review the Sandbox unknown-cost-unit exception for one bounded run.
-3. Approve and execute sponsor run `g4.4-sponsor-001` only.
-4. Review its redacted result before any second run.
-5. If approved, execute `g4.4-sponsor-002` under the same limits.
-6. Compare the two sponsor proof fingerprints, latency, failure rate, token use,
-   credits, Sandbox operation count, and reported cost.
+1. Preserve failed sponsor run `g4.4-sponsor-001` without retrying it.
+2. Complete offline review of the corrected planning contract and diagnostics.
+3. Confirm Tavily pay-as-you-go remains disabled and at least one free credit
+   remains after run 001.
+4. If approved, execute corrective run `g4.4-sponsor-002` under the same limits.
+5. Review its redacted result before any further provider run.
+6. After two successful runs exist, compare proof fingerprints, latency, failure
+   rate, token use, credits, Sandbox operation count, and reported cost.

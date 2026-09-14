@@ -9,10 +9,14 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from scully.application.execution import SandboxExecutionAdapter
-from scully.application.planning import EXPERIMENT_VARIANTS, NemotronPlanningAdapter
+from scully.application.planning import (
+    PLANNER_VARIANT_FIELDS,
+    NemotronPlanningAdapter,
+)
 from scully.config import Provider
 from scully.dependencies import LOCKED_PROVIDER_VERSIONS
 from scully.measurement import Measurement, OperationStatus
+from scully.providers import ProviderContractError
 from scully.providers.nemotron import ToolCallOutcome
 from scully.providers.tavily import SearchOutcome, SearchSource
 from scully.sponsor_path import (
@@ -128,6 +132,42 @@ class SponsorPathTests(unittest.TestCase):
         self.assertEqual(result["measurements"]["nemotron"]["request_count"], 1)
         self.assertEqual(result["measurements"]["sandbox"]["sandbox_operations"], 5)
 
+    def test_nemotron_provider_contract_failure_has_safe_specific_code(self) -> None:
+        with self.assertRaises(SponsorPathError) as blocked:
+            run_sponsor_path(
+                REPOSITORY_ROOT,
+                run_id="g4.4-sponsor-001",
+                searcher=FakeSearcher(),
+                planner_factory=lambda sources: NemotronPlanningAdapter(
+                    RaisingStructuredPlanner(),
+                    research_sources=sources,
+                ),
+                executor=SandboxExecutionAdapter(FakeSandboxRunner()),
+            )
+
+        self.assertEqual(
+            blocked.exception.code,
+            "nemotron_tool_call_count_invalid",
+        )
+
+    def test_nemotron_product_contract_failure_has_safe_specific_code(self) -> None:
+        with self.assertRaises(SponsorPathError) as blocked:
+            run_sponsor_path(
+                REPOSITORY_ROOT,
+                run_id="g4.4-sponsor-001",
+                searcher=FakeSearcher(),
+                planner_factory=lambda sources: NemotronPlanningAdapter(
+                    InvalidStructuredPlanner(),
+                    research_sources=sources,
+                ),
+                executor=SandboxExecutionAdapter(FakeSandboxRunner()),
+            )
+
+        self.assertEqual(
+            blocked.exception.code,
+            "nemotron_planner_contract_invalid",
+        )
+
 
 class FakeSearcher:
     def search(self, **unused_kwargs) -> SearchOutcome:
@@ -150,22 +190,20 @@ class FakeSearcher:
 
 class FakeStructuredPlanner:
     def invoke_tool(self, **unused_kwargs) -> ToolCallOutcome:
-        hypotheses = []
-        for index, variant in enumerate(EXPERIMENT_VARIANTS, start=1):
-            hypotheses.append(
-                {
-                    "title": f"Alternative {index}",
-                    "mechanism": f"Mechanism {index}",
-                    "rationale": f"Rationale {index}",
-                    "testable_prediction": f"Prediction {index}",
-                    "evidence_ids": ["environment", "incident-observation"],
-                    "confidence": [0.7, 0.2, 0.1][index - 1],
-                    "experiment_variant": variant,
-                }
-            )
+        hypotheses = {
+            field_name: {
+                "title": f"Alternative {index}",
+                "mechanism": f"Mechanism {index}",
+                "rationale": f"Rationale {index}",
+                "testable_prediction": f"Prediction {index}",
+                "evidence_ids": ["environment", "incident-observation"],
+                "confidence_weight": [0.7, 0.2, 0.1][index - 1],
+            }
+            for index, field_name in enumerate(PLANNER_VARIANT_FIELDS, start=1)
+        }
         return ToolCallOutcome(
             tool_name="record_investigation_plan",
-            arguments={"hypotheses": hypotheses},
+            arguments=hypotheses,
             finish_reason="stop",
             measurement=_measurement(
                 Provider.NEMOTRON,
@@ -173,6 +211,21 @@ class FakeStructuredPlanner:
                 output_tokens=900,
                 model_cost_usd=Decimal("0.000246"),
             ),
+        )
+
+
+class RaisingStructuredPlanner:
+    def invoke_tool(self, **unused_kwargs) -> ToolCallOutcome:
+        raise ProviderContractError("Exactly one tool call is required")
+
+
+class InvalidStructuredPlanner:
+    def invoke_tool(self, **unused_kwargs) -> ToolCallOutcome:
+        return ToolCallOutcome(
+            tool_name="record_investigation_plan",
+            arguments={},
+            finish_reason="stop",
+            measurement=_measurement(Provider.NEMOTRON),
         )
 
 

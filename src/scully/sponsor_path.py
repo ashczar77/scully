@@ -12,18 +12,19 @@ from pathlib import Path
 
 from scully.application.capsule_import import CapsuleImporter
 from scully.application.execution import ExecutionAdapter, SandboxExecutionAdapter
-from scully.application.investigations import InvestigationService
+from scully.application.investigations import InvestigationError, InvestigationService
 from scully.application.planning import (
     NemotronPlanningAdapter,
     PlanningAdapter,
     ResearchContextSource,
 )
 from scully.application.reproduction import ReproductionPackager
-from scully.config import Provider, Settings
+from scully.config import ConfigurationError, Provider, Settings
 from scully.infrastructure.capsules import CapsuleRepository
 from scully.infrastructure.database import Database
 from scully.infrastructure.investigations import InvestigationRepository
 from scully.preflight import build_preflight_report
+from scully.providers import ProviderContractError
 from scully.providers.clients import (
     create_nemotron_client,
     create_sandbox_client,
@@ -43,6 +44,42 @@ SPONSOR_RUN_PATTERN = re.compile(r"g4\.4-sponsor-[0-9]{3}")
 MINIMUM_CONFIRMED_BALANCE_USD = Decimal("0.02")
 NEMOTRON_MAX_COST_USD = Decimal("0.01")
 NEMOTRON_WORST_CASE_COST_USD = Decimal("0.00289152")
+NEMOTRON_CONTRACT_FAILURE_RULES = (
+    ("choices must be a sequence", "nemotron_choices_shape_invalid"),
+    ("Exactly one completion choice", "nemotron_choice_count_invalid"),
+    ("tool_calls must be a sequence", "nemotron_tool_calls_shape_invalid"),
+    ("Exactly one tool call", "nemotron_tool_call_count_invalid"),
+    ("Model selected an unexpected tool", "nemotron_tool_name_invalid"),
+    ("Tool arguments must be encoded", "nemotron_arguments_encoding_invalid"),
+    ("Tool arguments are not valid JSON", "nemotron_arguments_json_invalid"),
+    ("Tool arguments must be a JSON object", "nemotron_arguments_shape_invalid"),
+    ("Tool arguments are missing", "nemotron_arguments_missing"),
+    ("Tool arguments contain unexpected", "nemotron_arguments_extra"),
+    ("Tool argument", "nemotron_argument_schema_invalid"),
+    ("Reported input tokens", "nemotron_input_token_cap_exceeded"),
+    ("Reported output tokens", "nemotron_output_token_cap_exceeded"),
+    ("Reported model cost", "nemotron_model_cost_cap_exceeded"),
+    ("finish_reason", "nemotron_finish_reason_invalid"),
+)
+PLANNING_FAILURE_CODES = frozenset(
+    {
+        "planner_contract_invalid",
+        "planner_sensitive_input",
+        "planner_sensitive_output",
+        "plan_count_invalid",
+        "hypothesis_duplicate",
+        "confidence_invalid",
+        "evidence_duplicate",
+        "evidence_reference_invalid",
+        "experiment_duplicate",
+        "experiment_link_invalid",
+        "experiment_variant_set_invalid",
+        "checkpoint_invalid",
+        "experiment_variant_invalid",
+        "experiment_adapter_invalid",
+        "experiment_budget_invalid",
+    }
+)
 
 
 class SponsorPathError(RuntimeError):
@@ -176,6 +213,9 @@ def run_sponsor_path(
             CapsuleImporter(artifact_dir, capsules).import_path(
                 repository_root / "fixtures" / "capsules" / "proxy-identity-collapse"
             )
+        except Exception as error:
+            raise SponsorPathError("capsule_import_failed") from error
+        try:
             service = InvestigationService(
                 capsules,
                 InvestigationRepository(database),
@@ -185,7 +225,7 @@ def run_sponsor_path(
             )
             planned = service.create("proxy-identity-collapse-v2")
         except Exception as error:
-            raise SponsorPathError("nemotron_stage_failed") from error
+            raise SponsorPathError(_nemotron_failure_code(error)) from error
         try:
             completed = service.execute(planned.investigation_id)
         except Exception as error:
@@ -298,6 +338,27 @@ def _confirmed_nonnegative_integer(value: str | None) -> int | None:
         return None
     number = int(value.strip())
     return number if number >= 0 else None
+
+
+def _nemotron_failure_code(error: Exception) -> str:
+    if isinstance(error, ProviderContractError):
+        message = str(error)
+        for prefix, code in NEMOTRON_CONTRACT_FAILURE_RULES:
+            if message.startswith(prefix):
+                return code
+        return "nemotron_response_contract_invalid"
+    if isinstance(error, InvestigationError):
+        if error.code in PLANNING_FAILURE_CODES:
+            return f"nemotron_{error.code}"
+        return "nemotron_planning_failed"
+    if isinstance(error, ConfigurationError):
+        return "nemotron_configuration_invalid"
+    status_code = getattr(error, "status_code", None)
+    if status_code == 429:
+        return "nemotron_rate_limited"
+    if "timeout" in type(error).__name__.casefold():
+        return "nemotron_timed_out"
+    return "nemotron_request_failed"
 
 
 def _result_record(
