@@ -939,13 +939,15 @@ The final video should target 2 minutes 40 seconds, leaving upload margin.
 
 | Time | Story beat |
 |---:|---|
-| 0:00 to 0:20 | A production-only failure exists, but the AI receives no production access or customer data |
-| 0:20 to 0:40 | Engineer reviews the sanitized capsule and redaction boundary |
-| 0:40 to 1:15 | Nemotron forms hypotheses while the UI distinguishes facts from inference |
-| 1:15 to 1:50 | Sandbox branches test competing input, version, config, and timing explanations |
-| 1:50 to 2:15 | One branch recreates the exact failure and the others show why they were eliminated |
-| 2:15 to 2:35 | The system produces a minimal synthetic case and failing regression test |
-| 2:35 to 2:40 | Close on the promise: executable proof without production access |
+| 0:00 to 0:18 | Establish the production-evidence problem and the no-production-access boundary |
+| 0:18 to 0:38 | Review the sanitized capsule, known-good comparison, provenance, and exclusions |
+| 0:38 to 0:55 | Show the live sponsor result and the distinct Tavily, Nemotron, Sandbox, and evaluator roles |
+| 0:55 to 1:12 | Create three evidence-linked alternatives with fixed experiment slots |
+| 1:12 to 1:45 | Stream three branches from one clean checkpoint and show their states changing |
+| 1:45 to 2:07 | Show the single supported cause and why the other interventions were eliminated |
+| 2:07 to 2:27 | Review the exact signature match, causal delta, lineage, and test contract |
+| 2:27 to 2:35 | Verify the independent package and show its expected failing regression test |
+| 2:35 to 2:40 | Close on executable proof without production access |
 
 ## 12. Quality and test strategy
 
