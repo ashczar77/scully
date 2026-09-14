@@ -1,6 +1,6 @@
 # Reliability and Clean Setup
 
-**Status:** Step 4.4 in progress
+**Status:** Ready for Gate G4.4 review
 
 **Verification date:** 2026-09-14
 
@@ -12,10 +12,9 @@ tracked revision also passes a clean-checkout installation, the full backend
 and frontend suites, type checking, production build, dependency integrity,
 closed provider preflight, and the same two-run proof check.
 
-The sponsor-backed product path is implemented and passes offline with injected
-provider boundaries. Approved live run `g4.4-sponsor-001` stopped at Nemotron
-planning without retrying or starting Sandbox execution. Gate G4.4 remains open
-until the corrected path produces reviewed live evidence.
+The sponsor-backed product path passes offline with injected provider boundaries
+and passed live as corrective run `g4.4-sponsor-002`. Failed run 001 remains
+preserved without retry. Gate G4.4 is ready for review.
 
 ## Independent local runs
 
@@ -164,6 +163,35 @@ variant exactly once and making confidence values sum to one. The correction:
 Run 001 remains unchanged. Any corrective attempt requires a fresh run ID,
 another free-credit confirmation, a passing offline suite, and explicit review.
 
+## Sponsor run 002 result
+
+Corrective run `g4.4-sponsor-002` executed once on 14 September 2026 and passed
+the complete sponsor-backed product path:
+
+| Stage | Result | Measured use | Duration |
+|---|---|---:|---:|
+| Tavily source discovery | Succeeded | 1 search, 1 free credit | 2.663827 s |
+| Nemotron planning | Succeeded | 1 request, 1,739 input and 3,622 output tokens | 13.422531 s |
+| Sandbox branch lifecycle | Succeeded | 5 operations | 8.549539 s |
+| Deterministic evaluation | One supported cause | Local calculation | Included above |
+| Reproduction export | Succeeded | 17,260 bytes | Included above |
+
+Nemotron's calculated cost was $0.00097362 from the promotional balance. The
+Sandbox response reported cost `0.00216227`; its unit remains undocumented, so
+the record does not label that value as currency. The Sandbox also reported
+0.191441 seconds of elapsed execution time and zero CPU seconds.
+
+The run used five canonical Express documentation sources, made no automatic
+retry, and produced proof fingerprint
+`b069de521c89492585facefacd10498ea3c91053c83430773acb0b7915b1cf0a`.
+The result retains no source snippets, generated hypothesis text, provider
+messages, credentials, or Sandbox state identifiers.
+
+This single live success satisfies the release proof's sponsor-stack execution
+requirement. Repeatability is established separately by the two independent
+local product runs with equivalent deterministic proof. No additional live run
+is required for Gate G4.4.
+
 ## Sandbox retention policy
 
 Each reviewed product run may create one parent and three untagged child states.
@@ -199,11 +227,9 @@ termination probe is authorized.
 
 ## Remaining Gate G4.4 evidence
 
-1. Preserve failed sponsor run `g4.4-sponsor-001` without retrying it.
-2. Complete offline review of the corrected planning contract and diagnostics.
-3. Confirm Tavily pay-as-you-go remains disabled and at least one free credit
-   remains after run 001.
-4. If approved, execute corrective run `g4.4-sponsor-002` under the same limits.
-5. Review its redacted result before any further provider run.
-6. After two successful runs exist, compare proof fingerprints, latency, failure
-   rate, token use, credits, Sandbox operation count, and reported cost.
+1. Review the immutable failed run 001 and successful corrective run 002.
+2. Confirm the local two-run proof and clean-checkout evidence remain sufficient
+   for repeatability and reviewer setup.
+3. Approve Gate G4.4 and move directly to Step 4.5 feature freeze.
+4. Do not authorize another provider run unless a release blocker requires new
+   evidence and receives a separate review.
