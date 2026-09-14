@@ -29,9 +29,9 @@ ENDED = STARTED + timedelta(seconds=1)
 
 
 class SponsorPathTests(unittest.TestCase):
-    def test_preflight_is_redacted_and_requires_manual_cost_confirmations(self) -> None:
+    def test_preflight_is_redacted_and_requires_zero_spend_confirmation(self) -> None:
         environment = _ready_environment()
-        del environment["SCULLY_TAVILY_OVERAGE_STATUS_CONFIRMED"]
+        del environment["SCULLY_TAVILY_PAY_AS_YOU_GO_DISABLED"]
         secret = environment["NEBIUS_API_KEY"]
 
         with patch(
@@ -42,8 +42,22 @@ class SponsorPathTests(unittest.TestCase):
 
         self.assertEqual(report["status"], "blocked")
         self.assertFalse(report["performs_provider_calls"])
-        self.assertFalse(report["tavily_overage_status_confirmed"])
+        self.assertFalse(report["tavily_pay_as_you_go_disabled"])
         self.assertNotIn(secret, json.dumps(report))
+
+    def test_preflight_blocks_when_no_tavily_free_credit_remains(self) -> None:
+        environment = _ready_environment()
+        environment["SCULLY_CONFIRMED_TAVILY_FREE_CREDITS"] = "0"
+
+        with patch(
+            "scully.preflight.installed_version",
+            side_effect=lambda package: LOCKED_PROVIDER_VERSIONS[package],
+        ):
+            report = sponsor_preflight(environment)
+
+        self.assertEqual(report["status"], "blocked")
+        self.assertTrue(report["tavily_pay_as_you_go_disabled"])
+        self.assertFalse(report["confirmed_tavily_free_credits_sufficient"])
 
     def test_ready_preflight_opens_each_exact_provider_budget(self) -> None:
         with patch(
@@ -70,6 +84,8 @@ class SponsorPathTests(unittest.TestCase):
         )
         self.assertEqual(report["one_run_budget"]["tavily_credits"], 1)
         self.assertEqual(report["one_run_budget"]["sandbox_operations"], 5)
+        self.assertTrue(report["tavily_pay_as_you_go_disabled"])
+        self.assertTrue(report["confirmed_tavily_free_credits_sufficient"])
 
     def test_unapproved_live_run_stops_before_client_construction(self) -> None:
         with (
@@ -225,7 +241,8 @@ def _ready_environment() -> dict[str, str]:
         "NEBIUS_PROJECT_ID": "synthetic-project",
         "TAVILY_API_KEY": "synthetic-tavily-secret",
         "SCULLY_CONFIRMED_NEBIUS_BALANCE_USD": "25",
-        "SCULLY_TAVILY_OVERAGE_STATUS_CONFIRMED": "true",
+        "SCULLY_TAVILY_PAY_AS_YOU_GO_DISABLED": "true",
+        "SCULLY_CONFIRMED_TAVILY_FREE_CREDITS": "1",
         "SCULLY_SANDBOX_UNKNOWN_COST_UNIT_ACCEPTED": "true",
     }
 

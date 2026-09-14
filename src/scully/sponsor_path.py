@@ -65,8 +65,11 @@ def sponsor_preflight(environ: Mapping[str, str] | None = None) -> dict[str, obj
         for provider, value in settings.items()
     }
     balance = _confirmed_balance(source.get("SCULLY_CONFIRMED_NEBIUS_BALANCE_USD"))
-    tavily_overage_confirmed = _confirmed(
-        source.get("SCULLY_TAVILY_OVERAGE_STATUS_CONFIRMED")
+    tavily_pay_as_you_go_disabled = _confirmed(
+        source.get("SCULLY_TAVILY_PAY_AS_YOU_GO_DISABLED")
+    )
+    tavily_free_credits = _confirmed_nonnegative_integer(
+        source.get("SCULLY_CONFIRMED_TAVILY_FREE_CREDITS")
     )
     sandbox_unknown_cost_accepted = _confirmed(
         source.get("SCULLY_SANDBOX_UNKNOWN_COST_UNIT_ACCEPTED")
@@ -76,7 +79,9 @@ def sponsor_preflight(environ: Mapping[str, str] | None = None) -> dict[str, obj
         providers_ready
         and balance is not None
         and balance >= MINIMUM_CONFIRMED_BALANCE_USD
-        and tavily_overage_confirmed
+        and tavily_pay_as_you_go_disabled
+        and tavily_free_credits is not None
+        and tavily_free_credits >= 1
         and sandbox_unknown_cost_accepted
     )
     return {
@@ -110,7 +115,10 @@ def sponsor_preflight(environ: Mapping[str, str] | None = None) -> dict[str, obj
         "confirmed_nebius_balance_sufficient": (
             balance is not None and balance >= MINIMUM_CONFIRMED_BALANCE_USD
         ),
-        "tavily_overage_status_confirmed": tavily_overage_confirmed,
+        "tavily_pay_as_you_go_disabled": tavily_pay_as_you_go_disabled,
+        "confirmed_tavily_free_credits_sufficient": (
+            tavily_free_credits is not None and tavily_free_credits >= 1
+        ),
         "sandbox_reported_cost_unit": "unknown",
         "sandbox_unknown_cost_unit_accepted_for_one_run": (
             sandbox_unknown_cost_accepted
@@ -283,6 +291,13 @@ def _confirmed_balance(value: str | None) -> Decimal | None:
     except InvalidOperation:
         return None
     return balance if balance.is_finite() and balance >= 0 else None
+
+
+def _confirmed_nonnegative_integer(value: str | None) -> int | None:
+    if value is None or not value.strip().isdigit():
+        return None
+    number = int(value.strip())
+    return number if number >= 0 else None
 
 
 def _result_record(

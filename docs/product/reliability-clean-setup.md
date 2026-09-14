@@ -121,13 +121,18 @@ The read-only preflight confirms that the three credentials, exact SDK
 versions, and exact operation budgets are ready. It also confirms the previously
 reported $25 Nebius balance is above the two-run model-cost cap.
 
-Live execution remains blocked until both of these facts receive explicit
-review:
+Live execution remains blocked until these facts receive explicit review:
 
-1. Tavily paid-overage status is confirmed in the account dashboard. The
-   installed SDK exposes per-request usage but no account billing-status method.
-2. The Sandbox result cost unit remains undocumented. A reviewer must accept
+1. Tavily pay-as-you-go is confirmed disabled in the account dashboard.
+2. At least one free Tavily credit is confirmed remaining for the single
+   approved search. The installed SDK exposes per-request usage but no account
+   billing-status or remaining-credit method.
+3. The Sandbox result cost unit remains undocumented. A reviewer must accept
    that uncertainty for one bounded run before execution.
+
+With pay-as-you-go disabled, Scully cannot create a Tavily charge after the free
+allowance is exhausted. The run has no automatic retry and must fail closed if
+Tavily rejects the single search.
 
 ## Sandbox retention policy
 
@@ -164,7 +169,7 @@ termination probe is authorized.
 
 ## Remaining Gate G4.4 evidence
 
-1. Confirm Tavily overage status.
+1. Confirm Tavily pay-as-you-go is disabled and at least one free credit remains.
 2. Review the Sandbox unknown-cost-unit exception for one bounded run.
 3. Approve and execute sponsor run `g4.4-sponsor-001` only.
 4. Review its redacted result before any second run.
