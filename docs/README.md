@@ -13,8 +13,8 @@ customer data.
 
 - Phase: Realistic investigation and artifact quality
 - Completed gates: G0.1 through G4.3 and checkpoints G1.2a through G1.3f
-- Active step: Gate G4.4, reliability review
-- Next step after approval: Step 4.5, feature freeze
+- Active step: Step 5.1, story and demonstration script
+- Next checkpoint: Gate G5.1, narrative review
 - Implementation: Working local path from a rights-cleared capsule through real
   loopback proxy branches and a runnable reproduction download
 - Out-of-pocket cost limit: Zero
@@ -96,6 +96,9 @@ customer data.
 | [Gate G4.3 review](gates/G4.3-safety-review.md) | Evidence and decision record for the hardened product boundary | Approved |
 | [Reliability and clean setup](product/reliability-clean-setup.md) | Independent local proof runs, clean-checkout evidence, sponsor-path execution, retention, and recovery | Approved at G4.4 |
 | [Gate G4.4 review](gates/G4.4-reliability-review.md) | Evidence and decision record for local, clean-checkout, and live sponsor-path reliability | Approved |
+| [Release scope](product/release-scope.md) | Accepted baseline, blocker audit, deferred work, and freeze rules | Approved at G4.5 |
+| [Release architecture](product/release-architecture.md) | Final component, product-flow, sponsor-flow, and threat-boundary diagrams | Approved at G4.5 |
+| [Gate G4.5 review](gates/G4.5-phase-4-exit-review.md) | Evidence and decision record for feature freeze and the Phase 4 exit | Approved |
 | [User-value validation plan](validation/user-value-validation-plan.md) | Interview protocol retained for later direct validation | Deferred evidence |
 | [Engineer interview record](templates/ENGINEER_INTERVIEW_RECORD_TEMPLATE.md) | Sanitized record template for later direct validation | Ready for future use |
 | [Gate review template](templates/GATE_REVIEW_TEMPLATE.md) | Standard evidence and decision record for every delivery step | Active |
@@ -126,6 +129,7 @@ and packaging only. Gate G4.2 approved the minimized artifact and authorized
 Step 4.3 safety and operational hardening only. Gate G4.3 approved that safety
 boundary and authorized Step 4.4 reliability and clean setup only. Gate G4.4
 approved the reliability evidence and authorized Step 4.5 feature freeze only.
-No additional live provider run is authorized.
+Gate G4.5 froze the release candidate and authorized Step 5.1 story and
+demonstration work only. No additional live provider run is authorized.
 
 New documentation should support the active hackathon project.
