@@ -1,32 +1,27 @@
 # macOS metadata
 .DS_Store
 
-# Generated working files
-/tmp/
-/validation/**/node_modules/
-/validation/**/.venv/
-/validation/**/target/
+# Dependencies and generated output
+node_modules/
+dist/
+build/
+out/
+coverage/
+.vite/
+*.tsbuildinfo
+/test-results/
 
-# Python build and test artifacts
-__pycache__/
-*.py[cod]
-/.venv/
-/build/
-/dist/
-/*.egg-info/
-/src/*.egg-info/
-/web/node_modules/
-/web/dist/
-/web/coverage/
-/fixtures/reproductions/**/node_modules/
-
-# Local application state
+# Local application state and temporary files
 /.scully/
+/tmp/
 
 # Local credentials and environment
 .env
 .env.*
 !.env.example
 
-# Local agent instructions
+# Local instructions and planning
 /AGENTS.md
+/AI_PROBLEM_INVENTORY.local.md
+/AGENT_WORKSPACE_PLAN.local.md
+/CLEAN_START_REVIEW.local.md

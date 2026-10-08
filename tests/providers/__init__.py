@@ -1,1 +1,0 @@
-"""Mocked provider-contract tests."""

@@ -1,0 +1,40 @@
+import React from "react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { expect, it, vi } from "vitest";
+import { App } from "../src/renderer/App";
+import { initialTeam, type DesktopAPI } from "../src/shared/contracts";
+const api = (): DesktopAPI => ({
+  load: vi.fn().mockResolvedValue({ tasks: [], teammates: initialTeam }),
+  createTask: vi.fn(),
+  updateTeammate: vi.fn(),
+});
+it("labels illustrative activity and keeps execution unavailable", async () => {
+  render(<App api={api()} />);
+  expect(await screen.findByText(/Example conversation/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Review code" })).toBeDisabled();
+});
+it("navigates to honest empty and settings states", async () => {
+  render(<App api={api()} />);
+  await screen.findByText("Team room");
+  fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+  expect(screen.getByText(/No changes yet/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  expect(
+    screen.getByText("Approve each command individually"),
+  ).toBeInTheDocument();
+});
+it("opens the selected full profile", async () => {
+  render(<App api={api()} />);
+  await screen.findByText("Team room");
+  fireEvent.click(screen.getByRole("button", { name: "Open full profile" }));
+  expect(screen.getByText("Working instructions")).toBeInTheDocument();
+});
+it("shows load failure instead of pretending to have saved state", async () => {
+  const bridge = api();
+  bridge.load = vi.fn().mockRejectedValue(new Error("disk"));
+  render(<App api={bridge} />);
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "could not be loaded",
+  );
+});
