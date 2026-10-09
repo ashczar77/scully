@@ -14,7 +14,7 @@ export type Task = {
 };
 export type Workspace = { tasks: Task[]; teammates: Teammate[] };
 export type TaskInput = Pick<Task, "title" | "description" | "mode">;
-export type DesktopAPI = {
+export type DesktopAPI = import("./runs").RunAPI & {
   load: () => Promise<Workspace>;
   createTask: (input: TaskInput) => Promise<Task>;
   updateTeammate: (input: Teammate) => Promise<Teammate>;

@@ -29,6 +29,8 @@ import {
 } from "lucide-react";
 import type { DesktopAPI, Teammate, Workspace } from "../shared/contracts";
 import portraits from "../../assets/team-portraits.png";
+import { RunPanel, ConnectionSettings } from "./RunPanel";
+import { MetricsPanel } from "./MetricsPanel";
 
 type Page = "Room" | "Changes" | "Preview" | "Settings" | "Profile";
 const navigation = [
@@ -117,23 +119,24 @@ function Profile({
         </div>
         <p>{person.bio}</p>
         <div className="profile-stats">
-          <span className="eyebrow">Your workspace · all time</span>
+          <span className="eyebrow">Statistics not aggregated yet</span>
           <div>
             <span>
-              <strong>0</strong>Reviews
+              <strong>-</strong>Reviews
             </span>
             <span>
-              <strong>0</strong>Findings
+              <strong>-</strong>Findings
             </span>
             <span>
-              <strong>0</strong>Tasks run
+              <strong>-</strong>Tasks run
             </span>
           </div>
         </div>
         <div className="activity">
           <span className="eyebrow">CURRENT ACTIVITY</span>
           <p>
-            <span className="dot muted-dot" /> Waiting for the agent connection
+            <span className="dot muted-dot" /> See the task room for run
+            activity
           </p>
         </div>
         {full && (
@@ -142,8 +145,9 @@ function Profile({
             <p className="instructions">{person.instructions}</p>
             <h3>Tools & permissions</h3>
             <p>
-              No model or tools connected. Creating a task does not grant
-              command, file or publishing access.
+              Model connection is configured in Settings. Runs need explicit
+              sharing approval. Local checks require fresh individual
+              permission. Publishing actions are not available yet.
             </p>
           </>
         )}
@@ -378,14 +382,14 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
                 ),
               )}
             </ol>
-            {task && <small>Saved locally. Not started.</small>}
+            {task && <small>Run status is shown in the task room.</small>}
           </div>
           <div className="permission-card">
             <ShieldCheck size={18} />
             <div>
               <strong>You stay in control</strong>
               <small>
-                No commands can run yet.
+                Local commands require fresh approval.
                 <br />
                 Publishing requires approval.
               </small>
@@ -414,29 +418,12 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
                 <FlaskConical size={17} />
                 <span>
                   {task
-                    ? "Task saved. Agent execution arrives in the next milestone."
+                    ? "Private drafts · applying changes requires your approval."
                     : "Example conversation · a preview of how your team will work."}
                 </span>
               </div>
               {task ? (
-                <div className="saved-task-content">
-                  <div className="large-icon">
-                    <Check size={28} />
-                  </div>
-                  <h2>Your task has a home.</h2>
-                  <p>{task.description || task.title}</p>
-                  <span className="pill">
-                    {task.mode === "plan" ? "Plan first" : "Start working"} ·
-                    saved preference
-                  </span>
-                  <p className="muted">
-                    No agents have started, and no files have been changed. Your
-                    task will still be here when you reopen Scully.
-                  </p>
-                  <button className="secondary" onClick={() => setTaskId(null)}>
-                    Explore the example room <ArrowRight size={16} />
-                  </button>
-                </div>
+                <RunPanel key={task.id} api={api!} task={task} team={team} />
               ) : (
                 <div className="conversation">
                   <div className="day-divider">
@@ -498,42 +485,47 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
                   </div>
                 </div>
               )}
-              <div className="composer-area">
-                <div className="audit-actions">
-                  {[
-                    { text: "Check goal", icon: Target },
-                    { text: "Review code", icon: Code2 },
-                    { text: "Try to break it", icon: FlaskConical },
-                  ].map(({ text, icon: Icon }) => (
-                    <button
-                      key={text}
+              {!task && (
+                <div className="composer-area">
+                  <div className="audit-actions">
+                    {[
+                      { text: "Check goal", icon: Target },
+                      { text: "Review code", icon: Code2 },
+                      { text: "Try to break it", icon: FlaskConical },
+                    ].map(({ text, icon: Icon }) => (
+                      <button
+                        key={text}
+                        disabled
+                        title="Available when the agent runtime is connected"
+                      >
+                        <Icon size={16} />
+                        {text}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="composer">
+                    <Plus size={19} />
+                    <textarea
+                      aria-label="Message the team"
                       disabled
-                      title="Available when the agent runtime is connected"
-                    >
-                      <Icon size={16} />
-                      {text}
+                      placeholder="Message the team or @ a teammate..."
+                      rows={1}
+                    />
+                    <button disabled aria-label="Send message">
+                      <ArrowUp size={21} />
                     </button>
-                  ))}
+                  </div>
+                  <div className="composer-caption">
+                    <span>
+                      Mid-task messaging is planned for the coordination
+                      milestone.
+                    </span>
+                    <span>
+                      Private by default <ShieldCheck size={11} />
+                    </span>
+                  </div>
                 </div>
-                <div className="composer">
-                  <Plus size={19} />
-                  <textarea
-                    aria-label="Message the team"
-                    disabled
-                    placeholder="Message the team or @ a teammate..."
-                    rows={1}
-                  />
-                  <button disabled aria-label="Send message">
-                    <ArrowUp size={21} />
-                  </button>
-                </div>
-                <div className="composer-caption">
-                  <span>Messaging unlocks with the agent connection.</span>
-                  <span>
-                    Private by default <ShieldCheck size={11} />
-                  </span>
-                </div>
-              </div>
+              )}
             </>
           )}
           {page === "Profile" && (
@@ -556,14 +548,23 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
               />
             </>
           )}
-          {page === "Changes" && (
-            <EmptyPage
-              icon={<GitBranch size={30} />}
-              title="A clear view of every change."
-              text="When the team starts building, review its diffs, findings and checks here before anything is applied to your project."
-              note="No changes yet. This shell does not modify project files."
-            />
-          )}
+          {page === "Changes" &&
+            (task ? (
+              <RunPanel
+                key={task.id + "changes"}
+                api={api!}
+                task={task}
+                team={team}
+                changes
+              />
+            ) : (
+              <EmptyPage
+                icon={<GitBranch size={30} />}
+                title="A clear view of every change."
+                text="When the team starts building, review its diffs, findings and checks here before anything is applied to your project."
+                note="No changes yet. This shell does not modify project files."
+              />
+            ))}
           {page === "Preview" && (
             <EmptyPage
               icon={<Monitor size={30} />}
@@ -591,23 +592,27 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
                 />
                 <Setting
                   title="Agent connection"
-                  detail="Not connected in this milestone"
+                  detail="Configure the session below; each run needs approval"
                 />
                 <Setting
                   title="Theme"
                   detail="Dark · light theme planned for later"
                 />
               </section>
+              <ConnectionSettings api={api!} />
+              <MetricsPanel api={api!} />
               <section className="settings-card">
                 <h2>Local storage</h2>
                 <p>
                   Tasks and teammate profiles are stored in SQLite on this
-                  computer. No account or credentials are needed for this
-                  preview.
+                  computer. Run snapshots and draft results also stay here.
                 </p>
                 <p className="muted">
                   Execution settings are not editable until their controls are
-                  implemented. No tools or provider requests run in this build.
+                  implemented. Nebius requests run only after explicit approval.
+                  Local checks require separate approval and use fresh working
+                  copies. Their output and execution records stay on this
+                  computer.
                 </p>
               </section>
             </>
@@ -666,7 +671,8 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
         >
           <form onSubmit={createTask}>
             <p className="muted">
-              Save an idea for your team. No execution starts in this preview.
+              Save an idea, then choose a project source and approve a bounded
+              run.
             </p>
             <label>
               Task title

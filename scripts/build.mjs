@@ -2,7 +2,11 @@ import { build as bundle } from "esbuild";
 import { build as renderer } from "vite";
 await renderer();
 await bundle({
-  entryPoints: ["src/main/main.ts", "src/main/preload.ts"],
+  entryPoints: {
+    main: "src/main/main.ts",
+    preload: "src/main/preload.ts",
+    worker: "src/engine/worker.ts",
+  },
   outdir: "dist",
   outExtension: { ".js": ".cjs" },
   bundle: true,

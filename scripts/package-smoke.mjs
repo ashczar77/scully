@@ -7,6 +7,7 @@ await mkdir("test-results", { recursive: true });
 const bundle = resolve("out/Scully-darwin-arm64/Scully.app");
 const entries = listPackage(`${bundle}/Contents/Resources/app.asar`);
 assert(entries.some((p) => p.endsWith("/main.cjs")));
+assert(entries.some((p) => p.endsWith("/worker.cjs")));
 assert(
   !entries.some((p) =>
     /\/(\.env|AGENTS\.md|.*\.local\.md|node_modules)(\/|$)/.test(p),
