@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
 import { Store } from "./store";
 import { commandRevision } from "../engine/revision";
+import { assessLocalCriterion } from "../shared/check-criteria";
 import {
   parseMessage,
   parseAnswer,
@@ -11,7 +12,11 @@ import {
   type TeamReply,
 } from "../shared/messages";
 import { noopSink, emitMetric, type MetricSink } from "../shared/telemetry";
-import { recordFindingDecision, findingKey } from "../shared/audits";
+import {
+  recordFindingDecision,
+  findingKey,
+  findingCheckCurrent,
+} from "../shared/audits";
 import { snapshotRevision } from "../engine/integration";
 import { suggestionsVisible } from "../shared/suggestions";
 import {
@@ -21,6 +26,7 @@ import {
 } from "../shared/audits";
 import {
   makeCoordination,
+  isTestPath,
   parseCoordinationSettings,
 } from "../shared/coordination";
 import {
@@ -449,7 +455,11 @@ export class RunManager {
       snapshotRevision(run.files, run.drafts)
     )
       throw new Error("Draft changed. Review again.");
-    const decision = recordFindingDecision(run, value);
+    const decision = recordFindingDecision(
+      run,
+      value,
+      this.store.runs(run.taskId),
+    );
     run.events.push({
       actor: "system",
       at: decision.at,
@@ -500,6 +510,34 @@ export class RunManager {
       throw new Error(
         "One corrective attempt per original run; review the existing attempt",
       );
+    const parentFiles = new Map(
+      [...parent.files, ...parent.drafts].map((file) => [
+        file.path,
+        file.content,
+      ]),
+    );
+    const candidates = (parent.commands || []).flatMap((command) => {
+      const testPaths = command.args.filter(
+        (arg) => isTestPath(arg) && parentFiles.has(arg),
+      );
+      if (
+        command.cwd !== "." ||
+        testPaths.length !== 1 ||
+        !command.findingLink?.criterion ||
+        command.findingLink.auditIndex !== auditIndex ||
+        command.findingLink.findingIndex !== findingIndex ||
+        command.revision !== commandRevision(parent) ||
+        !findingCheckCurrent(parent, command)
+      )
+        return [];
+      return (parent.executions || [])
+        .filter(
+          (execution) =>
+            assessLocalCriterion(command, execution).status === "not_met",
+        )
+        .map((execution) => ({ command, execution, testPath: testPaths[0] }));
+    });
+    const baseline = candidates.length === 1 ? candidates[0] : null;
     const child: Run = {
       id: randomUUID(),
       taskId: parent.taskId,
@@ -522,6 +560,30 @@ export class RunManager {
         findingIndex: findingIndex as number,
         finding: structuredClone(finding),
         parentDrafts: structuredClone(parent.drafts),
+        ...(baseline
+          ? {
+              recheck: {
+                parentRunId: parent.id,
+                parentCommandId: baseline.command.id,
+                parentExecutionId: baseline.execution.id,
+                parentCommandRevision: baseline.command.revision,
+                testPath: baseline.testPath,
+                testSha256: createHash("sha256")
+                  .update(parentFiles.get(baseline.testPath)!)
+                  .digest("hex"),
+                criterion: structuredClone(
+                  baseline.command.findingLink!.criterion!,
+                ),
+                command: {
+                  executable: baseline.command.executable,
+                  args: [...baseline.command.args],
+                  cwd: baseline.command.cwd,
+                  reason: baseline.command.reason,
+                  timeoutSeconds: baseline.command.timeoutSeconds,
+                },
+              },
+            }
+          : {}),
       },
     };
     child.events.push({
@@ -675,6 +737,7 @@ export class RunManager {
     this.active = null;
     child.kill();
     run.status = "stopped";
+    run.inFlightRequests = [];
     interruptAudits(run);
     for (const review of run.coordination?.chunkReviews || []) {
       if (review.status === "reviewing") {
@@ -744,6 +807,7 @@ export class RunManager {
     this.active = null;
     child?.kill();
     run.status = "failed";
+    run.inFlightRequests = [];
     interruptAudits(run);
     run.error = error;
     this.save(run);

@@ -45,7 +45,10 @@ export type CloudExecution = Omit<CloudReview, "token" | "expiresAt"> & {
   finishedAt?: string;
   commandPassed: boolean | null;
   exitCode: number | null;
+  timedOut?: boolean;
+  signal?: number | null;
   stdout: string;
   stderr: string;
+  outputTruncated?: boolean;
   error: string;
 };

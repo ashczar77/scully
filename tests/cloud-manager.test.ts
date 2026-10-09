@@ -312,6 +312,9 @@ it.each([
       expect(updated.cloudExecutions![0]).toMatchObject({
         resultImage: returnedImage,
         commandPassed: exitCode === 0,
+        timedOut: false,
+        signal: null,
+        outputTruncated: false,
       });
       if (returnedImage) {
         await expect(
@@ -515,6 +518,55 @@ it("requires one-use review, uploads the exact snapshot and persists an operatio
     await expect(c.manager.submit(accepted.token, true)).rejects.toThrow(
       "fresh",
     );
+  } finally {
+    await c.close();
+  }
+});
+it("persists truncated output and process termination state for criterion review", async () => {
+  const c = await fixture();
+  try {
+    const review = c.manager.review(
+      "run",
+      "command",
+      image,
+      "/usr/local/bin/node",
+    );
+    const submitted = await c.manager.submit(review.token, true);
+    c.fetcher.mockImplementationOnce(
+      async () =>
+        new Response(
+          JSON.stringify({
+            uuid: operation,
+            kind: "instance",
+            status: "SUCCESS",
+            metadata: {
+              result: {
+                state: { exit_code: 0, timed_out: false },
+                stdout: {
+                  encoding: "ascii",
+                  value: "partial",
+                  truncated: true,
+                },
+              },
+            },
+          }),
+        ),
+    );
+    const refreshed = await c.manager.refresh(
+      "run",
+      submitted.cloudExecutions![0].id,
+    );
+    expect(refreshed.cloudExecutions![0]).toMatchObject({
+      outputTruncated: true,
+      timedOut: false,
+      signal: null,
+      stdout: "partial",
+    });
+    const reopened = new Store(join(c.root, "db.sqlite"));
+    expect(reopened.getRun("run").cloudExecutions![0].outputTruncated).toBe(
+      true,
+    );
+    reopened.close();
   } finally {
     await c.close();
   }

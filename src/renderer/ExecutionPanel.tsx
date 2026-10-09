@@ -20,6 +20,13 @@ export function ExecutionPanel({ api, run }: { api: DesktopAPI; run: Run }) {
     }
   }
   const running = run.executions?.some((e) => e.status === "running");
+  const reviewCommand = run.commands?.find(
+    (command) =>
+      command.id === review?.commandId && command.revision === review.revision,
+  );
+  const reviewCriterion =
+    reviewCommand?.findingLink?.criterion ||
+    reviewCommand?.recheckOf?.criterion;
   return (
     <section className="settings-card" aria-label="Local execution">
       <h3>Run a check locally</h3>
@@ -55,6 +62,18 @@ export function ExecutionPanel({ api, run }: { api: DesktopAPI; run: Run }) {
       {review && (
         <div className="command-proposal">
           <h4>Approve this exact local command</h4>
+          {reviewCriterion && (
+            <p>
+              {reviewCommand?.recheckOf
+                ? "Carried from the original failed check. "
+                : ""}
+              Proposed observation criterion: exit {reviewCriterion.exitCode}
+              {reviewCriterion.outputIncludes
+                ? ` and output contains ${JSON.stringify(reviewCriterion.outputIncludes)}`
+                : ""}
+              . This is not a correctness guarantee.
+            </p>
+          )}
           <pre>
             {JSON.stringify(
               {

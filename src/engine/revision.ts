@@ -15,6 +15,9 @@ export function commandRevision(run: Run): string {
         ...(run.commands?.some((c) => c.findingLink)
           ? { findingLinks: run.commands.map((c) => c.findingLink || null) }
           : {}),
+        ...(run.commands?.some((c) => c.recheckOf)
+          ? { rechecks: run.commands.map((c) => c.recheckOf || null) }
+          : {}),
       }),
     )
     .digest("hex");

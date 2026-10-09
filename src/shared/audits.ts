@@ -1,5 +1,7 @@
 import type { Finding, Run } from "./runs";
-import { parseCommands } from "./commands";
+import { parseCommands, type CheckCriterion } from "./commands";
+import { containsSecret } from "./runs";
+import { compareCorrection } from "./correction-evidence";
 export type FindingDecisionInput = {
   auditIndex: number;
   findingIndex: number;
@@ -18,8 +20,9 @@ export function findingEvidence(
   run: Run,
   auditIndex: number,
   findingIndex: number,
+  relatedRuns: Run[] = [],
 ) {
-  return (run.executions || []).filter((e) => {
+  const own = (run.executions || []).filter((e) => {
     const command = run.commands?.find((c) => c.id === e.commandId);
     return (
       command &&
@@ -32,14 +35,43 @@ export function findingEvidence(
       !e.signal
     );
   });
+  const corrected = relatedRuns.flatMap((child) => {
+    if (
+      child.correction?.parentId !== run.id ||
+      child.correction.auditIndex !== auditIndex ||
+      child.correction.findingIndex !== findingIndex
+    )
+      return [];
+    const comparison = compareCorrection(run, child);
+    if (
+      comparison.status !== "compared" ||
+      comparison.candidate?.status !== "met"
+    )
+      return [];
+    const replay = child.commands?.find(
+      (command) =>
+        command.recheckOf?.parentCommandId ===
+        child.correction?.recheck?.parentCommandId,
+    );
+    const execution = child.executions?.find(
+      (result) => result.commandId === replay?.id,
+    );
+    return execution ? [execution] : [];
+  });
+  return [...own, ...corrected];
 }
-export function decisionCurrent(run: Run, decision: FindingDecision) {
+export function decisionCurrent(
+  run: Run,
+  decision: FindingDecision,
+  relatedRuns: Run[] = [],
+) {
   const audit = run.specialistAudits?.[decision.auditIndex];
   const finding = audit?.findings[decision.findingIndex];
   const evidence = findingEvidence(
     run,
     decision.auditIndex,
     decision.findingIndex,
+    relatedRuns,
   );
   return !!(
     finding &&
@@ -47,12 +79,15 @@ export function decisionCurrent(run: Run, decision: FindingDecision) {
     audit?.revision === decision.revision &&
     run.coordination?.integratedRevision === decision.revision &&
     run.coordination.auditedRevision === decision.revision &&
-    decision.evidenceIds.every((id) => evidence.some((e) => e.id === id))
+    decision.evidenceIds.every(
+      (id) => evidence.filter((e) => e.id === id).length === 1,
+    )
   );
 }
 export function recordFindingDecision(
   run: Run,
   value: unknown,
+  relatedRuns: Run[] = [],
 ): FindingDecision {
   const v = value as FindingDecisionInput;
   if (
@@ -89,7 +124,7 @@ export function recordFindingDecision(
     evidenceIds: [...v.evidenceIds],
     at: new Date().toISOString(),
   };
-  if (!decisionCurrent(run, decision))
+  if (!decisionCurrent(run, decision, relatedRuns))
     throw new Error("Finding or evidence is stale. Review again.");
   if (v.decision === "resolved" && !v.evidenceIds.length)
     throw new Error("Resolution requires linked completed evidence");
@@ -114,12 +149,41 @@ export function parseFindingChecks(
       v.expected.length > 2000
     )
       throw new Error("Invalid finding check");
+    const criterion = parseCheckCriterion(v.criterion);
     return {
       spec: parseCommands([v.command])[0],
       findingIndex: v.findingIndex as number,
       expected: v.expected as string,
+      criterion,
     };
   });
+}
+export function parseCheckCriterion(value: unknown): CheckCriterion {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error("Invalid check criterion");
+  const v = value as Record<string, unknown>;
+  if (
+    Object.keys(v).some(
+      (key) => !["exitCode", "outputIncludes"].includes(key),
+    ) ||
+    !Object.prototype.hasOwnProperty.call(v, "exitCode") ||
+    !Number.isInteger(v.exitCode) ||
+    (v.exitCode as number) < 0 ||
+    (v.exitCode as number) > 255 ||
+    (v.outputIncludes !== undefined &&
+      (typeof v.outputIncludes !== "string" ||
+        !v.outputIncludes.trim() ||
+        v.outputIncludes.length > 200 ||
+        /[\x00-\x1f\x7f]/.test(v.outputIncludes) ||
+        containsSecret(v.outputIncludes)))
+  )
+    throw new Error("Invalid check criterion");
+  return {
+    exitCode: v.exitCode as number,
+    ...(v.outputIncludes === undefined
+      ? {}
+      : { outputIncludes: v.outputIncludes as string }),
+  };
 }
 export function findingCheckCurrent(
   run: Run,

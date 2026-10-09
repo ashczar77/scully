@@ -97,6 +97,40 @@ it("shows exact files and command and requires a fresh cloud consent", async () 
     expect(api.submitCloud).toHaveBeenCalledWith("one-use", true),
   );
 });
+it("shows a proposed criterion before cloud approval without submitting", async () => {
+  const api = bridge();
+  const criterionRun = {
+    ...run,
+    commands: [
+      {
+        ...run.commands![0],
+        revision: "revision",
+        findingLink: {
+          auditIndex: 0,
+          findingIndex: 0,
+          revision: "revision",
+          path: "test.js",
+          detail: "Check result",
+          severity: "warning",
+          expected: "Marker appears",
+          criterion: { exitCode: 0, outputIncludes: "assertions: 4" },
+        },
+      },
+    ],
+  } as Run;
+  render(<CloudPanel api={api} run={criterionRun} />);
+  await screen.findByText("Cloud project: project-fixture");
+  fireEvent.click(screen.getByRole("button", { name: "Find sandbox images" }));
+  fireEvent.click(await screen.findByRole("button", { name: /node:22/ }));
+  fireEvent.click(screen.getByRole("button", { name: /Review cloud check/ }));
+  expect(
+    await screen.findByText(/Proposed observation criterion/),
+  ).toHaveTextContent("assertions: 4");
+  expect(
+    screen.getByRole("button", { name: "Approve and run in cloud" }),
+  ).toBeDisabled();
+  expect(api.submitCloud).not.toHaveBeenCalled();
+});
 it("clears a prior image choice when the search changes", async () => {
   const api = bridge();
   render(<CloudPanel api={api} run={run} />);
@@ -276,6 +310,22 @@ it("shows completed checks from the same starting image together in the run pane
   const api = bridge();
   const completedRun = {
     ...run,
+    commands: [
+      {
+        ...run.commands![0],
+        revision: "revision",
+        findingLink: {
+          auditIndex: 0,
+          findingIndex: 0,
+          revision: "revision",
+          path: "test.js",
+          detail: "Check result",
+          severity: "warning",
+          expected: "Output after",
+          criterion: { exitCode: 1, outputIncludes: "after" },
+        },
+      },
+    ],
     cloudExecutions: [
       {
         id: "first",
@@ -302,8 +352,11 @@ it("shows completed checks from the same starting image together in the run pane
         operationId: "operation-second",
         remoteStatus: "SUCCESS",
         exitCode: 1,
+        timedOut: false,
+        signal: null,
         stdout: "after",
         stderr: "",
+        outputTruncated: false,
       },
     ],
   } as Run;
@@ -313,6 +366,9 @@ it("shows completed checks from the same starting image together in the run pane
   ).toBeInTheDocument();
   expect(screen.getByLabelText("Check 2 captured stdout")).toHaveTextContent(
     "after",
+  );
+  expect(screen.getAllByText(/Proposed criterion met/).length).toBeGreaterThan(
+    0,
   );
   expect(api.refreshCloud).not.toHaveBeenCalled();
   expect(api.submitCloud).not.toHaveBeenCalled();

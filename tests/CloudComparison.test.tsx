@@ -4,6 +4,7 @@ import { expect, it } from "vitest";
 import {
   CloudComparison,
   comparisonGroups,
+  invocationDifferences,
 } from "../src/renderer/CloudComparison";
 import type { CloudExecution } from "../src/shared/cloud";
 import type { CommandProposal } from "../src/shared/commands";
@@ -91,6 +92,48 @@ it("does not attach a command proposal from a different revision", () => {
   expect(groups[0][0].command).toBeUndefined();
 });
 
+it("requires the exact invocation and uploaded content for a like-for-like check", () => {
+  const base = execution("one", {
+    files: [
+      { path: "app.js", bytes: 10, sha256: "first" },
+      { path: "test.js", bytes: 8, sha256: "second" },
+    ],
+  });
+  expect(
+    invocationDifferences(
+      base,
+      execution("two", {
+        files: [
+          { path: "test.js", bytes: 8, sha256: "second" },
+          { path: "app.js", bytes: 10, sha256: "first" },
+        ],
+      }),
+    ),
+  ).toEqual([]);
+  expect(
+    invocationDifferences(
+      base,
+      execution("two", {
+        args: ["other.js"],
+        files: [
+          { path: "app.js", bytes: 10, sha256: "changed" },
+          { path: "test.js", bytes: 8, sha256: "second" },
+        ],
+      }),
+    ),
+  ).toEqual(["arguments", "uploaded files"]);
+  expect(
+    invocationDifferences(
+      base,
+      execution("two", {
+        executable: "/other/node",
+        cwd: "/other",
+        timeoutSeconds: 60,
+      }),
+    ),
+  ).toEqual(["executable", "working directory", "timeout", "uploaded files"]);
+});
+
 it("lets the engineer select a pair and treats matching output as captured text only", () => {
   const runs = [
     execution("one"),
@@ -107,6 +150,9 @@ it("lets the engineer select a pair and treats matching output as captured text 
     name: "Experiment comparison",
   });
   expect(
+    within(comparison).getByText(/Same command, arguments/),
+  ).toBeInTheDocument();
+  expect(
     within(comparison).getByText(/Recorded stdout differs/),
   ).toBeInTheDocument();
   expect(within(comparison).getByText(/Process exit: 1/)).toBeInTheDocument();
@@ -120,6 +166,45 @@ it("lets the engineer select a pair and treats matching output as captured text 
   expect(
     within(comparison).getByText(/does not prove the approach works/),
   ).toBeInTheDocument();
+});
+
+it("does not call different commands a like-for-like result", () => {
+  render(
+    <CloudComparison
+      executions={[
+        execution("one"),
+        execution("two", {
+          args: ["other.js"],
+          stdout: "different result",
+        }),
+      ]}
+      commands={commands}
+    />,
+  );
+  expect(
+    screen.getByText(/Different check invocation: arguments/),
+  ).toBeInTheDocument();
+  expect(screen.queryByText(/Recorded stdout differs/)).toBeNull();
+});
+
+it("withholds outcome comparison when the service failed or process exit is absent", () => {
+  render(
+    <CloudComparison
+      executions={[
+        execution("one"),
+        execution("two", {
+          remoteStatus: "FAILED",
+          exitCode: null,
+          stdout: "different result",
+        }),
+      ]}
+      commands={commands}
+    />,
+  );
+  expect(
+    screen.getByText(/lacks a successful service result/),
+  ).toBeInTheDocument();
+  expect(screen.queryByText(/Recorded stdout differs/)).toBeNull();
 });
 
 it("renders remote output as text, limits previews, and makes no comparison across different images", () => {

@@ -474,8 +474,11 @@ export class CloudManager {
         result.saveChanges === true ? status.resultImage : null;
       result.commandPassed = status.terminal ? status.commandPassed : null;
       result.exitCode = status.exitCode;
+      result.timedOut = status.timedOut;
+      result.signal = status.signal;
       result.stdout = status.stdout;
       result.stderr = status.stderr;
+      result.outputTruncated = status.truncated;
       result.status = status.terminal ? "complete" : "submitted";
       if (status.terminal) result.finishedAt = new Date().toISOString();
       this.save(run.id, result);

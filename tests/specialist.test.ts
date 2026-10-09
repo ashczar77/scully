@@ -13,6 +13,7 @@ it("honours remaining command capacity and binds expected observations into appr
   const check = {
     findingIndex: 0,
     expected: "Exit nonzero",
+    criterion: { exitCode: 1 },
     command: checkSpec,
   };
   expect(parseFindingChecks([], findings, 0)).toEqual([]);
@@ -36,6 +37,9 @@ it("honours remaining command capacity and binds expected observations into appr
   const before = commandRevision(run);
   run.commands[0].findingLink!.expected = "Exit zero";
   expect(commandRevision(run)).not.toBe(before);
+  const beforeCriterion = commandRevision(run);
+  run.commands[0].findingLink!.criterion = { exitCode: 0 };
+  expect(commandRevision(run)).not.toBe(beforeCriterion);
 });
 const checkSpec = {
   executable: "node",
@@ -63,6 +67,7 @@ it("adds finding-bound proposals, expires old approvals and keeps the two-reques
         {
           findingIndex: 0,
           expected: "A syntax error should exit nonzero",
+          criterion: { exitCode: 1, outputIncludes: "SyntaxError" },
           command: checkSpec,
         },
       ],
@@ -79,18 +84,20 @@ it("adds finding-bound proposals, expires old approvals and keeps the two-reques
       auditIndex: 0,
       path: "app.js",
       revision: run.specialistAudits![0].revision,
+      criterion: { exitCode: 1, outputIncludes: "SyntaxError" },
     },
   });
   expect(result.executions).toBeUndefined();
   expect(complete).toHaveBeenCalledTimes(2);
 });
-it.each(["index", "missing", "unsafe", "overflow", "expected"])(
+it.each(["index", "missing", "unsafe", "overflow", "expected", "criterion"])(
   "rejects invalid focused checks (%s) without partial proposals",
   async (mode) => {
     const run = fixture();
     const check = {
       findingIndex: 0,
       expected: "Expected observation",
+      criterion: { exitCode: 0 },
       command: checkSpec,
     };
     const checks =
@@ -103,6 +110,10 @@ it.each(["index", "missing", "unsafe", "overflow", "expected"])(
                 ...check,
                 findingIndex: mode === "index" ? 20 : 0,
                 expected: mode === "expected" ? "" : check.expected,
+                criterion:
+                  mode === "criterion"
+                    ? { exitCode: 0, outputIncludes: "" }
+                    : check.criterion,
                 command:
                   mode === "unsafe"
                     ? { ...checkSpec, cwd: "../outside" }

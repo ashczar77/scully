@@ -48,6 +48,79 @@ it("requires a fresh checkbox despite old approval and displays exact launch con
   );
   expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
 });
+it("shows a proposed criterion during exact-command review without granting execution", async () => {
+  const api = bridge();
+  render(
+    <ExecutionPanel
+      api={api}
+      run={{
+        ...run,
+        commands: [
+          {
+            ...run.commands![0],
+            revision: "revision",
+            findingLink: {
+              auditIndex: 0,
+              findingIndex: 0,
+              revision: "revision",
+              path: "test.js",
+              detail: "Check result",
+              severity: "warning",
+              expected: "Marker appears",
+              criterion: { exitCode: 0, outputIncludes: "assertions: 4" },
+            },
+          },
+        ],
+      }}
+    />,
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: /Review local execution/ }),
+  );
+  expect(
+    await screen.findByText(/Proposed observation criterion/),
+  ).toHaveTextContent("assertions: 4");
+  expect(
+    screen.getByRole("button", { name: "Approve and run locally" }),
+  ).toBeDisabled();
+  expect(api.executeCommand).not.toHaveBeenCalled();
+});
+it("labels a carried check and still requires fresh local execution permission", async () => {
+  const api = bridge();
+  render(
+    <ExecutionPanel
+      api={api}
+      run={{
+        ...run,
+        commands: [
+          {
+            ...run.commands![0],
+            revision: "revision",
+            recheckOf: {
+              parentRunId: "parent",
+              parentCommandId: "original",
+              parentExecutionId: "baseline",
+              parentCommandRevision: "old-revision",
+              testPath: "app.test.js",
+              testSha256: "hash",
+              criterion: { exitCode: 0 },
+            },
+          },
+        ],
+      }}
+    />,
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: /Review local execution/ }),
+  );
+  expect(
+    await screen.findByText(/Carried from the original failed check/),
+  ).toHaveTextContent("exit 0");
+  expect(
+    screen.getByRole("button", { name: "Approve and run locally" }),
+  ).toBeDisabled();
+  expect(api.executeCommand).not.toHaveBeenCalled();
+});
 it("cancel does not execute and preflight errors remain visible", async () => {
   const api = bridge();
   render(<ExecutionPanel api={api} run={run} />);

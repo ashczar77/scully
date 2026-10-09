@@ -7,7 +7,21 @@ export type CommandSpec = {
   reason: string;
   timeoutSeconds: number;
 };
+export type CheckCriterion = {
+  exitCode: number;
+  outputIncludes?: string;
+};
+export type RecheckLineage = {
+  parentRunId: string;
+  parentCommandId: string;
+  parentExecutionId: string;
+  parentCommandRevision: string;
+  testPath: string;
+  testSha256: string;
+  criterion: CheckCriterion;
+};
 export type CommandProposal = CommandSpec & {
+  recheckOf?: RecheckLineage;
   findingLink?: {
     auditIndex: number;
     findingIndex: number;
@@ -16,6 +30,7 @@ export type CommandProposal = CommandSpec & {
     path: string;
     severity: string;
     expected: string;
+    criterion?: CheckCriterion;
   };
   id: string;
   revision: string;

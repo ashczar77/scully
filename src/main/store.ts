@@ -210,6 +210,7 @@ export class Store {
       }
       if (["planning", "building", "auditing"].includes(run.status)) {
         run.status = "interrupted";
+        run.inFlightRequests = [];
         interruptAudits(run);
         for (const review of run.coordination?.chunkReviews || []) {
           if (review.status === "reviewing") {

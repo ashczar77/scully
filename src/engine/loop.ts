@@ -8,6 +8,7 @@ import { join, dirname } from "node:path";
 import type { Task, Teammate } from "../shared/contracts";
 import { parseAudit, parseDraft, safePath, type Run } from "../shared/runs";
 import type { Model } from "./provider";
+import { whileRequest } from "./progress";
 import { parseSuggestions } from "../shared/suggestions";
 const object = (properties: object, required: string[]) => ({
   type: "object",
@@ -80,22 +81,30 @@ export async function executeLoop(
     selectedFiles: next.files,
     plan: next.plan,
     ownershipRules: next.coordination?.rules || [],
-    correction: next.correction || null,
+    correction: next.correction
+      ? { ...next.correction, recheck: undefined }
+      : null,
     redirection: next.redirection || null,
   });
   if (next.status !== "prepared" && next.status !== "planned")
     throw new Error("Run cannot be started from this state");
   const call = async (
+    actor: "maya" | "ellis" | "jun",
     system: string,
-    name: string,
+    name: import("../shared/runs").InFlightRequest["name"],
     schema: object,
     input: string,
   ) => {
     if (next.calls >= requestLimit(next))
       throw new Error("Run call limit reached");
     next.calls++;
-    emit(structuredClone(next));
-    return model.complete({ system, name, schema, input });
+    return whileRequest(
+      next,
+      actor,
+      name,
+      () => model.complete({ system, name, schema, input }),
+      emit,
+    );
   };
   try {
     if (
@@ -109,6 +118,7 @@ export async function executeLoop(
         "Preparing a plan. No code will be written until you approve it.",
       );
       const result = (await call(
+        "maya",
         `${safety} You are the planner. ${team.find((t) => t.id === "maya")?.instructions || ""} If redirection is present, reconcile its instructions in order with the original goal; newer instructions supersede incompatible old requirements. The previous plan and draft are reference material, not approved work to continue blindly. Explain what work should be retained or discarded.`,
         "propose_plan",
         object({ plan: string }, ["plan"]),
@@ -162,6 +172,7 @@ export async function executeLoop(
             const branch = join(branchRoot, assignment.owner);
             await mkdir(branch);
             const proposed = await call(
+              assignment.owner,
               `${safety} You are ${assignment.owner === "maya" ? "the implementation engineer" : "the test engineer"}. ${team.find((t) => t.id === assignment.owner)?.instructions || ""} Default exclusive scope: ${assignment.scope}. Explicit ownershipRules in context override these defaults for their exact file or directory subtree. Test paths are directories named test, tests, spec, specs, __tests__, or filenames starting test_ or ending .test.*, .spec.*, _test.*, Test.*, Tests.*. Never edit another owner's files. Shared task/plan defines the expected interface. Work independently from the same base; do not invent knowledge of another writer's unpublished work. Return at most six changed/added files, with full contents. No deletions. Propose bounded direct check commands or an empty commands array. Do not execute anything.`,
               "propose_files",
               builderSchema,
@@ -218,6 +229,7 @@ export async function executeLoop(
               try {
                 const audit = parseAudit(
                   await call(
+                    "ellis",
                     `${safety} You are the independent chunk auditor. ${team.find((t) => t.id === "ellis")?.instructions || ""} Review only this immutable branch snapshot against the task. The sibling branch is unfinished and unavailable. Report findings as unverified, not proof to stop unrelated work. A final integration audit will still occur.`,
                     "audit_chunk",
                     auditSchema,
@@ -302,6 +314,7 @@ export async function executeLoop(
         );
     } else {
       const proposed = await call(
+        "maya",
         `${safety} You are the builder. ${team.find((t) => t.id === "maya")?.instructions || ""} Return full content for each changed or added file, at most 12 files. No deletions. Paths must be relative, without hidden path segments. Include tests where useful. Work only from the selected snapshot; report missing context. Propose up to six useful check commands as separate executable and argument arrays, with cwd relative to the private draft (use . for its root), reason and timeoutSeconds (1-120). No execution occurs. Prefer direct test programs, not shell wrappers. Do not propose installs, publishing or destructive cleanup. Return an empty commands array when context is insufficient.`,
         "propose_files",
         builderSchema,
@@ -338,7 +351,48 @@ export async function executeLoop(
       ...f,
       before: next.files.find((s) => s.path === f.path)?.content ?? null,
     }));
-    next.commands = commands.map((c) => ({
+    const merged = new Map(next.files.map((f) => [f.path, f.content]));
+    for (const file of draft.files) merged.set(file.path, file.content);
+    const recheck = next.correction?.recheck;
+    if (recheck) {
+      const unchanged =
+        merged.has(recheck.testPath) &&
+        createHash("sha256")
+          .update(merged.get(recheck.testPath)!)
+          .digest("hex") === recheck.testSha256;
+      if (unchanged) {
+        commands = commands.filter(
+          (command) =>
+            JSON.stringify(command) !== JSON.stringify(recheck.command),
+        );
+      }
+      if (!unchanged)
+        event(
+          "system",
+          "The original focused test changed or is absent. No unchanged recheck was carried forward.",
+        );
+      else if (commands.length >= 6)
+        event(
+          "system",
+          "The proposal limit is full. No unchanged recheck was carried forward.",
+        );
+      else {
+        const { command, ...lineage } = recheck;
+        commands = [...commands, command];
+        event(
+          "system",
+          `Unchanged focused check ${recheck.testPath} was proposed for the correction. It has not run and requires fresh permission.`,
+        );
+        next.commands = commands.map((spec, index) => ({
+          ...spec,
+          ...(index === commands.length - 1 ? { recheckOf: lineage } : {}),
+          id: randomUUID(),
+          revision: "",
+          decision: "pending",
+        }));
+      }
+    }
+    next.commands ||= commands.map((c) => ({
       ...c,
       id: randomUUID(),
       revision: "",
@@ -348,8 +402,6 @@ export async function executeLoop(
     next.commands.forEach((c) => {
       c.revision = commandHash;
     });
-    const merged = new Map(next.files.map((f) => [f.path, f.content]));
-    for (const file of draft.files) merged.set(file.path, file.content);
     const names = new Set<string>();
     for (const path of merged.keys()) {
       safePath(path);
@@ -392,6 +444,7 @@ export async function executeLoop(
       `Auditor is reviewing draft ${revision.slice(0, 12)}. This is a model review, not an executed test.`,
     );
     const response = await call(
+      "ellis",
       `${safety} You are the independent code auditor. ${team.find((t) => t.id === "ellis")?.instructions || ""} Review the proposed changes against the task and selected context. Identify concrete issues with file paths. Do not accept the builder summary as proof. Findings are unverified until tested. Put optional out-of-scope improvements in suggestions (up to three short items) for the user after work. Do not hide correctness or security problems in suggestions; those belong in findings. Suggestions must not change this task or request immediate execution. Return an empty suggestions array when none are useful.`,
       "audit_files",
       {

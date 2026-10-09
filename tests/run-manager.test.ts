@@ -776,7 +776,22 @@ it("blocks duplicate starts and ignores worker updates after stop", () => {
     expect(() => c.manager.start(run.id, true)).toThrow("active");
     const child = vi.mocked(utilityProcess.fork).mock.results.at(-1)!.value;
     expect(child.postMessage.mock.calls[0][0].run.status).toBe("prepared");
+    child.emit("message", {
+      run: {
+        ...started,
+        inFlightRequests: [
+          {
+            id: "request",
+            actor: "maya",
+            name: "propose_files",
+            startedAt: new Date().toISOString(),
+          },
+        ],
+      },
+    });
+    expect(c.store.getRun(run.id).inFlightRequests).toHaveLength(1);
     c.manager.stop(run.id);
+    expect(c.store.getRun(run.id).inFlightRequests).toEqual([]);
     child.emit("message", { run: { ...run, status: "complete" }, done: true });
     expect(c.store.getRun(run.id).status).toBe("stopped");
     expect(() => c.manager.start(run.id, true)).toThrow("again");
@@ -788,9 +803,21 @@ it("marks lost active runs interrupted instead of resuming or replaying permissi
   const c = setup();
   try {
     const r = c.manager.prepare(c.task.id, null, []);
-    c.store.saveRun({ ...r, status: "auditing" });
+    c.store.saveRun({
+      ...r,
+      status: "auditing",
+      inFlightRequests: [
+        {
+          id: "request",
+          actor: "ellis",
+          name: "audit_files",
+          startedAt: new Date().toISOString(),
+        },
+      ],
+    });
     c.store.recoverRuns();
     expect(c.store.getRun(r.id).status).toBe("interrupted");
+    expect(c.store.getRun(r.id).inFlightRequests).toEqual([]);
   } finally {
     c.cleanup();
   }

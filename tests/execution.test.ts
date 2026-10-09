@@ -64,6 +64,7 @@ it("runs a proposed finding check only with fresh permission and retains unresol
             {
               findingIndex: 0,
               expected: "Assertion exits zero",
+              criterion: { exitCode: 0 },
               command: {
                 executable: basename(process.execPath),
                 args: ["test.js"],

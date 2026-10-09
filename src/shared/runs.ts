@@ -1,4 +1,4 @@
-import type { CommandProposal } from "./commands";
+import type { CommandProposal, CommandSpec, RecheckLineage } from "./commands";
 import type { ExecutionReview, ExecutionResult } from "./execution";
 import type { ApplyReview, ApplyResult } from "./apply";
 import type {
@@ -41,6 +41,18 @@ export type RunEvent = {
   text: string;
   at: string;
 };
+export type InFlightRequest = {
+  id: string;
+  actor: "maya" | "ellis" | "jun";
+  name:
+    | "propose_plan"
+    | "propose_files"
+    | "audit_chunk"
+    | "audit_files"
+    | "specialist_audit"
+    | "respond_to_audit";
+  startedAt: string;
+};
 export type Finding = {
   path: string;
   severity: "info" | "warning" | "error";
@@ -65,6 +77,7 @@ export type Run = {
     findingIndex: number;
     finding: Finding;
     parentDrafts: DraftFile[];
+    recheck?: RecheckLineage & { command: CommandSpec };
   };
   findingDecisions?: FindingDecision[];
   specialistAudits?: SpecialistAudit[];
@@ -74,6 +87,7 @@ export type Run = {
   files: SourceFile[];
   status: RunStatus;
   events: RunEvent[];
+  inFlightRequests?: InFlightRequest[];
   plan: string;
   drafts: DraftFile[];
   findings: Finding[];

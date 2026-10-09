@@ -3,6 +3,7 @@ import type { DesktopAPI } from "../shared/contracts";
 import type { Run } from "../shared/runs";
 import type { CloudImage, CloudReview, CloudSession } from "../shared/cloud";
 import { CloudComparison } from "./CloudComparison";
+import { assessCloudCriterion } from "../shared/check-criteria";
 
 const statusPollLimit = 12;
 const statusPollIntervalMs = 5_000;
@@ -169,6 +170,10 @@ export function CloudPanel({ api, run }: { api: DesktopAPI; run: Run }) {
     saveChanges,
     ...(parentExecutionId ? { parentExecutionId } : {}),
   };
+  const reviewCriterion = run.commands?.find(
+    (command) =>
+      command.id === review?.commandId && command.revision === review.revision,
+  )?.findingLink?.criterion;
   return (
     <section className="settings-card" aria-label="Cloud execution">
       <h3>Run a check in Nebius Sandboxes</h3>
@@ -471,6 +476,15 @@ export function CloudPanel({ api, run }: { api: DesktopAPI; run: Run }) {
       {review && (
         <div className="command-proposal">
           <h4>Approve this exact cloud transfer and command</h4>
+          {reviewCriterion && (
+            <p>
+              Proposed observation criterion: exit {reviewCriterion.exitCode}
+              {reviewCriterion.outputIncludes
+                ? ` and output contains ${JSON.stringify(reviewCriterion.outputIncludes)}`
+                : ""}
+              . This is not a correctness guarantee.
+            </p>
+          )}
           <pre>
             {JSON.stringify(
               {
@@ -591,6 +605,20 @@ export function CloudPanel({ api, run }: { api: DesktopAPI; run: Run }) {
               Exit code: {item.exitCode ?? "unavailable"}
             </p>
           )}
+          {(() => {
+            const command = run.commands?.find(
+              (candidate) =>
+                candidate.id === item.commandId &&
+                candidate.revision === item.revision,
+            );
+            if (!command?.findingLink?.criterion) return null;
+            const observation = assessCloudCriterion(command, item);
+            return (
+              <p>
+                Proposed criterion {observation.status}: {observation.detail}
+              </p>
+            );
+          })()}
           {item.error && <p className="error">{item.error}</p>}
           {item.saveChanges && item.status === "complete" && (
             <p>

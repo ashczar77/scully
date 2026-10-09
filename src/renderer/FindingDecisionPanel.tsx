@@ -9,11 +9,13 @@ import type { Run, RunAPI } from "../shared/runs";
 export function FindingDecisionPanel({
   run,
   api,
+  relatedRuns = [],
   auditIndex,
   findingIndex,
 }: {
   run: Run;
   api: RunAPI;
+  relatedRuns?: Run[];
   auditIndex: number;
   findingIndex: number;
 }) {
@@ -29,7 +31,8 @@ export function FindingDecisionPanel({
     (d) => d.auditIndex === auditIndex && d.findingIndex === findingIndex,
   );
   const latest = history.at(-1);
-  const evidence = findingEvidence(run, auditIndex, findingIndex);
+  const evidence = findingEvidence(run, auditIndex, findingIndex, relatedRuns);
+  const current = latest && decisionCurrent(run, latest, relatedRuns);
   return (
     <section aria-label={`Finding ${findingIndex + 1} decision`}>
       {!run.correction && run.status === "complete" && (
@@ -71,20 +74,17 @@ export function FindingDecisionPanel({
       )}
       <p>
         Decision:{" "}
-        {latest && decisionCurrent(run, latest)
-          ? `${latest.decision} (user decision)`
-          : "unresolved"}
-        . No automatic correctness verdict.
+        {current ? `${latest.decision} (user decision)` : "unresolved"}. No
+        automatic correctness verdict.
       </p>
-      {latest && !decisionCurrent(run, latest) && (
-        <p role="alert">Previous decision is stale.</p>
-      )}
+      {latest && !current && <p role="alert">Previous decision is stale.</p>}
       <details>
         <summary>Review evidence and record a decision</summary>
         <p>
-          Resolving requires linked completed evidence and your explanation. An
-          exit code alone does not prove a fix. Accepting risk or dismissing is
-          a user judgement, not verification.
+          Resolving requires linked completed evidence and your explanation. A
+          corrective recheck is available here only when it meets the unchanged
+          check criterion. That result is not proof of a complete fix. Accepting
+          risk or dismissing is a user judgement, not verification.
         </p>
         <fieldset>
           <legend>Finding decision</legend>
@@ -128,6 +128,13 @@ export function FindingDecisionPanel({
                 )
               }
             />
+            {relatedRuns.some(
+              (child) =>
+                child.correction?.parentId === run.id &&
+                child.executions?.some((result) => result.id === e.id),
+            )
+              ? "Corrective recheck"
+              : "Original check"}{" "}
             {e.id.slice(0, 8)} · exit {e.exitCode}
             <pre>{e.output || "(No output)"}</pre>
           </label>

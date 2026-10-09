@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { CloudExecution } from "../shared/cloud";
 import type { CommandProposal } from "../shared/commands";
+import { assessCloudCriterion } from "../shared/check-criteria";
 
 type Candidate = {
   execution: CloudExecution;
@@ -44,6 +45,29 @@ export function comparisonGroups(
 
 const previewLimit = 2_000;
 
+function uploadedFiles(execution: CloudExecution): string {
+  return JSON.stringify(
+    [...(execution.files || [])]
+      .map(({ path, bytes, sha256 }) => ({ path, bytes, sha256 }))
+      .sort((a, b) => a.path.localeCompare(b.path)),
+  );
+}
+
+export function invocationDifferences(
+  left: CloudExecution,
+  right: CloudExecution,
+): string[] {
+  const differences: string[] = [];
+  if (left.executable !== right.executable) differences.push("executable");
+  if (JSON.stringify(left.args) !== JSON.stringify(right.args))
+    differences.push("arguments");
+  if (left.cwd !== right.cwd) differences.push("working directory");
+  if (left.timeoutSeconds !== right.timeoutSeconds) differences.push("timeout");
+  if (uploadedFiles(left) !== uploadedFiles(right))
+    differences.push("uploaded files");
+  return differences;
+}
+
 function outputPreview(output: string): string {
   if (!output) return "No standard output captured.";
   if (output.length <= previewLimit) return output;
@@ -58,6 +82,8 @@ function CheckOutput({
   side: "A" | "B";
 }) {
   const { execution, number, command } = candidate;
+  const observation =
+    command?.findingLink?.criterion && assessCloudCriterion(command, execution);
   return (
     <article className="cloud-compare-result">
       <h5>
@@ -71,6 +97,11 @@ function CheckOutput({
       {command?.findingLink?.expected && (
         <p className="muted">
           Proposed expected observation: {command.findingLink.expected}
+        </p>
+      )}
+      {observation && (
+        <p className="muted">
+          Proposed criterion {observation.status}: {observation.detail}
         </p>
       )}
       <pre aria-label={`Check ${number} captured stdout`}>
@@ -94,6 +125,12 @@ function ComparisonGroup({ candidates }: { candidates: Candidate[] }) {
   const right =
     candidates.find(({ execution }) => execution.id === rightId) ||
     candidates[1];
+  const differences = invocationDifferences(left.execution, right.execution);
+  const confirmedOutcomes =
+    left.execution.remoteStatus === "SUCCESS" &&
+    right.execution.remoteStatus === "SUCCESS" &&
+    typeof left.execution.exitCode === "number" &&
+    typeof right.execution.exitCode === "number";
 
   function choose(side: "A" | "B", id: string) {
     if (side === "A") {
@@ -140,13 +177,33 @@ function ComparisonGroup({ candidates }: { candidates: Candidate[] }) {
           </div>
         ))}
       </div>
-      <p className="muted">
-        Recorded stdout{" "}
-        {left.execution.stdout === right.execution.stdout
-          ? "matches"
-          : "differs"}
-        . This compares captured text, not behavior or correctness.
-      </p>
+      {differences.length ? (
+        <p className="muted">
+          Different check invocation: {differences.join(", ")}. Outputs are
+          shown side by side, but are not compared as a like-for-like result.
+        </p>
+      ) : !confirmedOutcomes ? (
+        <p className="muted">
+          The invocation matches, but at least one check lacks a successful
+          service result and confirmed process exit. Captured output is shown
+          without a like-for-like outcome comparison.
+        </p>
+      ) : (
+        <p className="muted">
+          Same command, arguments, working directory, timeout and uploaded
+          files. Recorded stdout{" "}
+          {left.execution.stdout === right.execution.stdout
+            ? "matches"
+            : "differs"}
+          ; recorded stderr{" "}
+          {left.execution.stderr === right.execution.stderr
+            ? "matches"
+            : "differs"}
+          . Process exit: {left.execution.exitCode ?? "unavailable"} to{" "}
+          {right.execution.exitCode ?? "unavailable"}. These are observations,
+          not a correctness verdict.
+        </p>
+      )}
       <div className="cloud-compare-results">
         <CheckOutput candidate={left} side="A" />
         <CheckOutput candidate={right} side="B" />

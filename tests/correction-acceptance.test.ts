@@ -15,6 +15,8 @@ import { RunManager } from "../src/main/run-manager";
 import { ExecutionManager } from "../src/main/execution-manager";
 import { executeLoop } from "../src/engine/loop";
 import { executeSpecialist } from "../src/engine/specialist";
+import { assessLocalCriterion } from "../src/shared/check-criteria";
+import { compareCorrection } from "../src/shared/correction-evidence";
 import { findingKey } from "../src/shared/audits";
 import { LocalMetrics, measured } from "../src/shared/telemetry";
 import type { Completion, Model } from "../src/engine/provider";
@@ -156,6 +158,7 @@ it.each([true, false])(
                   {
                     findingIndex: 0,
                     expected: "All addition assertions should pass",
+                    criterion: { exitCode: 0 },
                     command,
                   },
                 ],
@@ -167,6 +170,9 @@ it.each([true, false])(
       const beforeCheck = await execute(audited);
       expect(beforeCheck.exitCode).not.toBe(0);
       expect(beforeCheck.output).toContain("AssertionError");
+      expect(
+        assessLocalCriterion(audited.commands!.at(-1)!, beforeCheck).status,
+      ).toBe("not_met");
       const parentRecord = JSON.stringify(store.getRun(parent.id));
       const child = await measured(
         "correction:prepare",
@@ -183,6 +189,13 @@ it.each([true, false])(
       expect(child.commands).toBeUndefined();
       expect(child.executions).toBeUndefined();
       expect(child.findingDecisions).toBeUndefined();
+      expect(child.correction?.recheck).toMatchObject({
+        parentRunId: parent.id,
+        parentCommandId: audited.commands!.at(-1)!.id,
+        parentExecutionId: beforeCheck.id,
+        testPath: "check.test.cjs",
+        criterion: { exitCode: 0 },
+      });
       await expect(
         measured(
           "run:start",
@@ -196,31 +209,57 @@ it.each([true, false])(
         child,
         task,
         team,
-        fixture((request) =>
-          request.name === "propose_files"
-            ? {
-                summary: "Proposed arithmetic correction",
-                files: [
-                  {
-                    path: "calc.cjs",
-                    content: validFix
-                      ? "module.exports = (a, b) => a + b;"
-                      : "module.exports = (a, b) => a - b + 0;",
-                  },
-                ],
-                commands: [command],
-              }
-            : {
-                summary: "Fixture reviewer reported no findings",
-                findings: [],
-              },
-        ),
+        fixture((request) => {
+          if (request.name === "propose_files") {
+            expect(request.input).not.toContain(beforeCheck.id);
+            return {
+              summary: "Proposed arithmetic correction",
+              files: [
+                {
+                  path: "calc.cjs",
+                  content: validFix
+                    ? "module.exports = (a, b) => a + b;"
+                    : "module.exports = (a, b) => a - b + 0;",
+                },
+              ],
+              commands: [command],
+            };
+          }
+          return {
+            summary: "Fixture reviewer reported no findings",
+            findings: [],
+          };
+        }),
         afterRoot,
         save,
       );
       save(corrected);
       expect(corrected.calls).toBe(2);
       expect(corrected.status).toBe("complete");
+      expect(corrected.commands).toHaveLength(1);
+      expect(corrected.commands![0].recheckOf).toMatchObject({
+        parentCommandId: audited.commands!.at(-1)!.id,
+        parentExecutionId: beforeCheck.id,
+      });
+      expect(corrected.commands![0].decision).toBe("pending");
+      expect(
+        compareCorrection(store.getRun(parent.id), corrected),
+      ).toMatchObject({
+        status: "awaiting_execution",
+        baseline: { status: "not_met" },
+      });
+      const alteredTest = structuredClone(corrected);
+      alteredTest.drafts.find(
+        (file) => file.path === "check.test.cjs",
+      )!.content = "console.log('no assertions');";
+      expect(
+        compareCorrection(store.getRun(parent.id), alteredTest).status,
+      ).toBe("unavailable");
+      const alteredLineage = structuredClone(corrected);
+      alteredLineage.commands![0].recheckOf!.parentExecutionId = "other";
+      expect(
+        compareCorrection(store.getRun(parent.id), alteredLineage).status,
+      ).toBe("unavailable");
       expect(await readFile(join(afterRoot, "check.test.cjs"), "utf8")).toBe(
         oracle,
       );
@@ -228,6 +267,26 @@ it.each([true, false])(
         broken,
       );
       const afterCheck = await execute(corrected);
+      expect(
+        compareCorrection(store.getRun(parent.id), store.getRun(child.id)),
+      ).toMatchObject({
+        status: "compared",
+        baseline: { status: "not_met" },
+        candidate: { status: validFix ? "met" : "not_met" },
+      });
+      const incomplete = structuredClone(store.getRun(child.id));
+      incomplete.executions![0].status = "running";
+      expect(
+        compareCorrection(store.getRun(parent.id), incomplete),
+      ).toMatchObject({
+        status: "unavailable",
+        candidate: { status: "unavailable" },
+      });
+      const foreignResult = structuredClone(store.getRun(child.id));
+      foreignResult.executions![0].runId = "foreign-run";
+      expect(
+        compareCorrection(store.getRun(parent.id), foreignResult).status,
+      ).toBe("unavailable");
       expect(afterCheck.revision).not.toBe(beforeCheck.revision);
       if (validFix) {
         expect(afterCheck.exitCode).toBe(0);
@@ -241,6 +300,28 @@ it.each([true, false])(
         "needs-review",
       );
       expect(store.getRun(child.id).applications).toBeUndefined();
+      const decision = {
+        auditIndex: 0,
+        findingIndex: 0,
+        revision: parent.coordination!.integratedRevision,
+        findingKey: findingKey(finding),
+        previousCount: 0,
+        decision: "resolved" as const,
+        reason: "Reviewed the unchanged assertions and the corrective result",
+        evidenceIds: [afterCheck.id],
+      };
+      if (validFix) {
+        const updated = manager.decideFinding(parent.id, decision);
+        expect(updated.findingDecisions?.at(-1)).toMatchObject({
+          decision: "resolved",
+          evidenceIds: [afterCheck.id],
+        });
+      } else {
+        expect(() => manager.decideFinding(parent.id, decision)).toThrow(
+          "stale",
+        );
+        expect(store.getRun(parent.id).findingDecisions).toBeUndefined();
+      }
       expect(requests).toBe(7);
       const events = metrics.snapshot().events;
       expect(

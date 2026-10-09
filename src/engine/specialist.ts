@@ -1,6 +1,7 @@
 import type { Task } from "../shared/contracts";
 import { parseAudit, type Run } from "../shared/runs";
 import type { Model } from "./provider";
+import { whileRequest } from "./progress";
 import { snapshotRevision } from "./integration";
 import { auditSchema, commandSchema, safety } from "./loop";
 import { parseFindingChecks } from "../shared/audits";
@@ -26,15 +27,21 @@ export async function executeSpecialist(
     emit(structuredClone(next));
   };
   const call = async (
+    actor: "ellis" | "maya",
     system: string,
-    name: string,
+    name: import("../shared/runs").InFlightRequest["name"],
     schema: object,
     input: string,
   ) => {
     if (audit.calls >= 2) throw new Error("Specialist request limit reached");
     audit.calls++;
-    emit(structuredClone(next));
-    return model.complete({ system, name, schema, input });
+    return whileRequest(
+      next,
+      actor,
+      name,
+      () => model.complete({ system, name, schema, input }),
+      emit,
+    );
   };
   try {
     next.status = "auditing";
@@ -58,6 +65,7 @@ export async function executeSpecialist(
     }[audit.kind];
     const result = parseAudit(
       await call(
+        "ellis",
         `${safety} You are an independent specialist auditor. ${focus} Findings are unverified hypotheses. Only report concrete issues in changed files.`,
         "specialist_audit",
         auditSchema,
@@ -70,7 +78,8 @@ export async function executeSpecialist(
     event("ellis", result.summary);
     if (result.findings.length) {
       const response = (await call(
-        `${safety} You are the implementation reviewer responding to an independent audit. Explain which findings you accept or contest and why. Propose up to ${Math.min(3, 6 - (next.commands?.length || 0))} focused checks using existing draft files and available runtimes, or an empty checks array when no meaningful executable check is possible. Each check names a zero-based findingIndex, a direct command, and expected observations distinguishing the issue from correct behaviour. No installs, publishing, destructive cleanup or shell wrappers. Do not invent missing test files. You cannot resolve findings by assertion, alter files or execute tests. This is the only response round; unresolved issues go to the user.`,
+        "maya",
+        `${safety} You are the implementation reviewer responding to an independent audit. Explain which findings you accept or contest and why. Propose up to ${Math.min(3, 6 - (next.commands?.length || 0))} focused checks using existing draft files and available runtimes, or an empty checks array when no meaningful executable check is possible. Each check names a zero-based findingIndex, a direct command, expected observations distinguishing the issue from correct behaviour, and a literal machine-checkable criterion with the expected exit code and optional short output substring. Do not invent an output marker you cannot justify from the code or existing tests. The criterion is an unverified proposal, not proof of correctness. No installs, publishing, destructive cleanup or shell wrappers. Do not invent missing test files. You cannot resolve findings by assertion, alter files or execute tests. This is the only response round; unresolved issues go to the user.`,
         "respond_to_audit",
         {
           type: "object",
@@ -84,9 +93,18 @@ export async function executeSpecialist(
                 properties: {
                   findingIndex: { type: "integer", minimum: 0 },
                   expected: { type: "string" },
+                  criterion: {
+                    type: "object",
+                    properties: {
+                      exitCode: { type: "integer", minimum: 0, maximum: 255 },
+                      outputIncludes: { type: "string", maxLength: 200 },
+                    },
+                    required: ["exitCode"],
+                    additionalProperties: false,
+                  },
                   command: commandSchema,
                 },
-                required: ["findingIndex", "expected", "command"],
+                required: ["findingIndex", "expected", "criterion", "command"],
                 additionalProperties: false,
               },
             },
@@ -122,6 +140,7 @@ export async function executeSpecialist(
               revision: audit.revision,
               ...audit.findings[check.findingIndex],
               expected: check.expected,
+              criterion: check.criterion,
             },
           })),
         );

@@ -36,6 +36,7 @@ it("shows actual check output without resolving findings and labels old evidence
           severity: "warning",
           detail: "Issue",
           expected: "Reject invalid input",
+          criterion: { exitCode: 0, outputIncludes: "fixture" },
         },
       },
     ],
@@ -54,6 +55,8 @@ it("shows actual check output without resolving findings and labels old evidence
   // Evidence is visible both beside the check and inside the decision review.
   expect(screen.getAllByText("fixture output")).toHaveLength(2);
   expect(screen.getByText(/Matches reviewed proposal/)).toBeInTheDocument();
+  expect(screen.getByText(/Criterion met/)).toBeInTheDocument();
+  expect(screen.getByText(/Proposed literal criterion/)).toBeInTheDocument();
   expect(screen.getByText(/Execution does not resolve/)).toBeInTheDocument();
   const changed = structuredClone(run);
   changed.specialistAudits![0].findings[0].detail = "New concern";

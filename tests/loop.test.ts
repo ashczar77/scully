@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 import { executeLoop } from "../src/engine/loop";
 import { initialTeam, type Task } from "../src/shared/contracts";
 import type { Run } from "../src/shared/runs";
@@ -28,6 +29,27 @@ export const run = (): Run => ({
   calls: 0,
   model: "model",
   outputTokens: 2048,
+});
+it("publishes planner progress while the model response is still pending", async () => {
+  const snapshots: Run[] = [];
+  let finish!: (value: unknown) => void;
+  const pending = executeLoop(
+    run(),
+    { ...task, mode: "plan" },
+    initialTeam,
+    { complete: () => new Promise((resolve) => (finish = resolve)) },
+    "unused",
+    (snapshot) => snapshots.push(structuredClone(snapshot)),
+  );
+  expect(snapshots.at(-1)?.inFlightRequests).toMatchObject([
+    { actor: "maya", name: "propose_plan" },
+  ]);
+  expect(snapshots.at(-1)?.status).toBe("planning");
+  finish({ plan: "Review the work first" });
+  const completed = await pending;
+  expect(completed.status).toBe("planned");
+  expect(completed.inFlightRequests).toEqual([]);
+  expect(snapshots.at(-1)?.inFlightRequests).toEqual([]);
 });
 it("returns deferred ideas after the final audit without additional calls or commands", async () => {
   const root = await mkdtemp(join(tmpdir(), "scully-suggestions-"));
@@ -142,6 +164,66 @@ it("corrects in two calls, preserves parent files and audits the full replacemen
     expect(result.executions).toBeUndefined();
   } finally {
     await rm(dir, { recursive: true, force: true });
+  }
+});
+it("does not carry a focused recheck when the correction changes its test", async () => {
+  const root = await mkdtemp(join(tmpdir(), "scully-recheck-"));
+  try {
+    const input = run();
+    const testContent = "throw new Error('original assertion');";
+    input.correction = {
+      parentId: "parent",
+      parentRevision: "revision",
+      auditIndex: 0,
+      findingIndex: 0,
+      finding: { path: "app.js", severity: "error", detail: "Wrong result" },
+      parentDrafts: [
+        { path: "app.js", content: "bad", before: null },
+        { path: "app.test.js", content: testContent, before: null },
+      ],
+      recheck: {
+        parentRunId: "parent",
+        parentCommandId: "command",
+        parentExecutionId: "execution",
+        parentCommandRevision: "command-revision",
+        testPath: "app.test.js",
+        testSha256: createHash("sha256").update(testContent).digest("hex"),
+        criterion: { exitCode: 0 },
+        command: {
+          executable: "node",
+          args: ["app.test.js"],
+          cwd: ".",
+          reason: "Original assertion",
+          timeoutSeconds: 5,
+        },
+      },
+    };
+    const complete = vi
+      .fn()
+      .mockResolvedValueOnce({
+        summary: "Changed implementation and assertion",
+        files: [
+          { path: "app.js", content: "fixed" },
+          { path: "app.test.js", content: "console.log('no assertion');" },
+        ],
+        commands: [],
+      })
+      .mockResolvedValueOnce({ summary: "Review", findings: [] });
+    const result = await executeLoop(
+      input,
+      task,
+      initialTeam,
+      { complete },
+      join(root, "draft"),
+      () => {},
+    );
+    expect(result.status).toBe("complete");
+    expect(result.commands).toEqual([]);
+    expect(
+      result.events.some((event) => event.text.includes("test changed")),
+    ).toBe(true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });
 it.each(["no-change", "audit-fails", "retry"])(

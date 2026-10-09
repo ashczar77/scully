@@ -5,8 +5,17 @@ import {
   type AuditKind,
 } from "../shared/audits";
 import type { Run, RunAPI } from "../shared/runs";
+import { assessLocalCriterion } from "../shared/check-criteria";
 import { FindingDecisionPanel } from "./FindingDecisionPanel";
-export function SpecialistPanel({ run, api }: { run: Run; api: RunAPI }) {
+export function SpecialistPanel({
+  run,
+  api,
+  relatedRuns = [],
+}: {
+  run: Run;
+  api: RunAPI;
+  relatedRuns?: Run[];
+}) {
   const [focus, setFocus] = useState<AuditKind | null>(null);
   const [approved, setApproved] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -114,6 +123,7 @@ export function SpecialistPanel({ run, api }: { run: Run; api: RunAPI }) {
                 key={`${run.id}-${audit.revision}-${j}-${f.detail}`}
                 run={run}
                 api={api}
+                relatedRuns={relatedRuns}
                 auditIndex={i}
                 findingIndex={j}
               />
@@ -137,6 +147,16 @@ export function SpecialistPanel({ run, api }: { run: Run; api: RunAPI }) {
                   Expected observations (proposed, not verified):{" "}
                   {command.findingLink!.expected}
                 </p>
+                {command.findingLink?.criterion && (
+                  <p>
+                    Proposed literal criterion: exit{" "}
+                    {command.findingLink.criterion.exitCode}
+                    {command.findingLink.criterion.outputIncludes
+                      ? ` and output contains ${JSON.stringify(command.findingLink.criterion.outputIncludes)}`
+                      : ""}
+                    . This is not an independent test oracle.
+                  </p>
+                )}
                 <p>
                   Use the command review and local execution controls below.
                   Fresh execution permission is required.
@@ -162,6 +182,12 @@ export function SpecialistPanel({ run, api }: { run: Run; api: RunAPI }) {
                           : "Stale evidence"}
                       </p>
                       <pre>{e.output || "(No output)"}</pre>
+                      {command.findingLink?.criterion && (
+                        <p>
+                          Criterion {assessLocalCriterion(command, e).status}:{" "}
+                          {assessLocalCriterion(command, e).detail}
+                        </p>
+                      )}
                       {e.error && <p>{e.error}</p>}
                       <p>
                         Execution does not resolve this finding automatically.

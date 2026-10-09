@@ -22,6 +22,8 @@ import { TeamMessages } from "./TeamMessages";
 import { SuggestionsPanel } from "./SuggestionsPanel";
 import { SpecialistPanel } from "./SpecialistPanel";
 import { requestLimit } from "../shared/coordination";
+import { compareCorrection } from "../shared/correction-evidence";
+import { InFlightStatus } from "./InFlightStatus";
 export function ConnectionSettings({ api }: { api: DesktopAPI }) {
   const [info, setInfo] = useState<SessionInfo>({
     configured: false,
@@ -315,6 +317,7 @@ export function RunPanel({
               {run.calls}/{requestLimit(run)} requests
             </span>
           </div>
+          <InFlightStatus run={run} team={team} />
           <TeamMessages
             key={`messages-${run.id}`}
             run={run}
@@ -360,6 +363,52 @@ export function RunPanel({
                 and decisions are not automatically resolved. Execution and
                 application require fresh permission.
               </p>
+              {run.correction.recheck && (
+                <p>
+                  Unchanged focused check: {run.correction.recheck.testPath}.
+                  Test SHA-256: {run.correction.recheck.testSha256.slice(0, 12)}
+                  .
+                </p>
+              )}
+              {(() => {
+                const comparison = compareCorrection(
+                  history.find((item) => item.id === run.correction?.parentId),
+                  run,
+                );
+                return (
+                  <div aria-label="Correction check comparison">
+                    <p>{comparison.detail}</p>
+                    {comparison.baseline && (
+                      <p>
+                        Original: {comparison.baseline.status}.{" "}
+                        {comparison.baseline.detail}
+                      </p>
+                    )}
+                    {comparison.candidate && (
+                      <p>
+                        Correction: {comparison.candidate.status}.{" "}
+                        {comparison.candidate.detail}
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
+              {history.some((item) => item.id === run.correction?.parentId) && (
+                <button
+                  className="secondary"
+                  disabled={!!active}
+                  onClick={() => {
+                    setRun(
+                      history.find(
+                        (item) => item.id === run.correction?.parentId,
+                      ) || null,
+                    );
+                    setApproved(false);
+                  }}
+                >
+                  Review original finding
+                </button>
+              )}
               <details>
                 <summary>Review parent draft shared for correction</summary>
                 {run.correction.parentDrafts.map((f) => (
@@ -500,7 +549,12 @@ export function RunPanel({
             invalidateConsent={() => setApproved(false)}
           />
           {!!run.drafts.length && (
-            <SpecialistPanel key={`specialist-${run.id}`} run={run} api={api} />
+            <SpecialistPanel
+              key={`specialist-${run.id}`}
+              run={run}
+              api={api}
+              relatedRuns={history}
+            />
           )}
           {!!run.checks.length && (
             <div className="settings-card">
