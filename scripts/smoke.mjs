@@ -62,6 +62,7 @@ try {
       "metrics",
       "reviewApply",
       "applyDraft",
+      "inspectApplyRecovery",
       "decideCommand",
       "reviewExecution",
       "executeCommand",
@@ -490,6 +491,21 @@ try {
     .check();
   await applyButton.click();
   await page.getByRole("heading", { name: "Application: applied" }).waitFor();
+  await page.getByRole("button", { name: "Inspect recovery state" }).click();
+  await page
+    .getByRole("region", { name: "Recovery inspection" })
+    .getByText("Manifest matches the saved application record.")
+    .waitFor();
+  await page
+    .getByRole("region", { name: "Recovery inspection" })
+    .getByText(/Added file; no original backup required/)
+    .waitFor();
+  await assert.rejects(
+    page.evaluate(
+      (id) => window.scully.inspectApplyRecovery(id, "../escape"),
+      commandFixture.id,
+    ),
+  );
   assert.equal(
     await readFile(join(source, "test.js"), "utf8"),
     commandFixture.drafts[0].content,
@@ -534,6 +550,11 @@ try {
     .click();
   await page.getByText(/Decision: expired/).waitFor();
   await page.getByRole("heading", { name: "Application: applied" }).waitFor();
+  await page.getByRole("button", { name: "Inspect recovery state" }).click();
+  await page
+    .getByRole("region", { name: "Recovery inspection" })
+    .getByText("Manifest matches the saved application record.")
+    .waitFor();
   await page.getByText(/Process exited successfully/).waitFor();
   await page
     .getByRole("button", { name: "Persistence smoke test", exact: true })

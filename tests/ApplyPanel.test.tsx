@@ -62,3 +62,53 @@ it("cancel writes nothing and conflicts remain errors, not success", async () =>
   );
   expect(await screen.findByRole("alert")).toHaveTextContent("Conflict");
 });
+it("shows a read-only recovery inspection without offering an automatic restore", async () => {
+  const bridge = {
+    inspectApplyRecovery: vi.fn().mockResolvedValue({
+      applicationId: "application",
+      recordStatus: "failed",
+      manifest: "consistent",
+      checkedAt: "2026-10-11T10:00:00Z",
+      files: [
+        {
+          path: "a.txt",
+          recordedWritten: true,
+          pending: false,
+          backup: "matches_baseline",
+          destination: "different",
+        },
+      ],
+    }),
+  } as unknown as DesktopAPI;
+  render(
+    <ApplyPanel
+      run={{
+        ...run,
+        applications: [
+          {
+            id: "application",
+            status: "failed",
+            destination: "/chosen/project",
+            backupDirectory: "/private/backups/application",
+            revision: "revision",
+            written: ["a.txt"],
+            pendingPath: "",
+            error: "Partial write",
+            startedAt: "2026-10-11T09:00:00Z",
+          },
+        ],
+      }}
+      api={bridge}
+    />,
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Inspect recovery state" }),
+  );
+  await screen.findByText(/Backup matches saved baseline/);
+  expect(bridge.inspectApplyRecovery).toHaveBeenCalledWith(
+    "run",
+    "application",
+  );
+  expect(screen.getByText(/Destination differs from both/)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /restore/i })).toBeNull();
+});

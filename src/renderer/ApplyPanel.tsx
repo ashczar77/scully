@@ -1,10 +1,11 @@
 import { useState } from "react";
 import type { Run } from "../shared/runs";
 import type { DesktopAPI } from "../shared/contracts";
-import type { ApplyReview } from "../shared/apply";
+import type { ApplyReview, RecoveryInspection } from "../shared/apply";
 
 export function ApplyPanel({ api, run }: { api: DesktopAPI; run: Run }) {
   const [review, setReview] = useState<ApplyReview | null>(null);
+  const [inspection, setInspection] = useState<RecoveryInspection | null>(null);
   const [approved, setApproved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -140,6 +141,67 @@ export function ApplyPanel({ api, run }: { api: DesktopAPI; run: Run }) {
               before restoring anything. Recovery is manual.
             </p>
           </details>
+          <button
+            className="secondary"
+            disabled={busy || a.status === "applying"}
+            onClick={() =>
+              act(async () => {
+                setInspection(null);
+                setInspection(await api.inspectApplyRecovery(run.id, a.id));
+              })
+            }
+          >
+            Inspect recovery state
+          </button>
+          {inspection?.applicationId === a.id &&
+            (inspection.recordStatus !== a.status ? (
+              <p>Application status changed. Inspect recovery state again.</p>
+            ) : (
+              <section aria-label="Recovery inspection">
+                <p>
+                  Read-only snapshot at{" "}
+                  {new Date(inspection.checkedAt).toLocaleString()}. It does not
+                  restore or delete files. Inspect current files before any
+                  manual recovery.
+                </p>
+                <p>
+                  {inspection.manifest === "consistent"
+                    ? "Manifest matches the saved application record."
+                    : inspection.manifest === "missing"
+                      ? "Manifest is missing. Recorded writes may be incomplete."
+                      : inspection.manifest === "diverged"
+                        ? "Manifest differs from the saved application record."
+                        : "Manifest is unreadable or unsafe to inspect."}
+                </p>
+                <ul>
+                  {inspection.files.map((file) => (
+                    <li key={file.path}>
+                      <strong>{file.path}</strong>:{" "}
+                      {file.backup === "matches_baseline"
+                        ? "Backup matches saved baseline."
+                        : file.backup === "not_required"
+                          ? "Added file; no original backup required."
+                          : file.backup === "missing"
+                            ? "Original backup is missing."
+                            : file.backup === "different"
+                              ? "Original backup differs from saved baseline."
+                              : "Original backup is unreadable or unsafe."}{" "}
+                      {file.destination === "draft"
+                        ? "Destination matches saved draft."
+                        : file.destination === "baseline"
+                          ? "Destination matches saved baseline."
+                          : file.destination === "different"
+                            ? "Destination differs from both saved baseline and draft."
+                            : "Destination is unavailable or unsafe to inspect."}{" "}
+                      {file.recordedWritten
+                        ? "Write recorded."
+                        : "No confirmed write recorded."}
+                      {file.pending && " Write was pending when recorded."}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ))}
         </article>
       ))}
       {error && (

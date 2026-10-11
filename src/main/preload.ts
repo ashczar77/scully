@@ -63,6 +63,8 @@ const api: DesktopAPI = {
   reviewApply: (id) => ipcRenderer.invoke("apply:review", id),
   applyDraft: (token, approved) =>
     ipcRenderer.invoke("apply:write", token, approved),
+  inspectApplyRecovery: (runId, applicationId) =>
+    ipcRenderer.invoke("apply:inspect", runId, applicationId),
   reviewExecution: (id, commandId) =>
     ipcRenderer.invoke("execution:review", id, commandId),
   executeCommand: (token, approved) =>

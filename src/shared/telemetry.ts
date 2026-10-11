@@ -29,6 +29,7 @@ export const operations = [
   "execution:stop",
   "apply:review",
   "apply:write",
+  "apply:inspect",
   "coordination:configure",
   "session:configure",
   "model.request",

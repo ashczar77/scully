@@ -30,6 +30,23 @@ it("drops unknown fields and rejects unbounded labels and numbers", () => {
   ])
     expect(sanitizeMetric(value)).toBeNull();
 });
+it("records recovery inspection only as a bounded operation outcome", () => {
+  expect(
+    sanitizeMetric({
+      version: 1,
+      operation: "apply:inspect",
+      outcome: "returned",
+      durationMs: 9,
+      destination: "/private/project",
+      backup: "original source content",
+    }),
+  ).toEqual({
+    version: 1,
+    operation: "apply:inspect",
+    outcome: "returned",
+    durationMs: 9,
+  });
+});
 it("caps retained events, expires old entries and returns defensive copies", () => {
   let now = 1;
   const store = new LocalMetrics(() => now);

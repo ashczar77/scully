@@ -283,6 +283,10 @@ app
       trusted(event);
       return applications.apply(token, approved);
     });
+    metricHandle("apply:inspect", (event, runId, applicationId) => {
+      trusted(event);
+      return applications.inspectRecovery(runId, applicationId);
+    });
     window();
     app.on("activate", () => {
       if (!win) window();

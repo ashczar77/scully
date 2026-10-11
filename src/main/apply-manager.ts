@@ -17,7 +17,11 @@ import { dirname, join, resolve, sep } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { Store } from "./store";
 import { parseDraft, type Run } from "../shared/runs";
-import type { ApplyReview, ApplyResult } from "../shared/apply";
+import type {
+  ApplyReview,
+  ApplyResult,
+  RecoveryInspection,
+} from "../shared/apply";
 import { commandRevision } from "../engine/revision";
 import { snapshotFiles } from "./local-workspace";
 import { snapshotRevision } from "../engine/integration";
@@ -114,6 +118,135 @@ export class ApplyManager {
     private publish: (run: Run) => void,
     private beforeWrite: (path: string) => void = () => {},
   ) {}
+  inspectRecovery(runId: unknown, applicationId: unknown): RecoveryInspection {
+    if (
+      typeof applicationId !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
+        applicationId,
+      )
+    )
+      throw new Error("Invalid application ID");
+    const run = this.store.getRun(runId);
+    const application = run.applications?.find((a) => a.id === applicationId);
+    if (!application) throw new Error("Application not found on this run");
+    parseDraft({ summary: "Recovery inspection", files: run.drafts });
+    if (
+      run.drafts.some(
+        (file) =>
+          file.before !== null &&
+          (typeof file.before !== "string" ||
+            Buffer.byteLength(file.before) > 80_000),
+      )
+    )
+      throw new Error("Invalid saved application baseline");
+    const backupDirectory = resolve(
+      realpathSync(this.dataRoot),
+      "applications",
+      applicationId,
+    );
+    if (application.backupDirectory !== backupDirectory)
+      throw new Error("Recovery backup path changed");
+    let backupPresent = false;
+    try {
+      const stat = lstatSync(backupDirectory);
+      if (
+        !stat.isDirectory() ||
+        realpathSync(backupDirectory) !== backupDirectory
+      )
+        throw new Error("Recovery backup path changed");
+      backupPresent = true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    let manifest: RecoveryInspection["manifest"] = "missing";
+    if (backupPresent) {
+      try {
+        const raw = inspect(backupDirectory, "manifest.json");
+        if (raw !== null) {
+          const saved = JSON.parse(raw) as Record<string, unknown>;
+          const expectedFiles = run.drafts.map((file) => ({
+            path: file.path,
+            added: file.before === null,
+          }));
+          manifest =
+            saved?.id === application.id &&
+            saved.destination === application.destination &&
+            saved.revision === application.revision &&
+            saved.backupDirectory === application.backupDirectory &&
+            saved.startedAt === application.startedAt &&
+            saved.finishedAt === application.finishedAt &&
+            (saved.error === application.error ||
+              (application.status === "interrupted" &&
+                saved.status === "applying" &&
+                saved.error === "")) &&
+            JSON.stringify(saved.files) === JSON.stringify(expectedFiles) &&
+            JSON.stringify(saved.written) ===
+              JSON.stringify(application.written) &&
+            saved.pendingPath === application.pendingPath &&
+            (saved.status === application.status ||
+              (application.status === "interrupted" &&
+                saved.status === "applying"))
+              ? "consistent"
+              : "diverged";
+        }
+      } catch {
+        manifest = "unavailable";
+      }
+    }
+    let destinationPresent = false;
+    try {
+      destinationPresent =
+        lstatSync(application.destination).isDirectory() &&
+        realpathSync(application.destination) === application.destination;
+    } catch {
+      /* The destination may have been moved since application. */
+    }
+    return {
+      applicationId,
+      checkedAt: new Date().toISOString(),
+      recordStatus: application.status,
+      manifest,
+      files: run.drafts.map((file) => {
+        let backup: RecoveryInspection["files"][number]["backup"] =
+          file.before === null ? "not_required" : "missing";
+        if (file.before !== null && backupPresent) {
+          try {
+            const original = inspect(backupDirectory, `originals/${file.path}`);
+            backup =
+              original === null
+                ? "missing"
+                : original === file.before
+                  ? "matches_baseline"
+                  : "different";
+          } catch {
+            backup = "unavailable";
+          }
+        }
+        let destination: RecoveryInspection["files"][number]["destination"] =
+          "unavailable";
+        if (destinationPresent) {
+          try {
+            const current = inspect(application.destination, file.path);
+            destination =
+              current === file.content
+                ? "draft"
+                : current === file.before
+                  ? "baseline"
+                  : "different";
+          } catch {
+            /* Unsafe or unreadable paths are not classified as matches. */
+          }
+        }
+        return {
+          path: file.path,
+          recordedWritten: application.written.includes(file.path),
+          pending: application.pendingPath === file.path,
+          backup,
+          destination,
+        };
+      }),
+    };
+  }
   review(id: unknown, directory: string): ApplyReview {
     this.ticket = null;
     const run = this.store.getRun(id);

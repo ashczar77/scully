@@ -37,6 +37,7 @@ const api = (): DesktopAPI => ({
     .mockResolvedValue({ events: [], capacity: 1000, retentionMs: 86400000 }),
   reviewApply: vi.fn(),
   applyDraft: vi.fn(),
+  inspectApplyRecovery: vi.fn(),
   reviewExecution: vi.fn(),
   executeCommand: vi.fn(),
   stopExecution: vi.fn(),

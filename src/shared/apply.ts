@@ -19,3 +19,21 @@ export type ApplyResult = {
   startedAt: string;
   finishedAt?: string;
 };
+export type RecoveryInspection = {
+  applicationId: string;
+  checkedAt: string;
+  recordStatus: ApplyResult["status"];
+  manifest: "consistent" | "missing" | "diverged" | "unavailable";
+  files: {
+    path: string;
+    recordedWritten: boolean;
+    pending: boolean;
+    backup:
+      | "matches_baseline"
+      | "not_required"
+      | "missing"
+      | "different"
+      | "unavailable";
+    destination: "draft" | "baseline" | "different" | "unavailable";
+  }[];
+};

@@ -300,6 +300,22 @@ it("recovers interrupted records without replay and rejects application-data des
     const r = c.manager.review(c.run.id, c.destination);
     const run = c.manager.apply(r.token, true);
     run.applications![0].status = "applying";
+    run.applications![0].error = "";
+    delete run.applications![0].finishedAt;
+    const manifestPath = join(
+      run.applications![0].backupDirectory,
+      "manifest.json",
+    );
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({
+        ...run.applications![0],
+        files: run.drafts.map((file) => ({
+          path: file.path,
+          added: file.before === null,
+        })),
+      }),
+    );
     c.store.saveRun(run);
     c.store.recoverRuns();
     expect(c.store.getRun(c.run.id).applications![0].status).toBe(
@@ -308,6 +324,127 @@ it("recovers interrupted records without replay and rejects application-data des
     expect(readFileSync(join(c.destination, "main.txt"), "utf8")).toBe("new");
     const restarted = new ApplyManager(c.store, c.data, () => {});
     expect(() => restarted.apply(r.token, true)).toThrow("review");
+    expect(
+      restarted.inspectRecovery(c.run.id, run.applications![0].id).manifest,
+    ).toBe("consistent");
+  } finally {
+    c.cleanup();
+  }
+});
+it("inspects a partial apply after database reopen without changing destination files", () => {
+  let destination = "";
+  const c = setup((path) => {
+    if (path === "nested/added.txt") {
+      mkdirSync(join(destination, "nested"));
+      writeFileSync(join(destination, path), "user intervened");
+    }
+  });
+  destination = c.destination;
+  let reopened: Store | undefined;
+  try {
+    const review = c.manager.review(c.run.id, c.destination);
+    const result = c.manager.apply(review.token, true).applications![0];
+    c.store.close();
+    reopened = new Store(join(c.data, "db.sqlite"));
+    const inspector = new ApplyManager(reopened, c.data, vi.fn());
+    const state = inspector.inspectRecovery(c.run.id, result.id);
+    expect(state.manifest).toBe("consistent");
+    expect(state.recordStatus).toBe("failed");
+    expect(state.files).toMatchObject([
+      {
+        path: "main.txt",
+        recordedWritten: true,
+        backup: "matches_baseline",
+        destination: "draft",
+      },
+      {
+        path: "nested/added.txt",
+        recordedWritten: false,
+        backup: "not_required",
+        destination: "different",
+      },
+    ]);
+    expect(readFileSync(join(c.destination, "main.txt"), "utf8")).toBe("new");
+    expect(readFileSync(join(c.destination, "nested/added.txt"), "utf8")).toBe(
+      "user intervened",
+    );
+  } finally {
+    reopened?.close();
+    rmSync(c.root, { recursive: true, force: true });
+  }
+});
+it("reports missing or changed recovery evidence without trusting it", () => {
+  const c = setup();
+  try {
+    const review = c.manager.review(c.run.id, c.destination);
+    const result = c.manager.apply(review.token, true).applications![0];
+    writeFileSync(join(result.backupDirectory, "manifest.json"), "broken");
+    writeFileSync(
+      join(result.backupDirectory, "originals/main.txt"),
+      "tampered",
+    );
+    writeFileSync(join(c.destination, "main.txt"), "later user edit");
+    const state = c.manager.inspectRecovery(c.run.id, result.id);
+    expect(state.manifest).toBe("unavailable");
+    expect(state.files[0]).toMatchObject({
+      backup: "different",
+      destination: "different",
+    });
+    writeFileSync(
+      join(result.backupDirectory, "manifest.json"),
+      JSON.stringify({ ...result, backupDirectory: c.root, files: [] }),
+    );
+    expect(c.manager.inspectRecovery(c.run.id, result.id).manifest).toBe(
+      "diverged",
+    );
+    rmSync(join(result.backupDirectory, "manifest.json"));
+    rmSync(join(result.backupDirectory, "originals/main.txt"));
+    const missing = c.manager.inspectRecovery(c.run.id, result.id);
+    expect(missing.manifest).toBe("missing");
+    expect(missing.files[0].backup).toBe("missing");
+  } finally {
+    c.cleanup();
+  }
+});
+it("rejects forged recovery paths and never follows symlinked backup evidence", () => {
+  const c = setup();
+  try {
+    const review = c.manager.review(c.run.id, c.destination);
+    const result = c.manager.apply(review.token, true).applications![0];
+    expect(() => c.manager.inspectRecovery(c.run.id, "../outside")).toThrow();
+    expect(() => c.manager.inspectRecovery("missing", result.id)).toThrow();
+    const saved = c.store.getRun(c.run.id);
+    saved.applications![0].backupDirectory = c.root;
+    c.store.saveRun(saved);
+    expect(() => c.manager.inspectRecovery(c.run.id, result.id)).toThrow(
+      "backup path",
+    );
+    saved.applications![0].backupDirectory = result.backupDirectory;
+    c.store.saveRun(saved);
+    rmSync(join(result.backupDirectory, "manifest.json"));
+    symlinkSync(
+      join(c.destination, "main.txt"),
+      join(result.backupDirectory, "manifest.json"),
+    );
+    expect(c.manager.inspectRecovery(c.run.id, result.id).manifest).toBe(
+      "unavailable",
+    );
+    rmSync(join(result.backupDirectory, "originals/main.txt"));
+    symlinkSync(
+      join(c.destination, "main.txt"),
+      join(result.backupDirectory, "originals/main.txt"),
+    );
+    expect(c.manager.inspectRecovery(c.run.id, result.id).files[0].backup).toBe(
+      "unavailable",
+    );
+    rmSync(join(c.destination, "main.txt"));
+    symlinkSync(
+      join(c.destination, "context.txt"),
+      join(c.destination, "main.txt"),
+    );
+    expect(
+      c.manager.inspectRecovery(c.run.id, result.id).files[0].destination,
+    ).toBe("unavailable");
   } finally {
     c.cleanup();
   }

@@ -1,6 +1,6 @@
 import type { CommandProposal, CommandSpec, RecheckLineage } from "./commands";
 import type { ExecutionReview, ExecutionResult } from "./execution";
-import type { ApplyReview, ApplyResult } from "./apply";
+import type { ApplyReview, ApplyResult, RecoveryInspection } from "./apply";
 import type {
   AuditKind,
   SpecialistAudit,
@@ -181,6 +181,10 @@ export type RunAPI = {
   stopExecution: (id: string) => Promise<Run>;
   reviewApply: (id: string) => Promise<ApplyReview | null>;
   applyDraft: (token: string, approved: boolean) => Promise<Run>;
+  inspectApplyRecovery: (
+    runId: string,
+    applicationId: string,
+  ) => Promise<RecoveryInspection>;
   configureCoordination: (
     id: string,
     settings: CoordinationSettings,
