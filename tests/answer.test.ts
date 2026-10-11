@@ -25,6 +25,18 @@ it("makes one structured read-only request with no retry", async () => {
   );
   expect(complete).toHaveBeenCalledTimes(2);
 });
+it("signals the start of the model request before it finishes", async () => {
+  let finish!: (value: { answer: string }) => void;
+  const complete = vi.fn(
+    () => new Promise<{ answer: string }>((resolve) => (finish = resolve)),
+  );
+  const started = vi.fn();
+  const pending = answerQuestion("snapshot", { complete }, started);
+  expect(started).toHaveBeenCalledTimes(1);
+  expect(complete).toHaveBeenCalledTimes(1);
+  finish({ answer: "A bounded answer." });
+  expect(await pending).toBe("A bounded answer.");
+});
 it.each([
   null,
   {},

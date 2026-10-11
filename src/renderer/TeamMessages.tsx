@@ -1,7 +1,29 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Run, RunAPI } from "../shared/runs";
-import type { ReplyReview } from "../shared/messages";
+import type { ReplyReview, TeamReply } from "../shared/messages";
 import { initialTeam, type Teammate } from "../shared/contracts";
+
+function ReplyWait({ reply }: { reply: TeamReply }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!reply.requestStartedAt) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [reply.requestStartedAt]);
+  if (!reply.requestStartedAt) return <p>Starting read-only reply worker...</p>;
+  const start = Date.parse(reply.requestStartedAt);
+  const seconds = Number.isFinite(start)
+    ? Math.max(0, Math.floor((now - start) / 1000))
+    : 0;
+  return (
+    <p>
+      {reply.recipient?.name || "Read-only teammate"}: preparing an answer{" "}
+      <span aria-live="off">({seconds}s waiting)</span>. Elapsed time is
+      measured locally; the answer appears when the request completes.
+    </p>
+  );
+}
 export function TeamMessages({
   run,
   api,
@@ -84,9 +106,11 @@ export function TeamMessages({
                     : "Read-only teammate reply"}{" "}
                   · {r.status}
                 </strong>
-                <p style={{ whiteSpace: "pre-wrap" }}>
-                  {r.answer || "Answering from the approved snapshot..."}
-                </p>
+                {r.status === "answering" ? (
+                  <ReplyWait reply={r} />
+                ) : (
+                  <p style={{ whiteSpace: "pre-wrap" }}>{r.answer}</p>
+                )}
                 <small>
                   Snapshot {r.revision.slice(0, 12)}. No plan or code changes.
                   {r.duringWork &&

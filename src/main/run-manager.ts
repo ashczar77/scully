@@ -296,10 +296,24 @@ export class RunManager {
     this.activeReply = { id: run.id, child, replyId: reply.id };
     child.on(
       "message",
-      (message: { metric?: unknown; answer?: unknown; failed?: boolean }) => {
+      (message: {
+        metric?: unknown;
+        replyStarted?: unknown;
+        answer?: unknown;
+        failed?: boolean;
+      }) => {
         if (this.activeReply?.child !== child) return;
         if (message.metric) {
           emitMetric(this.metricSink, message.metric);
+          return;
+        }
+        if (message.replyStarted === true) {
+          const current = this.store.getRun(run.id);
+          const waiting = current.replies?.find((r) => r.id === reply.id);
+          if (waiting?.status === "answering" && !waiting.requestStartedAt) {
+            waiting.requestStartedAt = new Date().toISOString();
+            this.publish(this.store.updateReply(run.id, waiting));
+          }
           return;
         }
         try {

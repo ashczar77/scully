@@ -1,5 +1,11 @@
 import React from "react";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  act,
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+} from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { TeamMessages } from "../src/renderer/TeamMessages";
 import type { Run, RunAPI } from "../src/shared/runs";
@@ -37,6 +43,83 @@ it("offers questions during work and stops only the reply", async () => {
   fireEvent.click(screen.getByText("Stop reply"));
   await waitFor(() => expect(stopReply).toHaveBeenCalledWith("r"));
   expect(stopRun).not.toHaveBeenCalled();
+});
+it("shows a locally advancing reply wait only during the model request", () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-10-11T10:00:00.000Z"));
+  try {
+    const base = {
+      id: "r",
+      status: "complete",
+      messages: [{ id: "m", text: "Why?", intent: "continue" }],
+    } as Run;
+    const reply = {
+      id: "q",
+      messageId: "m",
+      revision: "hash",
+      status: "answering" as const,
+      answer: "",
+      at: "2026-10-11T09:59:55.000Z",
+      recipient: {
+        id: "maya",
+        name: "Maya",
+        role: "Builder",
+        instructions: "",
+      },
+    };
+    const api = {} as RunAPI;
+    const view = render(
+      <TeamMessages run={{ ...base, replies: [reply] }} api={api} />,
+    );
+    expect(
+      screen.getByText(/Starting read-only reply worker/),
+    ).toBeInTheDocument();
+    view.rerender(
+      <TeamMessages
+        run={{
+          ...base,
+          replies: [{ ...reply, requestStartedAt: "2026-10-11T10:00:00.000Z" }],
+        }}
+        api={api}
+      />,
+    );
+    expect(screen.getByText(/Maya: preparing an answer/)).toBeInTheDocument();
+    expect(screen.getByText("(0s waiting)")).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(3000));
+    expect(screen.getByText("(3s waiting)")).toBeInTheDocument();
+    view.rerender(
+      <TeamMessages
+        run={{
+          ...base,
+          replies: [{ ...reply, status: "answered", answer: "Done" }],
+        }}
+        api={api}
+      />,
+    );
+    expect(screen.queryByText(/waiting/)).not.toBeInTheDocument();
+    expect(screen.getByText("Done")).toBeInTheDocument();
+    view.rerender(
+      <TeamMessages
+        run={{
+          ...base,
+          replies: [
+            {
+              ...reply,
+              status: "failed",
+              answer: "Remote completion unconfirmed.",
+            },
+          ],
+        }}
+        api={api}
+      />,
+    );
+    expect(screen.queryByText(/waiting/)).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Remote completion unconfirmed."),
+    ).toBeInTheDocument();
+  } finally {
+    vi.useRealTimers();
+  }
 });
 it("does not upload until the exact reply snapshot is approved", async () => {
   const reviewReply = vi.fn().mockResolvedValue({

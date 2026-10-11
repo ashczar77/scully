@@ -1,6 +1,11 @@
 import type { Model } from "./provider";
 import { parseAnswer } from "../shared/messages";
-export async function answerQuestion(context: string, model: Model) {
+export async function answerQuestion(
+  context: string,
+  model: Model,
+  onRequestStart: () => void = () => {},
+) {
+  onRequestStart();
   return parseAnswer(
     await model.complete({
       name: "answer_question",

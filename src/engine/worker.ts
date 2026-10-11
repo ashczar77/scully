@@ -33,7 +33,9 @@ port.once(
       };
       if (data.replyContext !== undefined) {
         port.postMessage({
-          answer: await answerQuestion(data.replyContext, model),
+          answer: await answerQuestion(data.replyContext, model, () =>
+            port.postMessage({ replyStarted: true }),
+          ),
         });
         return;
       }

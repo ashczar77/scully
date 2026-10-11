@@ -52,6 +52,18 @@ it("answers from frozen progress without stopping or overwriting an active build
     );
     expect(review.context).not.toContain("New progress after review");
     expect(build.kill).not.toHaveBeenCalled();
+    reply.emit("message", { replyStarted: true });
+    const inFlight = c.store.getRun(run.id).replies![0];
+    expect(inFlight.status).toBe("answering");
+    expect(Date.parse(inFlight.requestStartedAt!)).not.toBeNaN();
+    reply.emit("message", { replyStarted: true });
+    expect(c.store.getRun(run.id).replies![0].requestStartedAt).toBe(
+      inFlight.requestStartedAt,
+    );
+    build.emit("message", { run: updated });
+    expect(c.store.getRun(run.id).replies![0].requestStartedAt).toBe(
+      inFlight.requestStartedAt,
+    );
     expect(() =>
       c.manager.reviewReply(run.id, noted.messages![0].id),
     ).toThrow();
@@ -65,6 +77,10 @@ it("answers from frozen progress without stopping or overwriting an active build
     c.manager.stopReply(run.id);
     expect(c.store.getRun(run.id).status).toBe("building");
     expect(build.kill).not.toHaveBeenCalled();
+    reply.emit("message", { replyStarted: true });
+    expect(c.store.getRun(run.id).replies![0].requestStartedAt).toBe(
+      inFlight.requestStartedAt,
+    );
     reply.emit("message", { answer: "Late answer" });
     expect(c.store.getRun(run.id).replies![0].status).toBe("failed");
     const next = c.manager.reviewReply(run.id, noted.messages![0].id, "jun");

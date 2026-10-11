@@ -25,6 +25,7 @@ export type TeamReply = {
   status: "answering" | "answered" | "failed";
   answer: string;
   at: string;
+  requestStartedAt?: string;
 };
 export function parseAnswer(value: unknown): string {
   const v = value as { answer?: unknown };
