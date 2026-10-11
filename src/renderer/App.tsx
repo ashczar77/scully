@@ -31,6 +31,7 @@ import type { DesktopAPI, Teammate, Workspace } from "../shared/contracts";
 import portraits from "../../assets/team-portraits.png";
 import { RunPanel, ConnectionSettings } from "./RunPanel";
 import { MetricsPanel } from "./MetricsPanel";
+import { StoragePanel } from "./StoragePanel";
 
 type Page = "Room" | "Changes" | "Preview" | "Settings" | "Profile";
 const navigation = [
@@ -601,20 +602,7 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
               </section>
               <ConnectionSettings api={api!} />
               <MetricsPanel api={api!} />
-              <section className="settings-card">
-                <h2>Local storage</h2>
-                <p>
-                  Tasks and teammate profiles are stored in SQLite on this
-                  computer. Run snapshots and draft results also stay here.
-                </p>
-                <p className="muted">
-                  Execution settings are not editable until their controls are
-                  implemented. Nebius requests run only after explicit approval.
-                  Local checks require separate approval and use fresh working
-                  copies. Their output and execution records stay on this
-                  computer.
-                </p>
-              </section>
+              <StoragePanel api={api!} />
             </>
           )}
         </main>

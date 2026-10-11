@@ -75,7 +75,7 @@ export class ExecutionManager {
       const executable = await resolveExecutable(command.executable, path);
       const executableHash = await fileHash(executable);
       const files = snapshotFiles(run);
-      const root = await createWorkspace(this.root, files);
+      const root = await createWorkspace(this.root, files, run.id);
       const cwd = await verifyWorkspace(root, files, command.cwd);
       const review: ExecutionReview = {
         token: randomUUID(),

@@ -10,12 +10,15 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname, basename } from "node:path";
+import { createHash } from "node:crypto";
 import { expect, it, vi } from "vitest";
 import { Store } from "../src/main/store";
+import { inspectLocalArtifacts } from "../src/main/artifacts";
 import { ExecutionManager } from "../src/main/execution-manager";
 import { commandRevision } from "../src/engine/revision";
 import {
   resolveExecutable,
+  createWorkspace,
   verifyWorkspace,
   snapshotFiles,
 } from "../src/main/local-workspace";
@@ -85,8 +88,13 @@ it("runs a proposed finding check only with fresh permission and retains unresol
     c.store.saveRun(audited);
     const command = audited.commands!.at(-1)!;
     const denied = await c.manager.review(c.run.id, command.id);
+    const owner = createHash("sha256").update(c.run.id).digest("hex");
+    expect(basename(denied.cwd)).toMatch(new RegExp(`^check-r-${owner}-`));
     await expect(c.manager.execute(denied.token, false)).rejects.toThrow(
       "permission",
+    );
+    expect(await readFile(join(denied.cwd, "test.js"), "utf8")).toBe(
+      c.run.drafts[0].content,
     );
     expect(c.store.getRun(c.run.id).executions).toBeUndefined();
     const review = await c.manager.review(c.run.id, command.id);
@@ -195,6 +203,8 @@ it("executes only after fresh permission, streams output, persists exact command
   );
   try {
     const review = await c.manager.review(c.run.id, "command");
+    const owner = createHash("sha256").update(c.run.id).digest("hex");
+    expect(basename(review.cwd)).toMatch(new RegExp(`^check-r-${owner}-`));
     expect(c.store.getRun(c.run.id).executions).toBeUndefined();
     expect(review.executable).toMatch(/^\//);
     expect(review.executableHash).toMatch(/^[a-f0-9]{64}$/);
@@ -220,6 +230,36 @@ it("executes only after fresh permission, streams output, persists exact command
     );
   } finally {
     await c.cleanup();
+  }
+});
+it("keeps legacy check copies and rejects malformed ownership before creating a workspace", async () => {
+  const root = await mkdtemp(join(tmpdir(), "scully-execution-owner-"));
+  try {
+    await mkdir(join(root, "executions", "check-legacy"), { recursive: true });
+    await writeFile(join(root, "executions", "check-legacy", "keep"), "old");
+    await expect(
+      createWorkspace(root, new Map([["test.js", "test"]]), "../other"),
+    ).rejects.toThrow("Invalid run ID");
+    const files = new Map([["test.js", "test"]]);
+    const first = await createWorkspace(root, files, "run-a");
+    const second = await createWorkspace(root, files, "run-a");
+    const other = await createWorkspace(root, files, "run-b");
+    const ownerA = createHash("sha256").update("run-a").digest("hex");
+    const ownerB = createHash("sha256").update("run-b").digest("hex");
+    expect(basename(first)).toMatch(new RegExp(`^check-r-${ownerA}-`));
+    expect(basename(second)).toMatch(new RegExp(`^check-r-${ownerA}-`));
+    expect(first).not.toBe(second);
+    expect(basename(other)).toMatch(new RegExp(`^check-r-${ownerB}-`));
+    expect(inspectLocalArtifacts(root).categories[1]).toMatchObject({
+      kind: "executions",
+      status: "complete",
+      items: 4,
+    });
+    expect(
+      await readFile(join(root, "executions", "check-legacy", "keep"), "utf8"),
+    ).toBe("old");
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });
 it("does not inherit credential or runtime injection environment variables", async () => {

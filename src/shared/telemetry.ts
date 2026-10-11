@@ -1,4 +1,5 @@
 export const operations = [
+  "storage:inspect",
   "sandbox.inspect",
   "cloud:resolve",
   "sandbox.images",

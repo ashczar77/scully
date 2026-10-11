@@ -72,7 +72,7 @@ The desktop smoke test uses a temporary workspace and stores screenshots under i
 - Model uploads, local command execution, cloud checks and file application have separate reviews. Reviews are bound to the relevant snapshot and expire; they do not transfer to another action.
 - Local commands run under your account in a fresh partial copy. That copy is not a security sandbox, and approved programs may access local files and the network.
 - Applying several files is not atomic. Scully retains originals and a manifest and offers read-only recovery inspection; it does not automatically overwrite later edits during recovery.
-- Scully does not commit, push or open a pull request. Drafts, backups and execution copies currently have no retention controls in the app.
+- Scully does not commit, push or open a pull request. Settings shows a read-only inventory of draft branches, backups and execution copies. Cleanup controls are not yet available.
 
 ## Project layout
 

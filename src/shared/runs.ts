@@ -1,6 +1,7 @@
 import type { CommandProposal, CommandSpec, RecheckLineage } from "./commands";
 import type { ExecutionReview, ExecutionResult } from "./execution";
 import type { ApplyReview, ApplyResult, RecoveryInspection } from "./apply";
+import type { ArtifactInventory } from "./artifacts";
 import type {
   AuditKind,
   SpecialistAudit,
@@ -113,6 +114,7 @@ export type SessionInfo = {
   outputTokens: number;
 };
 export type RunAPI = {
+  inspectLocalArtifacts: () => Promise<ArtifactInventory>;
   resolveCloudExecutable: (
     id: string,
     commandId: string,

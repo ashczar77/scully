@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { Store } from "../src/main/store";
+import type { Run } from "../src/shared/runs";
 it("persists real SQLite tasks and profiles across reopen without duplicating defaults", () => {
   const dir = mkdtempSync(join(tmpdir(), "scully-store-"));
   let db: Store | undefined;
@@ -26,6 +27,23 @@ it("persists real SQLite tasks and profiles across reopen without duplicating de
       db!.createTask({ title: " ", mode: "plan", description: "" }),
     ).toThrow();
     expect(db.load().tasks).toHaveLength(1);
+  } finally {
+    db?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("lists saved run IDs across reopen with a bounded completeness signal", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scully-store-runs-"));
+  let db: Store | undefined;
+  try {
+    db = new Store(join(dir, "test.sqlite"));
+    for (const id of ["run-a", "run-b"])
+      db.saveRun({ id, taskId: "task" } as Run);
+    db.close();
+    db = new Store(join(dir, "test.sqlite"));
+    expect(db.runIds()).toEqual({ ids: ["run-a", "run-b"], complete: true });
+    expect(db.runIds(1)).toEqual({ ids: ["run-a"], complete: false });
   } finally {
     db?.close();
     rmSync(dir, { recursive: true, force: true });

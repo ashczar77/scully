@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { DesktopAPI } from "../shared/contracts";
 const api: DesktopAPI = {
+  inspectLocalArtifacts: () => ipcRenderer.invoke("storage:inspect"),
   cloudImages: (tagPrefix) => ipcRenderer.invoke("cloud:images", tagPrefix),
   resolveCloudExecutable: (id, commandId, image, parentExecutionId) =>
     ipcRenderer.invoke(

@@ -60,6 +60,7 @@ try {
       "reviewReply",
       "answerMessage",
       "metrics",
+      "inspectLocalArtifacts",
       "reviewApply",
       "applyDraft",
       "inspectApplyRecovery",
@@ -621,6 +622,15 @@ try {
   await page
     .getByRole("region", { name: "Local metrics" })
     .screenshot({ path: "test-results/local-metrics.png" });
+  await page.getByRole("button", { name: "Refresh storage inventory" }).click();
+  await page
+    .getByRole("region", { name: "Local storage" })
+    .getByText(/Application backups.*items, .*files, .*bytes/)
+    .waitFor();
+  await page
+    .getByRole("region", { name: "Local storage" })
+    .getByText(/Check copy names:.*match saved runs/)
+    .waitFor();
   await page.getByRole("button", { name: "Room", exact: true }).click();
   await page
     .getByLabel("Team message", { exact: true })

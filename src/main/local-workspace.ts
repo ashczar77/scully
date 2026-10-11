@@ -80,12 +80,17 @@ export function snapshotFiles(run: Run) {
 export async function createWorkspace(
   dataRoot: string,
   files: Map<string, string>,
+  runId: string,
 ) {
+  if (typeof runId !== "string" || !/^[A-Za-z0-9_-]{1,100}$/.test(runId))
+    throw new Error("Invalid run ID");
   const root = join(await realpath(dataRoot), "executions");
   await mkdir(root, { recursive: true, mode: 0o700 });
   if ((await lstat(root)).isSymbolicLink() || (await realpath(root)) !== root)
     throw new Error("Execution root must not be a symlink");
-  const workspace = await mkdtemp(join(root, "check-"));
+  // A stable opaque prefix links future copies to their run, including denied reviews.
+  const owner = createHash("sha256").update(runId).digest("hex");
+  const workspace = await mkdtemp(join(root, `check-r-${owner}-`));
   for (const [path, content] of files) {
     await mkdir(dirname(join(workspace, path)), {
       recursive: true,

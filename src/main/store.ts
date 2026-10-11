@@ -159,6 +159,19 @@ export class Store {
         .all(taskId) as { data: string }[]
     ).map((row) => JSON.parse(row.data));
   }
+  runIds(requestedLimit = 2_000) {
+    const limit =
+      Number.isSafeInteger(requestedLimit) && requestedLimit > 0
+        ? Math.min(requestedLimit, 2_000)
+        : 2_000;
+    const rows = this.db
+      .prepare("SELECT id FROM runs ORDER BY rowid LIMIT ?")
+      .all(limit + 1) as { id: string }[];
+    return {
+      ids: rows.slice(0, limit).map((row) => row.id),
+      complete: rows.length <= limit,
+    };
+  }
   recoverRuns() {
     for (const row of this.db.prepare("SELECT data FROM runs").all() as {
       data: string;

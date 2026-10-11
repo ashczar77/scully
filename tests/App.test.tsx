@@ -4,6 +4,7 @@ import { expect, it, vi } from "vitest";
 import { App } from "../src/renderer/App";
 import { initialTeam, type DesktopAPI } from "../src/shared/contracts";
 const api = (): DesktopAPI => ({
+  inspectLocalArtifacts: vi.fn(),
   cloudImages: vi.fn(),
   resolveCloudExecutable: vi.fn(),
   cloudSession: vi.fn().mockResolvedValue({ configured: false, projectId: "" }),

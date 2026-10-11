@@ -15,6 +15,7 @@ import { RunManager } from "./run-manager";
 import { readSource } from "./source";
 import { ExecutionManager } from "./execution-manager";
 import { ApplyManager } from "./apply-manager";
+import { inspectLocalArtifacts } from "./artifacts";
 import { CloudManager } from "./cloud-manager";
 import { LocalMetrics, measured, type Operation } from "../shared/telemetry";
 const metrics = new LocalMetrics();
@@ -130,6 +131,16 @@ app
     ipcMain.handle("metrics:read", (event) => {
       trusted(event);
       return metrics.snapshot();
+    });
+    metricHandle("storage:inspect", (event) => {
+      trusted(event);
+      const savedRuns = store.runIds();
+      return inspectLocalArtifacts(
+        app.getPath("userData"),
+        2_000,
+        savedRuns.ids,
+        savedRuns.complete,
+      );
     });
     metricHandle("message:send", (event, id, value) => {
       trusted(event);

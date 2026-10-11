@@ -47,6 +47,23 @@ it("records recovery inspection only as a bounded operation outcome", () => {
     durationMs: 9,
   });
 });
+it("records storage inspection without paths or inventory values", () => {
+  expect(
+    sanitizeMetric({
+      version: 1,
+      operation: "storage:inspect",
+      outcome: "returned",
+      durationMs: 4,
+      path: "/private/workspace",
+      fileCount: 100,
+    }),
+  ).toEqual({
+    version: 1,
+    operation: "storage:inspect",
+    outcome: "returned",
+    durationMs: 4,
+  });
+});
 it("caps retained events, expires old entries and returns defensive copies", () => {
   let now = 1;
   const store = new LocalMetrics(() => now);
