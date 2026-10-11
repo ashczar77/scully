@@ -1,8 +1,5 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/branding/scully-friendly-nerd-charcoal-v1.png">
-    <img src="assets/branding/scully-friendly-nerd-transparent-v1.png" alt="Scully logo" width="150">
-  </picture>
+  <img src="assets/branding/scully-friendly-nerd-transparent-v1.png" alt="Scully alien head logo" width="150">
 </p>
 
 <h1 align="center">Scully</h1>
@@ -92,13 +89,15 @@ The desktop app uses Electron, React, TypeScript, Vite and local SQLite storage.
 
 ## Brand assets
 
-The README uses the appropriate logo for the viewer's color scheme. Both repository-owned variants are available for project materials:
+The header uses the transparent logo, so only the alien head appears on the reader's page. The other background variants remain available for project materials:
 
 | Light backgrounds                                                                                             | Dark backgrounds                                                                                        |
 | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | <img src="assets/branding/scully-friendly-nerd-transparent-v1.png" alt="Scully transparent logo" width="110"> | <img src="assets/branding/scully-friendly-nerd-charcoal-v1.png" alt="Scully charcoal logo" width="110"> |
 
 The [team portraits](assets/team-portraits.png) are part of the current desktop room.
+
+A [light-background logo](assets/branding/scully-friendly-nerd-light-v1.png) is also saved for future use.
 
 ## License
 
