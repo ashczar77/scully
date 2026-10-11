@@ -1035,6 +1035,17 @@ nav button.active svg {
   font-size: 12px;
   color: #a1b2c1;
 }
+.choice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+}
+.choice-grid button {
+  text-align: left;
+  white-space: normal;
+  line-height: 1.5;
+}
 .setting {
   display: flex;
   justify-content: space-between;

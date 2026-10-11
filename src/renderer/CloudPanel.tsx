@@ -184,7 +184,9 @@ export function CloudPanel({ api, run }: { api: DesktopAPI; run: Run }) {
       </p>
       <p className="muted">
         Billing status and overage settings cannot be verified here. Confirm
-        them in Token Factory before approving a cloud check. The guest has no
+        them in Token Factory before approving a cloud check. Sandbox price is
+        unknown here and the model-only USD warning budget does not cover it.
+        Check Organisation Usage for billed service spending. The guest has no
         network access. Uploaded files and logs may remain on the service even
         when the execution is disposable.
       </p>
@@ -535,6 +537,11 @@ export function CloudPanel({ api, run }: { api: DesktopAPI; run: Run }) {
             submission times out, the job may still run. No automatic retry or
             cancellation occurs. After a confirmed submission, Scully makes at
             most 12 read-only status checks while this panel stays open.
+          </p>
+          <p role="alert" className="attention">
+            This Sandbox check may incur charges. Its dollar cost is unknown,
+            and the model USD warning budget does not cover it. Review billed
+            spending in Token Factory Organisation Usage.
           </p>
           <label className="consent">
             <input

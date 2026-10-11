@@ -62,9 +62,11 @@ export function SpecialistPanel({
               <p>
                 {focus} review of revision{" "}
                 {run.coordination.integratedRevision.slice(0, 12)}. Uploads the
-                task, selected source, full draft and new findings to the
-                configured Nebius model. Up to two additional requests at the
-                session output limit, no retries. No commands execute or files
+                task, selected source, full draft and new findings to the saved
+                run model ({run.usagePolicy?.model || run.model}). Up to two
+                additional requests at{" "}
+                {run.usagePolicy?.outputTokens || run.outputTokens} maximum
+                output tokens each, no retries. No commands execute or files
                 change. Confirm free credits and billing limits first.
               </p>
               <label className="consent">

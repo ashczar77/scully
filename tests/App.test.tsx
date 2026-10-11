@@ -3,6 +3,10 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { App } from "../src/renderer/App";
 import { initialTeam, type DesktopAPI } from "../src/shared/contracts";
+import {
+  defaultUsageAlertPolicy,
+  emptyUsageAlertState,
+} from "../src/shared/usage-alerts";
 const api = (): DesktopAPI => ({
   inspectLocalArtifacts: vi.fn(),
   cloudImages: vi.fn(),
@@ -18,6 +22,27 @@ const api = (): DesktopAPI => ({
   selectSource: vi.fn(),
   prepareRun: vi.fn(),
   runs: vi.fn().mockResolvedValue([]),
+  usageForRun: vi.fn().mockResolvedValue({
+    requests: 0,
+    measured: 0,
+    unknown: 0,
+    pending: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    pendingMaxOutputTokens: 0,
+  }),
+  usageAlertsForRun: vi.fn().mockResolvedValue({
+    policy: defaultUsageAlertPolicy,
+    state: emptyUsageAlertState(),
+    waiting: false,
+  }),
+  costForRun: vi.fn(),
+  configureCost: vi.fn(),
+  configureUsageAlerts: vi.fn(),
+  continueUsage: vi.fn(),
+  saveTokensForRemaining: vi.fn(),
+  configureUsagePolicy: vi.fn(),
+  reviewUsagePolicy: vi.fn(),
   session: vi
     .fn()
     .mockResolvedValue({ configured: false, model: "", outputTokens: 2048 }),

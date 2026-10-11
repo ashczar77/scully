@@ -39,6 +39,18 @@ it("uses fixed HTTPS endpoint, bounded output, no storage and an explicit tool r
   expect(body.max_tokens).toBe(1024);
   expect(options.body).not.toContain(config.key);
 });
+it("uses the request's captured output limit and rejects invalid overrides", async () => {
+  const fetcher = vi
+    .fn()
+    .mockResolvedValue(new Response(JSON.stringify(response())));
+  const model = nebiusModel(config, fetcher);
+  await model.complete({ ...request, maxOutputTokens: 512 });
+  expect(JSON.parse(fetcher.mock.calls[0][1].body).max_tokens).toBe(512);
+  await expect(
+    model.complete({ ...request, maxOutputTokens: 999999 }),
+  ).rejects.toThrow("Invalid output token limit");
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
 it.each([401, 429, 500])(
   "does not retry HTTP %s or disclose raw response",
   async (status) => {
@@ -72,6 +84,39 @@ it("bounds provider response size", async () => {
       vi.fn().mockResolvedValue(new Response("x".repeat(200001))),
     ).complete(request),
   ).rejects.toThrow("limit");
+});
+it("reports valid provider usage even when the structured result is invalid", async () => {
+  const onUsage = vi.fn();
+  await expect(
+    nebiusModel(
+      config,
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            ...response("not json"),
+            usage: { prompt_tokens: 15, completion_tokens: 4 },
+          }),
+        ),
+      ),
+    ).complete({ ...request, onUsage }),
+  ).rejects.toThrow();
+  expect(onUsage).toHaveBeenCalledWith({ inputTokens: 15, outputTokens: 4 });
+});
+it.each([
+  undefined,
+  { prompt_tokens: -1, completion_tokens: 2 },
+  { prompt_tokens: 1.5, completion_tokens: 2 },
+])("marks absent or invalid provider usage unknown", async (usage) => {
+  const onUsage = vi.fn();
+  await nebiusModel(
+    config,
+    vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ ...response(), usage })),
+      ),
+  ).complete({ ...request, onUsage });
+  expect(onUsage).toHaveBeenCalledWith(null);
 });
 it("exercises the adapter through a real loopback HTTP boundary without contacting Nebius", async () => {
   let captured: any;

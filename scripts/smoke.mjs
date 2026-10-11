@@ -46,8 +46,17 @@ try {
       "selectSource",
       "prepareRun",
       "runs",
+      "usageForRun",
+      "usageAlertsForRun",
+      "costForRun",
+      "configureCost",
+      "configureUsageAlerts",
+      "continueUsage",
+      "saveTokensForRemaining",
       "session",
       "configureSession",
+      "configureUsagePolicy",
+      "reviewUsagePolicy",
       "startRun",
       "stopRun",
       "configureCoordination",
@@ -81,6 +90,19 @@ try {
   await page.getByText("Your task has a home.").waitFor();
   await page.getByRole("button", { name: "Prepare private workspace" }).click();
   await page.getByRole("button", { name: "Request plan" }).waitFor();
+  await page.getByText(/0 input \+ 0 output tokens reported/).waitFor();
+  await page.getByRole("region", { name: "Usage alerts and pauses" }).waitFor();
+  await page.getByText("Configure usage alerts", { exact: true }).click();
+  await page.getByLabel("Run token budget").fill("12000");
+  await page.getByRole("button", { name: "Save alert settings" }).click();
+  await page.getByText(/Budget: 12,000 tokens/).waitFor();
+  const costPanel = page.getByRole("region", { name: "Model cost estimates" });
+  await costPanel.getByText(/No USD warning budget set/).waitFor();
+  await costPanel.getByLabel("USD warning budget").fill("2.50");
+  await costPanel.getByRole("button", { name: "Save cost settings" }).click();
+  await costPanel.getByText(/USD warning budget: \$2.50/).waitFor();
+  await costPanel.getByText(/Nebius Sandboxes: 0 check attempts/).waitFor();
+  await costPanel.getByText(/Tavily: not connected in this build/).waitFor();
   await page.getByRole("region", { name: "Team ownership" }).waitFor();
   assert(
     (
@@ -547,6 +569,14 @@ try {
   app = await launch();
   page = await app.firstWindow();
   await page
+    .getByRole("button", { name: "Persistence smoke test", exact: true })
+    .click();
+  await page.getByText(/Budget: 12,000 tokens/).waitFor();
+  await page
+    .getByRole("region", { name: "Model cost estimates" })
+    .getByText(/USD warning budget: \$2.50/)
+    .waitFor();
+  await page
     .getByRole("button", { name: "Existing project smoke test", exact: true })
     .click();
   await page.getByText(/Decision: expired/).waitFor();
@@ -681,6 +711,13 @@ try {
   await page
     .getByRole("heading", { name: "Revised plan context", exact: true })
     .waitFor();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Room", exact: true }).click();
+  await page
+    .getByRole("heading", { name: "Revised plan context", exact: true })
+    .waitFor();
+  await page.getByRole("button", { name: "Apply Save tokens" }).click();
+  await page.getByText(/Current: Save tokens/).waitFor();
   assert.equal(
     await page
       .getByRole("button", { name: "Request plan", exact: true })
@@ -701,11 +738,12 @@ try {
   await page
     .getByRole("heading", { name: "Revised plan context", exact: true })
     .waitFor();
+  await page.getByText(/Current: Save tokens/).waitFor();
   await page
     .getByText("Use a command line interface instead", { exact: true })
     .waitFor();
   console.log(
-    "PASS: desktop launch, renderer isolation, both project intakes, upload approval, source preservation, offline coordinator, command review/stale rejection/restart expiry, local fixture execution with fresh permission and persisted results, task/profile persistence. No live provider request.",
+    "PASS: desktop launch, renderer isolation, both project intakes, usage preset and cost budget persistence, upload approval, source preservation, offline coordinator, command review/stale rejection/restart expiry, local fixture execution with fresh permission and persisted results, task/profile persistence. No live provider request.",
   );
 } finally {
   if (app) await app.close();

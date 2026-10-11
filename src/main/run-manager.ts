@@ -3,6 +3,17 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
 import { Store } from "./store";
+import { validUsageStart, type UsageStart } from "../shared/usage";
+import type { UsageAlert } from "../shared/usage-alerts";
+import {
+  chooseUsagePolicy,
+  defaultUsagePolicy,
+  expandsUsage,
+  requiredCalls,
+  type UsagePolicyChoice,
+  type UsagePolicy,
+} from "../shared/usage-policy";
+import { requestLimit } from "../shared/coordination";
 import { commandRevision } from "../engine/revision";
 import { assessLocalCriterion } from "../shared/check-criteria";
 import {
@@ -41,20 +52,135 @@ export class RunManager {
   private active: {
     id: string;
     child: UtilityProcess;
+    acknowledged: number;
+    limit: number;
+    kind: "core" | "specialist";
+    outputTokens: number;
+    pendingOutputTokens?: number;
   } | null = null;
   private activeReply: {
     id: string;
     child: UtilityProcess;
     replyId: string;
+    acknowledged: number;
+    outputTokens: number;
   } | null = null;
   private replyTicket: ReplyReview | null = null;
+  private usageReview: {
+    token: string;
+    revision: string;
+    expiresAt: number;
+  } | null = null;
+  private heldUsage = new Map<
+    string,
+    {
+      runId: string;
+      child: UtilityProcess;
+      scope: "reply" | "coordinator";
+      value: UsageStart;
+    }
+  >();
   constructor(
     private store: Store,
     private dataRoot: string,
     private publish: (run: Run) => void,
     private metricSink: MetricSink = noopSink,
+    private notifyUsageAlert: (alert: UsageAlert) => void = () => {},
   ) {
     store.recoverRuns();
+  }
+  usageAlertsForRun(id: unknown) {
+    const run = this.store.getRun(id);
+    return {
+      ...this.store.alertsForRun(run.id),
+      waiting: [...this.heldUsage.values()].some(
+        (item) => item.runId === run.id,
+      ),
+    };
+  }
+  costForRun(id: unknown) {
+    const run = this.store.getRun(id);
+    return this.store.costForRun(run.id, run.model || this.config?.model || "");
+  }
+  configureCost(id: unknown, value: unknown) {
+    const run = this.store.getRun(id);
+    const snapshot = this.store.configureCost(
+      run.id,
+      run.model || this.config?.model || "",
+      value,
+    );
+    this.publish(this.store.getRun(run.id));
+    return snapshot;
+  }
+  configureUsageAlerts(id: unknown, value: unknown) {
+    const updated = this.store.configureUsageAlerts(id, value);
+    this.publish(this.store.getRun(id));
+    return {
+      ...updated,
+      waiting: [...this.heldUsage.values()].some(
+        (item) => item.runId === this.store.getRun(id).id,
+      ),
+    };
+  }
+  continueUsage(id: unknown, pauseId: unknown) {
+    const run = this.store.getRun(id);
+    const held = [...this.heldUsage.values()].find(
+      (item) => item.runId === run.id,
+    );
+    if (!held || typeof pauseId !== "string")
+      throw new Error("No active model request is waiting for review");
+    if (
+      !this.acknowledgeUsage(
+        run.id,
+        held.child,
+        held.value,
+        held.scope,
+        pauseId,
+      )
+    )
+      throw new Error("Usage review changed. Review the current pause again.");
+    for (const next of this.heldUsage.values()) {
+      if (next.runId === run.id) {
+        this.acknowledgeUsage(run.id, next.child, next.value, next.scope);
+        break;
+      }
+    }
+    this.publish(this.store.getRun(run.id));
+    return this.usageAlertsForRun(run.id);
+  }
+  saveTokensForRemaining(id: unknown) {
+    const run = this.store.getRun(id);
+    const active = this.active;
+    if (!active || active.id !== run.id || active.kind !== "core")
+      throw new Error("No active coordinator to lower future usage");
+    const target = Math.min(active.outputTokens, 1024);
+    if (target === active.outputTokens) return run;
+    active.pendingOutputTokens = target;
+    active.child.postMessage({ usageOutputTokens: target });
+    return run;
+  }
+  private usageAlertSequence(runId: string) {
+    return this.store.alertsForRun(runId).state.sequence;
+  }
+  private announceUsageAlert(runId: string, before: number) {
+    const snapshot = this.store.alertsForRun(runId);
+    if (
+      snapshot.state.sequence > before &&
+      snapshot.policy.delivery === "desktop" &&
+      snapshot.state.latest
+    ) {
+      try {
+        this.notifyUsageAlert(snapshot.state.latest);
+      } catch {
+        /* Local notification failure does not affect dispatch. */
+      }
+    }
+  }
+  private clearHeld(runId: string, scope?: "reply" | "coordinator") {
+    for (const [key, value] of this.heldUsage) {
+      if (value.runId === runId && (!scope || value.scope === scope))
+        this.heldUsage.delete(key);
+    }
   }
   session() {
     return {
@@ -76,6 +202,7 @@ export class RunManager {
     return updated;
   }
   configureCoordination(id: unknown, value: unknown) {
+    this.usageReview = null;
     const run = this.store.getRun(id);
     if (run.status !== "prepared" || run.calls !== 0 || !run.coordination)
       throw new Error(
@@ -84,6 +211,100 @@ export class RunManager {
     const { settings, rules } = parseCoordinationSettings(value);
     run.coordination.settings = settings;
     run.coordination.rules = rules;
+    if (
+      run.usagePolicy &&
+      run.usagePolicy.earlyReviews !== settings.chunkReviews
+    ) {
+      const task = this.store
+        .load()
+        .tasks.find((item) => item.id === run.taskId);
+      if (!task) throw new Error("Task not found");
+      run.usagePolicy = {
+        ...run.usagePolicy,
+        preset: "custom",
+        earlyReviews: settings.chunkReviews,
+        requestCeiling:
+          requiredCalls(run, task.mode) + (settings.chunkReviews ? 2 : 0),
+      };
+    }
+    this.save(run);
+    return run;
+  }
+  private proposedUsagePolicy(id: unknown, choice: unknown) {
+    if (!this.config) throw new Error("Configure Nebius in Settings first");
+    const run = this.store.getRun(id);
+    if (
+      this.active ||
+      this.activeReply ||
+      !["prepared", "planned"].includes(run.status)
+    )
+      throw new Error("Wait for a stable run before changing usage settings");
+    const task = this.store.load().tasks.find((item) => item.id === run.taskId);
+    if (!task) throw new Error("Task not found");
+    const old =
+      run.usagePolicy ||
+      defaultUsagePolicy(
+        run,
+        task.mode,
+        run.model || this.config.model,
+        run.outputTokens || this.config.outputTokens,
+      );
+    const next = chooseUsagePolicy(
+      run,
+      task.mode,
+      this.config.model,
+      choice as UsagePolicyChoice,
+    );
+    if (run.calls > 0 && run.model && next.model !== run.model)
+      throw new Error("Model cannot change after this run starts");
+    if (
+      next.requestCeiling <
+      Math.max(run.calls, this.store.coreUsageRequests(run.id))
+    )
+      throw new Error("Request ceiling cannot be below calls already made");
+    const revision = createHash("sha256")
+      .update(
+        JSON.stringify({
+          runId: run.id,
+          status: run.status,
+          calls: run.calls,
+          accountedCalls: this.store.coreUsageRequests(run.id),
+          old,
+          next,
+          plan: run.plan,
+          files: run.files,
+        }),
+      )
+      .digest("hex");
+    return { run, old, next, revision };
+  }
+  reviewUsagePolicy(id: unknown, choice: unknown) {
+    this.usageReview = null;
+    const { next, revision } = this.proposedUsagePolicy(id, choice);
+    const token = randomUUID();
+    this.usageReview = { token, revision, expiresAt: Date.now() + 120000 };
+    return { token, policy: next };
+  }
+  configureUsagePolicy(id: unknown, choice: unknown, reviewToken: unknown) {
+    const ticket = this.usageReview;
+    this.usageReview = null;
+    const { run, old, next, revision } = this.proposedUsagePolicy(id, choice);
+    if (
+      expandsUsage(old, next) &&
+      (!ticket ||
+        ticket.token !== reviewToken ||
+        ticket.revision !== revision ||
+        Date.now() >= ticket.expiresAt)
+    )
+      throw new Error("Review this usage increase again");
+    run.usagePolicy = next;
+    if (this.replyTicket?.runId === run.id) this.replyTicket = null;
+    if (run.coordination) {
+      run.coordination.settings = {
+        ownership: run.coordination.settings?.ownership || "",
+        chunkReviews: next.earlyReviews,
+      };
+    }
     this.save(run);
     return run;
   }
@@ -94,6 +315,7 @@ export class RunManager {
       );
     this.config = validateSession(value);
     this.replyTicket = null;
+    this.usageReview = null;
     return this.session();
   }
   select(selection: SourceSelection) {
@@ -142,6 +364,12 @@ export class RunManager {
       model: "",
       outputTokens: 0,
       coordination: makeCoordination(),
+      usagePolicy: defaultUsagePolicy(
+        {} as Run,
+        task.mode,
+        this.config?.model || "",
+        this.config?.outputTokens || 2048,
+      ),
     };
     this.store.saveRun(run);
     return run;
@@ -216,6 +444,9 @@ export class RunManager {
       messageId,
       recipientId,
     );
+    const task = this.store.load().tasks.find((item) => item.id === run.taskId);
+    if (!task) throw new Error("Task not found");
+    const policy = this.checkedRunPolicy(run, task.mode);
     const review: ReplyReview = {
       duringWork: ["planning", "building", "auditing"].includes(run.status),
       recipient,
@@ -226,7 +457,7 @@ export class RunManager {
       revision: createHash("sha256").update(context).digest("hex"),
       expiresAt: Date.now() + 120000,
       model: this.config.model,
-      outputTokens: this.config.outputTokens,
+      outputTokens: policy.outputTokens,
     };
     this.replyTicket = review;
     return review;
@@ -241,7 +472,9 @@ export class RunManager {
     if (
       !this.config ||
       ticket.model !== this.config.model ||
-      ticket.outputTokens !== this.config.outputTokens ||
+      ticket.outputTokens !==
+        (this.store.getRun(ticket.runId).usagePolicy?.outputTokens ||
+          this.config.outputTokens) ||
       Date.now() >= ticket.expiresAt
     )
       throw new Error("Reply review expired or settings changed");
@@ -293,11 +526,19 @@ export class RunManager {
       this.publish(failed);
       return failed;
     }
-    this.activeReply = { id: run.id, child, replyId: reply.id };
+    this.activeReply = {
+      id: run.id,
+      child,
+      replyId: reply.id,
+      acknowledged: 0,
+      outputTokens: ticket.outputTokens,
+    };
     child.on(
       "message",
       (message: {
         metric?: unknown;
+        usageStart?: unknown;
+        usageFinish?: unknown;
         replyStarted?: unknown;
         answer?: unknown;
         failed?: boolean;
@@ -305,6 +546,18 @@ export class RunManager {
         if (this.activeReply?.child !== child) return;
         if (message.metric) {
           emitMetric(this.metricSink, message.metric);
+          return;
+        }
+        if (message.usageStart) {
+          if (this.acknowledgeUsage(run.id, child, message.usageStart, "reply"))
+            this.publish(this.store.getRun(run.id));
+          return;
+        }
+        if (message.usageFinish) {
+          const before = this.usageAlertSequence(run.id);
+          this.store.finishUsage(run.id, message.usageFinish, "reply");
+          this.announceUsageAlert(run.id, before);
+          this.publish(this.store.getRun(run.id));
           return;
         }
         if (message.replyStarted === true) {
@@ -344,7 +597,10 @@ export class RunManager {
         );
     });
     try {
-      child.postMessage({ replyContext: ticket.context, config: this.config });
+      child.postMessage({
+        replyContext: ticket.context,
+        config: { ...this.config, outputTokens: ticket.outputTokens },
+      });
     } catch {
       return this.finishReply(
         run.id,
@@ -364,6 +620,8 @@ export class RunManager {
     const child = this.activeReply?.child;
     this.activeReply = null;
     child?.kill();
+    this.clearHeld(id, "reply");
+    this.store.interruptUsage(id, "reply");
     const current = this.store.getRun(id);
     const reply = current.replies?.find((r) => r.id === replyId);
     if (reply) {
@@ -440,6 +698,12 @@ export class RunManager {
         previousDrafts: structuredClone(parent.drafts),
       },
     };
+    child.usagePolicy = defaultUsagePolicy(
+      child,
+      "plan",
+      this.config?.model || "",
+      this.config?.outputTokens || 2048,
+    );
     parent.redirectedTo = child.id;
     parent.status = "stopped";
     parent.events.push({
@@ -600,6 +864,16 @@ export class RunManager {
           : {}),
       },
     };
+    const task = this.store
+      .load()
+      .tasks.find((item) => item.id === parent.taskId);
+    if (!task) throw new Error("Task not found");
+    child.usagePolicy = defaultUsagePolicy(
+      child,
+      task.mode,
+      this.config?.model || "",
+      this.config?.outputTokens || 2048,
+    );
     child.events.push({
       actor: "system",
       at: new Date().toISOString(),
@@ -622,6 +896,7 @@ export class RunManager {
     approved: unknown,
     specialist?: { kind: AuditKind; revision: unknown },
   ): Run {
+    this.usageReview = null;
     if (approved !== true)
       throw new Error("Explicit upload and usage approval is required");
     if (!this.config) throw new Error("Configure Nebius in Settings first");
@@ -648,16 +923,14 @@ export class RunManager {
     const workspace = this.store.load();
     const task = workspace.tasks.find((t) => t.id === run.taskId);
     if (!task) throw new Error("Task not found");
+    run.usagePolicy = this.checkedRunPolicy(run, task.mode);
     if (
-      run.model &&
-      (run.model !== this.config.model ||
-        run.outputTokens !== this.config.outputTokens)
+      !specialist &&
+      this.store.coreUsageRequests(run.id) >= run.usagePolicy.requestCeiling
     )
-      throw new Error(
-        "Keep the approved run configuration unchanged or prepare a new run",
-      );
+      throw new Error("This run reached its saved request ceiling");
     run.model = this.config.model;
-    run.outputTokens = this.config.outputTokens;
+    run.outputTokens = run.usagePolicy.outputTokens;
     if (specialist) {
       run.specialistAudits ||= [];
       run.specialistAudits.push({
@@ -696,7 +969,14 @@ export class RunManager {
       this.save(queued);
       return queued;
     }
-    this.active = { id: run.id, child };
+    this.active = {
+      id: run.id,
+      child,
+      acknowledged: 0,
+      limit: specialist ? 2 : requestLimit(run),
+      kind: specialist ? "specialist" : "core",
+      outputTokens: run.usagePolicy.outputTokens,
+    };
     child.on(
       "message",
       (message: {
@@ -704,10 +984,53 @@ export class RunManager {
         done?: boolean;
         failed?: boolean;
         metric?: unknown;
+        usageStart?: unknown;
+        usageFinish?: unknown;
+        usageLimitApplied?: unknown;
       }) => {
         if (this.active?.child !== child) return;
         if (message.metric) {
           emitMetric(this.metricSink, message.metric);
+          return;
+        }
+        if (message.usageLimitApplied !== undefined) {
+          if (
+            this.active?.pendingOutputTokens === message.usageLimitApplied &&
+            Number.isSafeInteger(message.usageLimitApplied) &&
+            (message.usageLimitApplied as number) <= this.active.outputTokens
+          ) {
+            this.active.outputTokens = message.usageLimitApplied as number;
+            this.active.pendingOutputTokens = undefined;
+            const current = this.store.getRun(run.id);
+            if (current.usagePolicy) {
+              current.usagePolicy = {
+                ...current.usagePolicy,
+                preset: "custom",
+                outputTokens: this.active.outputTokens,
+              };
+              current.outputTokens = this.active.outputTokens;
+              this.save(current);
+            }
+          }
+          return;
+        }
+        if (message.usageStart) {
+          if (
+            this.acknowledgeUsage(
+              run.id,
+              child,
+              message.usageStart,
+              "coordinator",
+            )
+          )
+            this.publish(this.store.getRun(run.id));
+          return;
+        }
+        if (message.usageFinish) {
+          const before = this.usageAlertSequence(run.id);
+          this.store.finishUsage(run.id, message.usageFinish, "coordinator");
+          this.announceUsageAlert(run.id, before);
+          this.publish(this.store.getRun(run.id));
           return;
         }
         if (message.failed) {
@@ -715,10 +1038,21 @@ export class RunManager {
           return;
         }
         if (message.run && message.run.id === run.id) {
+          const approvedRun = this.store.getRun(run.id);
+          message.run.usagePolicy = approvedRun.usagePolicy;
+          message.run.model = approvedRun.model;
+          message.run.outputTokens = approvedRun.outputTokens;
+          if (message.run.coordination && approvedRun.coordination) {
+            message.run.coordination.settings =
+              approvedRun.coordination.settings;
+            message.run.coordination.rules = approvedRun.coordination.rules;
+          }
           this.save(message.run);
           if (message.done) {
             this.active = null;
             child.kill();
+            this.clearHeld(run.id, "coordinator");
+            this.store.interruptUsage(run.id, "coordinator");
           }
         }
       },
@@ -735,7 +1069,7 @@ export class RunManager {
       run,
       task,
       team: workspace.teammates,
-      config: this.config,
+      config: { ...this.config, outputTokens: run.usagePolicy.outputTokens },
       outputRoot: join(this.dataRoot, "drafts", run.id),
     });
     return queued;
@@ -750,6 +1084,8 @@ export class RunManager {
     const child = this.active.child;
     this.active = null;
     child.kill();
+    this.clearHeld(run.id, "coordinator");
+    this.store.interruptUsage(run.id, "coordinator");
     run.status = "stopped";
     run.inFlightRequests = [];
     interruptAudits(run);
@@ -807,9 +1143,124 @@ export class RunManager {
   }
   close() {
     this.replyTicket = null;
+    this.usageReview = null;
     if (this.active) this.stop(this.active.id);
     if (this.activeReply) this.stopReply(this.activeReply.id);
     this.config = null;
+  }
+  private checkedRunPolicy(run: Run, mode: "plan" | "work"): UsagePolicy {
+    if (!this.config) throw new Error("Configure Nebius in Settings first");
+    const policy =
+      run.usagePolicy ||
+      defaultUsagePolicy(
+        run,
+        mode,
+        run.model || this.config.model,
+        run.outputTokens || this.config.outputTokens,
+      );
+    const checked = chooseUsagePolicy(
+      run,
+      mode,
+      policy.model || this.config.model,
+      policy,
+    );
+    if (
+      checked.outputTokens !== policy.outputTokens ||
+      checked.requestCeiling !== policy.requestCeiling ||
+      checked.earlyReviews !== policy.earlyReviews ||
+      !!run.coordination?.settings?.chunkReviews !== policy.earlyReviews
+    )
+      throw new Error("Saved usage policy is invalid. Review it again");
+    if (policy.model && policy.model !== this.config.model)
+      throw new Error(
+        "Configured model changed. Review and apply a run usage policy again",
+      );
+    if (run.model && run.model !== this.config.model)
+      throw new Error("Keep this run's approved model unchanged");
+    return { ...policy, model: this.config.model };
+  }
+  private acceptUsageStart(
+    value: unknown,
+    scope: "reply" | "coordinator",
+    expectedOutputTokens: number,
+  ): value is UsageStart {
+    return (
+      validUsageStart(value) &&
+      value.model === this.config?.model &&
+      value.maxOutputTokens === expectedOutputTokens &&
+      (scope === "reply"
+        ? value.stage === "answer_question"
+        : value.stage !== "answer_question")
+    );
+  }
+  private rejectUsage(child: UtilityProcess, value: unknown) {
+    if (validUsageStart(value)) {
+      this.heldUsage.delete(value.id);
+      try {
+        child.postMessage({ usageRejected: value.id });
+      } catch {
+        /* Worker may already have exited. */
+      }
+    }
+  }
+  private acknowledgeUsage(
+    runId: string,
+    child: UtilityProcess,
+    value: unknown,
+    scope: "reply" | "coordinator",
+    pauseId?: string,
+  ) {
+    try {
+      const active = scope === "reply" ? this.activeReply : this.active;
+      if (
+        !active ||
+        active.child !== child ||
+        (scope === "reply"
+          ? active.acknowledged >= 1
+          : this.active!.kind === "core"
+            ? this.store.coreUsageRequests(runId) >= this.active!.limit
+            : active.acknowledged >= this.active!.limit)
+      ) {
+        this.rejectUsage(child, value);
+        return false;
+      }
+      if (
+        !this.acceptUsageStart(
+          value,
+          scope,
+          pauseId && validUsageStart(value) && this.heldUsage.has(value.id)
+            ? value.maxOutputTokens
+            : active.outputTokens,
+        ) ||
+        (scope === "coordinator" &&
+          (this.active!.kind === "core"
+            ? value.stage === "specialist_audit"
+            : value.stage !== "specialist_audit"))
+      ) {
+        this.rejectUsage(child, value);
+        return false;
+      }
+      const before = this.usageAlertSequence(runId);
+      const result = this.store.reserveUsage(runId, value, pauseId);
+      this.announceUsageAlert(runId, before);
+      if (result === "paused") {
+        this.heldUsage.set(value.id, { runId, child, scope, value });
+        this.publish(this.store.getRun(runId));
+        return false;
+      }
+      if (result !== "allowed") {
+        if (pauseId === undefined) this.rejectUsage(child, value);
+        return false;
+      }
+      this.heldUsage.delete(value.id);
+      child.postMessage({ usageAcknowledged: value.id });
+      active.acknowledged++;
+      return true;
+    } catch {
+      this.rejectUsage(child, value);
+      // The worker cannot dispatch without a durable acknowledgment.
+      return false;
+    }
   }
   private save(run: Run) {
     this.store.saveRun(run);
@@ -820,6 +1271,8 @@ export class RunManager {
     const child = this.active?.child;
     this.active = null;
     child?.kill();
+    this.clearHeld(id, "coordinator");
+    this.store.interruptUsage(id, "coordinator");
     run.status = "failed";
     run.inFlightRequests = [];
     interruptAudits(run);

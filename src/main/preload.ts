@@ -55,10 +55,24 @@ const api: DesktopAPI = {
   prepareRun: (taskId, sourceId, paths) =>
     ipcRenderer.invoke("run:prepare", taskId, sourceId, paths),
   runs: (taskId) => ipcRenderer.invoke("run:list", taskId),
+  usageForRun: (id) => ipcRenderer.invoke("usage:run", id),
+  usageAlertsForRun: (id) => ipcRenderer.invoke("usage:alerts", id),
+  costForRun: (id) => ipcRenderer.invoke("usage:cost", id),
+  configureCost: (id, value) =>
+    ipcRenderer.invoke("usage:cost:configure", id, value),
+  configureUsageAlerts: (id, value) =>
+    ipcRenderer.invoke("usage:alerts:configure", id, value),
+  continueUsage: (id, pauseId) =>
+    ipcRenderer.invoke("usage:continue", id, pauseId),
+  saveTokensForRemaining: (id) => ipcRenderer.invoke("usage:save", id),
   session: () => ipcRenderer.invoke("session:info"),
   configureCoordination: (id, settings) =>
     ipcRenderer.invoke("coordination:configure", id, settings),
   configureSession: (value) => ipcRenderer.invoke("session:configure", value),
+  reviewUsagePolicy: (id, choice) =>
+    ipcRenderer.invoke("usage:review", id, choice),
+  configureUsagePolicy: (id, choice, reviewToken) =>
+    ipcRenderer.invoke("usage:configure", id, choice, reviewToken),
   startRun: (id, approved) => ipcRenderer.invoke("run:start", id, approved),
   stopRun: (id) => ipcRenderer.invoke("run:stop", id),
   reviewApply: (id) => ipcRenderer.invoke("apply:review", id),

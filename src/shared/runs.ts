@@ -97,6 +97,7 @@ export type Run = {
   calls: number;
   model: string;
   outputTokens: number;
+  usagePolicy?: import("./usage-policy").UsagePolicy;
   commands?: CommandProposal[];
   executions?: ExecutionResult[];
   cloudExecutions?: CloudExecution[];
@@ -167,8 +168,35 @@ export type RunAPI = {
     paths: string[],
   ) => Promise<Run>;
   runs: (taskId: string) => Promise<Run[]>;
+  usageForRun: (id: string) => Promise<import("./usage").UsageSnapshot>;
+  usageAlertsForRun: (
+    id: string,
+  ) => Promise<import("./usage-alerts").UsageAlertSnapshot>;
+  costForRun: (id: string) => Promise<import("./model-cost").CostSnapshot>;
+  configureCost: (
+    id: string,
+    value: import("./model-cost").CostSettings,
+  ) => Promise<import("./model-cost").CostSnapshot>;
+  configureUsageAlerts: (
+    id: string,
+    value: import("./usage-alerts").UsageAlertPolicy,
+  ) => Promise<import("./usage-alerts").UsageAlertSnapshot>;
+  continueUsage: (
+    id: string,
+    pauseId: string,
+  ) => Promise<import("./usage-alerts").UsageAlertSnapshot>;
+  saveTokensForRemaining: (id: string) => Promise<Run>;
   session: () => Promise<SessionInfo>;
   configureSession: (config: SessionConfig) => Promise<SessionInfo>;
+  configureUsagePolicy: (
+    id: string,
+    choice: import("./usage-policy").UsagePolicyChoice,
+    reviewToken: string | null,
+  ) => Promise<Run>;
+  reviewUsagePolicy: (
+    id: string,
+    choice: import("./usage-policy").UsagePolicyChoice,
+  ) => Promise<{ token: string; policy: import("./usage-policy").UsagePolicy }>;
   startRun: (id: string, approved: boolean) => Promise<Run>;
   stopRun: (id: string) => Promise<Run>;
   decideCommand: (

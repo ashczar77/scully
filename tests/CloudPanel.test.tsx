@@ -54,6 +54,9 @@ it("shows exact files and command and requires a fresh cloud consent", async () 
   const api = bridge();
   render(<CloudPanel api={api} run={run} />);
   await screen.findByText("Cloud project: project-fixture");
+  expect(screen.getByText(/Sandbox price is unknown here/)).toHaveTextContent(
+    "model-only USD warning budget does not cover it",
+  );
   fireEvent.change(
     screen.getByLabelText("Search sandbox image tags by prefix"),
     { target: { value: "node" } },
@@ -63,6 +66,9 @@ it("shows exact files and command and requires a fresh cloud consent", async () 
   fireEvent.click(selected);
   expect(selected).toHaveAttribute("aria-pressed", "true");
   fireEvent.click(screen.getByRole("button", { name: /Review cloud check/ }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "dollar cost is unknown",
+  );
   await waitFor(() =>
     expect(api.resolveCloudExecutable).toHaveBeenCalledWith(
       "run",

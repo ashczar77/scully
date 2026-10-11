@@ -6,6 +6,7 @@ import {
   net,
   session,
   dialog,
+  Notification,
 } from "electron";
 import { join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -103,6 +104,13 @@ app
       app.getPath("userData"),
       (run) => win?.webContents.send("run:update", run),
       metrics.record,
+      () => {
+        if (Notification.isSupported())
+          new Notification({
+            title: "Scully usage alert",
+            body: "Open Scully to review this run's usage.",
+          }).show();
+      },
     );
     executions = new ExecutionManager(store, app.getPath("userData"), (run) =>
       win?.webContents.send("run:update", run),
@@ -186,6 +194,42 @@ app
     ipcMain.handle("run:list", (event, taskId) => {
       trusted(event);
       return store.runs(taskId);
+    });
+    ipcMain.handle("usage:run", (event, id) => {
+      trusted(event);
+      return store.usageForRun(id);
+    });
+    ipcMain.handle("usage:alerts", (event, id) => {
+      trusted(event);
+      return runs.usageAlertsForRun(id);
+    });
+    ipcMain.handle("usage:cost", (event, id) => {
+      trusted(event);
+      return runs.costForRun(id);
+    });
+    metricHandle("usage:cost:configure", (event, id, value) => {
+      trusted(event);
+      return runs.configureCost(id, value);
+    });
+    metricHandle("usage:alerts:configure", (event, id, value) => {
+      trusted(event);
+      return runs.configureUsageAlerts(id, value);
+    });
+    metricHandle("usage:continue", (event, id, pauseId) => {
+      trusted(event);
+      return runs.continueUsage(id, pauseId);
+    });
+    metricHandle("usage:save", (event, id) => {
+      trusted(event);
+      return runs.saveTokensForRemaining(id);
+    });
+    metricHandle("usage:review", (event, id, choice) => {
+      trusted(event);
+      return runs.reviewUsagePolicy(id, choice);
+    });
+    metricHandle("usage:configure", (event, id, choice, reviewToken) => {
+      trusted(event);
+      return runs.configureUsagePolicy(id, choice, reviewToken);
     });
     ipcMain.handle("session:info", (event) => {
       trusted(event);

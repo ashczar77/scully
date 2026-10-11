@@ -24,6 +24,9 @@ import { SpecialistPanel } from "./SpecialistPanel";
 import { requestLimit } from "../shared/coordination";
 import { compareCorrection } from "../shared/correction-evidence";
 import { InFlightStatus } from "./InFlightStatus";
+import { UsagePolicyPanel } from "./UsagePolicyPanel";
+import { UsageAlertsPanel } from "./UsageAlertsPanel";
+import { CostPanel } from "./CostPanel";
 export function ConnectionSettings({ api }: { api: DesktopAPI }) {
   const [info, setInfo] = useState<SessionInfo>({
     configured: false,
@@ -104,8 +107,8 @@ export function ConnectionSettings({ api }: { api: DesktopAPI }) {
           />
         </label>
         <p className="muted">
-          Key kept in memory for this app session only. New team runs make at
-          most 4 requests, or 6 with optional early reviews, each with a
+          Key kept in memory for this app session only. The output limit seeds
+          new runs; each run can choose a saved usage preset. Requests have a
           90-second deadline and no retries. Token limits are not a currency
           spending cap. Confirm free credits and account billing limits before
           starting.
@@ -135,6 +138,9 @@ export function RunPanel({
 }) {
   const [history, setHistory] = useState<Run[]>([]);
   const [run, setRun] = useState<Run | null>(null);
+  const [usage, setUsage] = useState<
+    import("../shared/usage").UsageSnapshot | null
+  >(null);
   const [source, setSource] = useState<SourceSelection | null>(null);
   const [kind, setKind] = useState<"new" | "existing">("new");
   const [selected, setSelected] = useState<string[]>([]);
@@ -143,6 +149,22 @@ export function RunPanel({
   const [approved, setApproved] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [connection, setConnection] = useState<SessionInfo | null>(null);
+  useEffect(() => {
+    setUsage(null);
+    if (!run) return;
+    let active = true;
+    api
+      .usageForRun(run.id)
+      .then((value) => {
+        if (active) setUsage(value);
+      })
+      .catch(() => {
+        if (active) setUsage(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [api, run]);
   useEffect(() => {
     let active = true;
     api
@@ -317,6 +339,48 @@ export function RunPanel({
               {run.calls}/{requestLimit(run)} requests
             </span>
           </div>
+          <p className="muted" aria-label="Model token usage">
+            {usage
+              ? `${usage.inputTokens.toLocaleString()} input + ${usage.outputTokens.toLocaleString()} output tokens reported across ${usage.measured} measured ${usage.measured === 1 ? "request" : "requests"}. ${usage.pending} pending (up to ${usage.pendingMaxOutputTokens.toLocaleString()} output tokens requested; input unknown). ${usage.unknown} ${usage.unknown === 1 ? "request has" : "requests have"} unknown usage.`
+              : "Model token usage is unavailable."}
+          </p>
+          <UsagePolicyPanel
+            run={run}
+            mode={task.mode}
+            session={connection}
+            api={api}
+            onUpdate={(next) => {
+              setApproved(false);
+              setRun(next);
+              setHistory((items) => [
+                next,
+                ...items.filter((item) => item.id !== next.id),
+              ]);
+            }}
+          />
+          <UsageAlertsPanel
+            run={run}
+            usage={usage}
+            api={api}
+            onSaveTokens={() => {
+              void act(async () => {
+                await api.saveTokensForRemaining(run.id);
+              });
+            }}
+            onStop={() => {
+              void act(async () => {
+                const replying = run.replies?.some(
+                  (reply) => reply.status === "answering",
+                );
+                setRun(
+                  replying && !active
+                    ? await api.stopReply(run.id)
+                    : await api.stopRun(run.id),
+                );
+              });
+            }}
+          />
+          <CostPanel run={run} api={api} />
           <InFlightStatus run={run} team={team} />
           <TeamMessages
             key={`messages-${run.id}`}
@@ -456,9 +520,9 @@ export function RunPanel({
                     ? "Two writer requests in parallel and one final auditor request."
                     : "One builder request and one auditor request."}{" "}
                 {run.coordination &&
-                  `Start working uses at most ${requestLimit(run) - 1} requests. Plan first adds one planning request, for at most ${requestLimit(run)} total. ${run.coordination.settings?.chunkReviews ? "Includes up to two early chunk reviews." : "Early reviews are disabled."}`}{" "}
-                Uses the model and output limit configured in Settings. Your
-                source project stays untouched. No generated code or shell
+                  `The saved coordinator ceiling is ${requestLimit(run)} requests across this run; up to ${Math.max(0, requestLimit(run) - run.calls)} remain. ${run.coordination.settings?.chunkReviews ? "Includes up to two optional early chunk reviews." : "Early reviews are disabled."}`}{" "}
+                Uses the saved run model and output limit shown in Run usage.
+                Your source project stays untouched. No generated code or shell
                 commands run.
               </p>
               <label className="consent">

@@ -1,8 +1,12 @@
+import { reportedUsage, type ReportedUsage } from "../shared/usage";
+
 export type Completion = {
   system: string;
   input: string;
   name: string;
   schema: object;
+  onUsage?: (usage: ReportedUsage | null) => void;
+  maxOutputTokens?: number;
 };
 export type Model = { complete: (request: Completion) => Promise<unknown> };
 export function nebiusModel(
@@ -11,6 +15,13 @@ export function nebiusModel(
 ): Model {
   return {
     async complete(request) {
+      const maxOutputTokens = request.maxOutputTokens ?? config.outputTokens;
+      if (
+        !Number.isSafeInteger(maxOutputTokens) ||
+        maxOutputTokens < 512 ||
+        maxOutputTokens > 4096
+      )
+        throw new Error("Invalid output token limit");
       const body = JSON.stringify({
         model: config.model,
         messages: [
@@ -19,7 +30,7 @@ export function nebiusModel(
         ],
         store: false,
         stream: false,
-        max_tokens: config.outputTokens,
+        max_tokens: maxOutputTokens,
         temperature: 0.6,
         top_p: 0.95,
         n: 1,
@@ -75,6 +86,11 @@ export function nebiusModel(
         await reader.cancel();
       }
       const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      try {
+        request.onUsage?.(reportedUsage(value.usage));
+      } catch {
+        // Usage recording must not change the result of a model request.
+      }
       const choice = value.choices?.[0];
       const calls = choice?.message?.tool_calls;
       if (

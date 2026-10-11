@@ -117,7 +117,9 @@ export function makeCoordination(): Coordination {
 export function requestLimit(run: {
   coordination?: Coordination;
   correction?: unknown;
+  usagePolicy?: { requestCeiling: number };
 }) {
+  if (run.usagePolicy) return run.usagePolicy.requestCeiling;
   if (run.correction) return 2;
   return run.coordination
     ? run.coordination.settings?.chunkReviews

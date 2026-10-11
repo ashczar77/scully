@@ -4,6 +4,10 @@ import { expect, it, vi } from "vitest";
 import { RunPanel } from "../src/renderer/RunPanel";
 import type { DesktopAPI } from "../src/shared/contracts";
 import type { Run } from "../src/shared/runs";
+import {
+  defaultUsageAlertPolicy,
+  emptyUsageAlertState,
+} from "../src/shared/usage-alerts";
 const task = {
   id: "task",
   title: "Build",
@@ -37,10 +41,63 @@ function api() {
       .fn()
       .mockResolvedValue({ configured: false, model: "", outputTokens: 2048 }),
     runs: vi.fn().mockResolvedValue([run]),
+    usageForRun: vi.fn().mockResolvedValue({
+      requests: 0,
+      measured: 0,
+      unknown: 0,
+      pending: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      pendingMaxOutputTokens: 0,
+    }),
+    usageAlertsForRun: vi.fn().mockResolvedValue({
+      policy: defaultUsageAlertPolicy,
+      state: emptyUsageAlertState(),
+      waiting: false,
+    }),
+    costForRun: vi.fn().mockResolvedValue({
+      model: "",
+      settings: { budgetCents: null, manualRate: null },
+      rate: null,
+      referenceRate: null,
+      rateStatus: "unknown",
+      totals: {
+        verifiedNanoUsd: 0,
+        estimatedNanoUsd: 0,
+        unpricedMeasured: 0,
+        unknownUsage: 0,
+        pendingProjectedNanoUsd: 0,
+        unpricedPending: 0,
+      },
+      nextProjectedNanoUsd: null,
+      budgetExposureNanoUsd: 0,
+    }),
+    configureCost: vi.fn(),
+    configureUsageAlerts: vi.fn(),
+    continueUsage: vi.fn(),
+    saveTokensForRemaining: vi.fn(),
     onRun: vi.fn().mockReturnValue(() => {}),
     startRun: vi.fn().mockResolvedValue({ ...run, status: "building" }),
   } as unknown as DesktopAPI;
 }
+it("shows measured, pending and unknown usage separately", async () => {
+  const bridge = api();
+  bridge.usageForRun = vi.fn().mockResolvedValue({
+    requests: 3,
+    measured: 1,
+    unknown: 1,
+    pending: 1,
+    inputTokens: 120,
+    outputTokens: 40,
+    pendingMaxOutputTokens: 1024,
+  });
+  render(<RunPanel api={bridge} task={task} />);
+  await waitFor(() =>
+    expect(screen.getByLabelText("Model token usage")).toHaveTextContent(
+      "120 input + 40 output tokens reported across 1 measured request. 1 pending (up to 1,024 output tokens requested; input unknown). 1 request has unknown usage.",
+    ),
+  );
+});
 it.each(["approved", "denied"] as const)(
   "records an individual %s decision without dispatching execution",
   async (decision) => {

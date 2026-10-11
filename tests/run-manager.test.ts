@@ -23,6 +23,200 @@ import { RunManager } from "../src/main/run-manager";
 import { commandRevision } from "../src/engine/revision";
 import { snapshotRevision } from "../src/engine/integration";
 import { findingKey } from "../src/shared/audits";
+import { defaultUsageAlertPolicy } from "../src/shared/usage-alerts";
+
+it("holds the next worker request, consumes one current continuation, and rejects stale or stopped approval", () => {
+  const c = setup();
+  try {
+    c.manager.configure({
+      key: "fixture-key",
+      model: "model",
+      outputTokens: 1024,
+    });
+    const run = c.manager.prepare(c.task.id, null, []);
+    c.manager.configureUsageAlerts(run.id, {
+      ...defaultUsageAlertPolicy,
+      budgetTokens: 10000,
+      requestAllowanceTokens: 6000,
+    });
+    c.manager.start(run.id, true);
+    const worker = vi.mocked(utilityProcess.fork).mock.results.at(-1)!.value;
+    const send = (id: string) =>
+      worker.emit("message", {
+        usageStart: {
+          id,
+          stage: "propose_files",
+          model: "model",
+          maxOutputTokens: 1024,
+        },
+      });
+    send("11111111-1111-4111-8111-111111111111");
+    send("22222222-2222-4222-8222-222222222222");
+    expect(c.store.usageForRun(run.id)).toMatchObject({
+      requests: 1,
+      pending: 1,
+    });
+    expect(
+      worker.postMessage.mock.calls.filter(
+        ([value]: any[]) => value.usageAcknowledged,
+      ),
+    ).toHaveLength(1);
+    const paused = c.manager.usageAlertsForRun(run.id);
+    expect(paused.waiting).toBe(true);
+    expect(paused.state.pauseReason).toBe("budget");
+    expect(() => c.manager.continueUsage(run.id, "stale")).toThrow();
+    c.manager.continueUsage(run.id, paused.state.pauseId);
+    expect(c.store.usageForRun(run.id).requests).toBe(2);
+    expect(() =>
+      c.manager.continueUsage(run.id, paused.state.pauseId),
+    ).toThrow();
+    send("33333333-3333-4333-8333-333333333333");
+    expect(c.manager.usageAlertsForRun(run.id).waiting).toBe(true);
+    c.manager.stop(run.id);
+    expect(() =>
+      c.manager.continueUsage(
+        run.id,
+        c.manager.usageAlertsForRun(run.id).state.pauseId,
+      ),
+    ).toThrow();
+    expect(c.store.usageForRun(run.id).requests).toBe(2);
+  } finally {
+    c.cleanup();
+  }
+});
+
+it("warning-only permits unknown usage but never lifts the saved coordinator ceiling", () => {
+  const c = setup();
+  try {
+    c.manager.configure({
+      key: "fixture-key",
+      model: "model",
+      outputTokens: 1024,
+    });
+    const run = c.manager.prepare(c.task.id, null, []);
+    c.manager.configureUsageAlerts(run.id, {
+      ...defaultUsageAlertPolicy,
+      mode: "warn",
+      budgetTokens: 1000,
+      requestAllowanceTokens: 1024,
+    });
+    c.manager.start(run.id, true);
+    const worker = vi.mocked(utilityProcess.fork).mock.results.at(-1)!.value;
+    for (let n = 1; n <= 5; n++)
+      worker.emit("message", {
+        usageStart: {
+          id: `0000000${n}-0000-4000-8000-000000000000`,
+          stage: "propose_files",
+          model: "model",
+          maxOutputTokens: 1024,
+        },
+      });
+    expect(c.store.usageForRun(run.id).requests).toBe(4);
+    worker.emit("message", {
+      usageFinish: {
+        id: "00000001-0000-4000-8000-000000000000",
+        usage: null,
+      },
+    });
+    expect(c.store.usageForRun(run.id).unknown).toBe(1);
+    expect(c.manager.usageAlertsForRun(run.id).state.pauseId).toBeNull();
+    expect(
+      c.manager
+        .usageAlertsForRun(run.id)
+        .state.recent.some((a) => a.kind === "budget"),
+    ).toBe(true);
+  } finally {
+    c.cleanup();
+  }
+});
+
+it("lowers only future worker output after its acknowledgment", () => {
+  const c = setup();
+  try {
+    c.manager.configure({
+      key: "fixture-key",
+      model: "model",
+      outputTokens: 2048,
+    });
+    const run = c.manager.prepare(c.task.id, null, []);
+    c.manager.start(run.id, true);
+    const worker = vi.mocked(utilityProcess.fork).mock.results.at(-1)!.value;
+    c.manager.saveTokensForRemaining(run.id);
+    expect(worker.postMessage.mock.calls.at(-1)?.[0]).toEqual({
+      usageOutputTokens: 1024,
+    });
+    expect(c.store.getRun(run.id).usagePolicy?.outputTokens).toBe(2048);
+    worker.emit("message", { usageLimitApplied: 1024 });
+    expect(c.store.getRun(run.id).usagePolicy?.outputTokens).toBe(1024);
+    worker.emit("message", {
+      usageStart: {
+        id: "11111111-1111-4111-8111-111111111111",
+        stage: "propose_files",
+        model: "model",
+        maxOutputTokens: 1024,
+      },
+    });
+    expect(c.store.usageForRun(run.id).requests).toBe(1);
+    expect(() => c.manager.saveTokensForRemaining("other")).toThrow();
+  } finally {
+    c.cleanup();
+  }
+});
+
+it("uses desktop notification only after opt-in and ignores notification failure", () => {
+  const notify = vi.fn(() => {
+    throw new Error("notifications blocked");
+  });
+  const c = setup(notify);
+  try {
+    c.manager.configure({
+      key: "fixture-key",
+      model: "model",
+      outputTokens: 1024,
+    });
+    const run = c.manager.prepare(c.task.id, null, []);
+    c.manager.configureUsageAlerts(run.id, {
+      ...defaultUsageAlertPolicy,
+      budgetTokens: 1000,
+      requestAllowanceTokens: 1024,
+    });
+    c.manager.start(run.id, true);
+    const worker = vi.mocked(utilityProcess.fork).mock.results.at(-1)!.value;
+    worker.emit("message", {
+      usageStart: {
+        id: "11111111-1111-4111-8111-111111111111",
+        stage: "propose_files",
+        model: "model",
+        maxOutputTokens: 1024,
+      },
+    });
+    expect(notify).not.toHaveBeenCalled();
+    expect(c.manager.usageAlertsForRun(run.id).waiting).toBe(true);
+    c.manager.stop(run.id);
+    const opted = c.manager.prepare(c.task.id, null, []);
+    c.manager.configureUsageAlerts(opted.id, {
+      ...defaultUsageAlertPolicy,
+      budgetTokens: 1000,
+      requestAllowanceTokens: 1024,
+      delivery: "desktop",
+    });
+    c.manager.start(opted.id, true);
+    const next = vi.mocked(utilityProcess.fork).mock.results.at(-1)!.value;
+    next.emit("message", {
+      usageStart: {
+        id: "22222222-2222-4222-8222-222222222222",
+        stage: "propose_files",
+        model: "model",
+        maxOutputTokens: 1024,
+      },
+    });
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(c.manager.usageAlertsForRun(opted.id).waiting).toBe(true);
+    expect(c.store.usageForRun(opted.id).requests).toBe(0);
+  } finally {
+    c.cleanup();
+  }
+});
 it("answers from frozen progress without stopping or overwriting an active build", () => {
   const c = setup();
   try {
@@ -572,6 +766,27 @@ it("gates specialist dispatch by permission, revision, idle execution and a pers
     ).toThrow("active");
     const child = vi.mocked(utilityProcess.fork).mock.results.at(-1)!.value;
     expect(child.postMessage.mock.calls[0][0].specialist).toBe(true);
+    child.emit("message", {
+      usageStart: {
+        id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        stage: "propose_files",
+        model: "model",
+        maxOutputTokens: 1024,
+      },
+    });
+    child.emit("message", {
+      usageStart: {
+        id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        stage: "specialist_audit",
+        model: "model",
+        maxOutputTokens: 1024,
+      },
+    });
+    expect(
+      child.postMessage.mock.calls.filter(
+        ([message]: any[]) => message.usageAcknowledged,
+      ),
+    ).toHaveLength(1);
     c.manager.stop(run.id);
     expect(c.store.getRun(run.id).specialistAudits![0].status).toBe("failed");
     run.specialistAudits = Array.from({ length: 3 }, () => ({
@@ -591,11 +806,409 @@ it("gates specialist dispatch by permission, revision, idle execution and a pers
     c.cleanup();
   }
 });
-function setup() {
+it("accounts for coordinator and reply requests separately and ignores late usage after stop", () => {
+  const c = setup();
+  try {
+    c.manager.configure({
+      key: "fixture-key",
+      model: "model",
+      outputTokens: 1024,
+    });
+    const run = c.manager.prepare(c.task.id, null, []);
+    c.manager.start(run.id, true);
+    const build = vi.mocked(utilityProcess.fork).mock.results.at(-1)!.value;
+    const buildId = "11111111-1111-4111-8111-111111111111";
+    const replyId = "22222222-2222-4222-8222-222222222222";
+    build.emit("message", {
+      usageStart: {
+        id: buildId,
+        stage: "propose_files",
+        model: "model",
+        maxOutputTokens: 1024,
+      },
+    });
+    expect(build.postMessage).toHaveBeenCalledWith({
+      usageAcknowledged: buildId,
+    });
+    build.emit("message", {
+      usageStart: {
+        id: "33333333-3333-4333-8333-333333333333",
+        stage: "answer_question",
+        model: "model",
+        maxOutputTokens: 1024,
+      },
+    });
+    build.emit("message", {
+      usageStart: {
+        id: "44444444-4444-4444-8444-444444444444",
+        stage: "propose_files",
+        model: "wrong-model",
+        maxOutputTokens: 1024,
+      },
+    });
+    build.emit("message", {
+      usageStart: {
+        id: "99999999-9999-4999-8999-999999999999",
+        stage: "specialist_audit",
+        model: "model",
+        maxOutputTokens: 1024,
+      },
+    });
+    expect(c.store.usageForRun(run.id).requests).toBe(1);
+    expect(
+      build.postMessage.mock.calls.filter(
+        ([message]: any[]) => message.usageAcknowledged,
+      ),
+    ).toHaveLength(1);
+    expect(
+      build.postMessage.mock.calls.filter(
+        ([message]: any[]) => message.usageRejected,
+      ),
+    ).toHaveLength(3);
+    const noted = c.manager.sendTeamMessage(run.id, {
+      text: "Status?",
+      intent: "continue",
+    });
+    const review = c.manager.reviewReply(run.id, noted.messages![0].id);
+    c.manager.answerMessage(review.token, true);
+    const reply = vi.mocked(utilityProcess.fork).mock.results.at(-1)!.value;
+    reply.emit("message", {
+      usageStart: {
+        id: replyId,
+        stage: "answer_question",
+        model: "model",
+        maxOutputTokens: 1024,
+      },
+    });
+    expect(c.store.usageForRun(run.id).pending).toBe(2);
+    c.manager.stopReply(run.id);
+    expect(c.store.usageForRun(run.id)).toMatchObject({
+      pending: 1,
+      unknown: 1,
+    });
+    reply.emit("message", {
+      usageFinish: {
+        id: replyId,
+        usage: { inputTokens: 99, outputTokens: 99 },
+      },
+    });
+    build.emit("message", {
+      usageFinish: { id: buildId, usage: { inputTokens: 20, outputTokens: 8 } },
+    });
+    build.emit("message", {
+      usageFinish: { id: buildId, usage: { inputTokens: 20, outputTokens: 8 } },
+    });
+    expect(c.store.usageForRun(run.id)).toEqual({
+      requests: 2,
+      measured: 1,
+      unknown: 1,
+      pending: 0,
+      inputTokens: 20,
+      outputTokens: 8,
+      pendingMaxOutputTokens: 0,
+    });
+    const stoppedId = "55555555-5555-4555-8555-555555555555";
+    build.emit("message", {
+      usageStart: {
+        id: stoppedId,
+        stage: "audit_files",
+        model: "model",
+        maxOutputTokens: 1024,
+      },
+    });
+    expect(c.manager.usageAlertsForRun(run.id).state.pauseReason).toBe(
+      "unknown",
+    );
+    expect(c.store.usageForRun(run.id).requests).toBe(2);
+    c.manager.continueUsage(
+      run.id,
+      c.manager.usageAlertsForRun(run.id).state.pauseId,
+    );
+    c.manager.stop(run.id);
+    build.emit("message", {
+      usageFinish: {
+        id: stoppedId,
+        usage: { inputTokens: 100, outputTokens: 50 },
+      },
+    });
+    expect(c.store.usageForRun(run.id)).toMatchObject({
+      requests: 3,
+      measured: 1,
+      unknown: 2,
+      inputTokens: 20,
+      outputTokens: 8,
+    });
+  } finally {
+    c.cleanup();
+  }
+});
+
+it("does not crash or acknowledge a request when usage acknowledgment cannot reach the worker", () => {
+  const c = setup();
+  try {
+    c.manager.configure({
+      key: "fixture-key",
+      model: "model",
+      outputTokens: 1024,
+    });
+    const run = c.manager.prepare(c.task.id, null, []);
+    c.manager.start(run.id, true);
+    const child = vi.mocked(utilityProcess.fork).mock.results.at(-1)!.value;
+    child.postMessage.mockImplementationOnce(() => {
+      throw new Error("worker exited");
+    });
+    const id = "66666666-6666-4666-8666-666666666666";
+    expect(() =>
+      child.emit("message", {
+        usageStart: {
+          id,
+          stage: "propose_plan",
+          model: "model",
+          maxOutputTokens: 1024,
+        },
+      }),
+    ).not.toThrow();
+    expect(
+      child.postMessage.mock.calls.filter(
+        ([message]: any[]) => message.usageAcknowledged,
+      ),
+    ).toHaveLength(1);
+    expect(
+      child.postMessage.mock.calls.filter(
+        ([message]: any[]) => message.usageRejected,
+      ),
+    ).toHaveLength(1);
+    c.manager.stop(run.id);
+    expect(c.store.usageForRun(run.id)).toMatchObject({
+      measured: 0,
+      unknown: 1,
+      pending: 0,
+    });
+  } finally {
+    c.cleanup();
+  }
+});
+
+it("persists reviewed presets, binds worker settings and rejects extra dispatches", () => {
+  const c = setup();
+  try {
+    c.manager.configure({
+      key: "fixture-key",
+      model: "model",
+      outputTokens: 2048,
+    });
+    const run = c.manager.prepare(c.task.id, null, []);
+    expect(run.usagePolicy).toMatchObject({
+      preset: "custom",
+      outputTokens: 2048,
+      requestCeiling: 4,
+    });
+    expect(() =>
+      c.manager.configureUsagePolicy(run.id, { preset: "thorough" }, null),
+    ).toThrow("Review");
+    const review = c.manager.reviewUsagePolicy(run.id, { preset: "thorough" });
+    const selected = c.manager.configureUsagePolicy(
+      run.id,
+      { preset: "thorough" },
+      review.token,
+    );
+    expect(selected.usagePolicy).toMatchObject({
+      preset: "thorough",
+      outputTokens: 4096,
+      requestCeiling: 5,
+      earlyReviews: true,
+    });
+    expect(selected.coordination?.settings?.chunkReviews).toBe(true);
+    c.manager.start(run.id, true);
+    const worker = vi.mocked(utilityProcess.fork).mock.results.at(-1)!.value;
+    expect(worker.postMessage.mock.calls[0][0].config.outputTokens).toBe(4096);
+    for (let i = 1; i <= 6; i++) {
+      const id = `0000000${i}-0000-4000-8000-000000000000`;
+      worker.emit("message", {
+        usageStart: {
+          id,
+          stage: "propose_files",
+          model: "model",
+          maxOutputTokens: 4096,
+        },
+      });
+    }
+    expect(
+      worker.postMessage.mock.calls.filter(
+        ([message]: any[]) => message.usageAcknowledged,
+      ),
+    ).toHaveLength(5);
+    expect(c.store.usageForRun(run.id).requests).toBe(5);
+    worker.emit("message", {
+      run: {
+        ...c.store.getRun(run.id),
+        usagePolicy: { ...selected.usagePolicy, requestCeiling: 100 },
+      },
+    });
+    expect(c.store.getRun(run.id).usagePolicy?.requestCeiling).toBe(5);
+  } finally {
+    c.cleanup();
+  }
+});
+
+it("applies Save tokens after a planning pause only to future requests", () => {
+  const c = setup();
+  try {
+    c.manager.configure({
+      key: "fixture-key",
+      model: "model",
+      outputTokens: 2048,
+    });
+    const task = c.store.createTask({
+      title: "Plan it",
+      description: "Plan first",
+      mode: "plan",
+    });
+    const run = c.manager.prepare(task.id, null, []);
+    c.manager.start(run.id, true);
+    const planning = vi.mocked(utilityProcess.fork).mock.results.at(-1)!.value;
+    expect(planning.postMessage.mock.calls[0][0].config.outputTokens).toBe(
+      2048,
+    );
+    planning.emit("message", {
+      usageStart: {
+        id: "77777777-7777-4777-8777-777777777777",
+        stage: "propose_plan",
+        model: "model",
+        maxOutputTokens: 2048,
+      },
+    });
+    expect(c.store.coreUsageRequests(run.id)).toBe(1);
+    planning.emit("message", {
+      usageFinish: {
+        id: "77777777-7777-4777-8777-777777777777",
+        usage: { inputTokens: 20, outputTokens: 10 },
+      },
+    });
+    planning.emit("message", {
+      run: {
+        ...c.store.getRun(run.id),
+        status: "planned",
+        plan: "Proceed",
+        calls: 1,
+      },
+      done: true,
+    });
+    const saved = c.manager.configureUsagePolicy(
+      run.id,
+      { preset: "save" },
+      null,
+    );
+    expect(saved.usagePolicy).toMatchObject({
+      preset: "save",
+      outputTokens: 1024,
+      requestCeiling: 4,
+      earlyReviews: false,
+    });
+    c.manager.start(run.id, true);
+    const build = vi.mocked(utilityProcess.fork).mock.results.at(-1)!.value;
+    expect(build.postMessage.mock.calls[0][0].config.outputTokens).toBe(1024);
+    expect(build.postMessage.mock.calls[0][0].run.calls).toBe(1);
+    for (let i = 1; i <= 4; i++)
+      build.emit("message", {
+        usageStart: {
+          id: `8888888${i}-8888-4888-8888-888888888888`,
+          stage: "propose_files",
+          model: "model",
+          maxOutputTokens: 1024,
+        },
+      });
+    expect(
+      build.postMessage.mock.calls.filter(
+        ([message]: any[]) => message.usageAcknowledged,
+      ),
+    ).toHaveLength(3);
+    expect(c.store.coreUsageRequests(run.id)).toBe(4);
+    expect(() =>
+      c.manager.configureUsagePolicy(run.id, { preset: "thorough" }, null),
+    ).toThrow("stable");
+  } finally {
+    c.cleanup();
+  }
+});
+
+it("rejects a forged saved policy before any provider or reply worker starts", () => {
+  const c = setup();
+  try {
+    c.manager.configure({
+      key: "fixture-key",
+      model: "model",
+      outputTokens: 2048,
+    });
+    const run = c.manager.prepare(c.task.id, null, []);
+    run.usagePolicy!.requestCeiling = 100;
+    c.store.saveRun(run);
+    const count = vi.mocked(utilityProcess.fork).mock.calls.length;
+    expect(() => c.manager.start(run.id, true)).toThrow("policy");
+    const message = c.manager.sendTeamMessage(run.id, {
+      text: "Status?",
+      intent: "continue",
+    });
+    expect(() =>
+      c.manager.reviewReply(run.id, message.messages![0].id),
+    ).toThrow("policy");
+    expect(vi.mocked(utilityProcess.fork).mock.calls).toHaveLength(count);
+  } finally {
+    c.cleanup();
+  }
+});
+
+it("binds usage increases to one review and rejects a changed or replayed choice", () => {
+  const c = setup();
+  try {
+    c.manager.configure({
+      key: "fixture-key",
+      model: "model",
+      outputTokens: 2048,
+    });
+    const run = c.manager.prepare(c.task.id, null, []);
+    const review = c.manager.reviewUsagePolicy(run.id, { preset: "thorough" });
+    expect(() =>
+      c.manager.configureUsagePolicy(
+        run.id,
+        {
+          preset: "custom",
+          outputTokens: 3000,
+          requestCeiling: 4,
+          earlyReviews: false,
+        },
+        review.token,
+      ),
+    ).toThrow("Review");
+    expect(() =>
+      c.manager.configureUsagePolicy(
+        run.id,
+        { preset: "thorough" },
+        review.token,
+      ),
+    ).toThrow("Review");
+    const fresh = c.manager.reviewUsagePolicy(run.id, { preset: "thorough" });
+    const changed = c.store.getRun(run.id);
+    changed.plan = "changed after review";
+    c.store.saveRun(changed);
+    expect(() =>
+      c.manager.configureUsagePolicy(
+        run.id,
+        { preset: "thorough" },
+        fresh.token,
+      ),
+    ).toThrow("Review");
+    expect(c.store.getRun(run.id).usagePolicy?.requestCeiling).toBe(4);
+  } finally {
+    c.cleanup();
+  }
+});
+
+function setup(notify?: () => void) {
   const root = mkdtempSync(join(tmpdir(), "scully-manager-"));
   const store = new Store(join(root, "test.sqlite"));
   const publish = vi.fn();
-  const manager = new RunManager(store, root, publish);
+  const manager = new RunManager(store, root, publish, undefined, notify);
   const task = store.createTask({
     title: "Task",
     description: "Test",

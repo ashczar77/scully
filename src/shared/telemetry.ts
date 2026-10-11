@@ -32,6 +32,12 @@ export const operations = [
   "apply:write",
   "apply:inspect",
   "coordination:configure",
+  "usage:configure",
+  "usage:review",
+  "usage:alerts:configure",
+  "usage:cost:configure",
+  "usage:continue",
+  "usage:save",
   "session:configure",
   "model.request",
 ] as const;
