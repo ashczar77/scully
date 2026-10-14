@@ -4,6 +4,7 @@ import { expect, it, vi } from "vitest";
 import { RunPanel } from "../src/renderer/RunPanel";
 import type { DesktopAPI } from "../src/shared/contracts";
 import type { Run } from "../src/shared/runs";
+import { initialTeam } from "../src/shared/contracts";
 import {
   defaultUsageAlertPolicy,
   emptyUsageAlertState,
@@ -31,6 +32,82 @@ const run: Run = {
   model: "",
   outputTokens: 0,
 };
+it("shows the exact saved team attached to a prepared run", async () => {
+  const bridge = api();
+  bridge.runs = vi.fn().mockResolvedValue([
+    {
+      ...run,
+      teamSnapshot: {
+        id: "team-v1",
+        name: "Security team",
+        version: 2,
+        createdAt: "now",
+        members: initialTeam,
+      },
+    },
+  ]);
+  render(<RunPanel api={bridge} task={task} />);
+  expect(
+    await screen.findByText(/Saved team for this run: Security team v2/),
+  ).toBeInTheDocument();
+});
+it("keeps a completed event's identity when the current profile is renamed", async () => {
+  const bridge = api();
+  bridge.runs = vi.fn().mockResolvedValue([
+    {
+      ...run,
+      status: "complete",
+      events: [
+        {
+          actor: "ellis",
+          actorName: "Earlier name",
+          actorRole: "Security reviewer",
+          actorPortraitId: initialTeam[1].portraitId,
+          text: "Review recorded",
+          at: "2026-10-12T12:00:00.000Z",
+        },
+      ],
+    },
+  ]);
+  render(
+    <RunPanel
+      api={bridge}
+      task={task}
+      team={initialTeam.map((person) =>
+        person.id === "ellis"
+          ? { ...person, name: "Current name", role: "Architect" }
+          : person,
+      )}
+    />,
+  );
+  expect(
+    await screen.findByText("Earlier name · Security reviewer"),
+  ).toBeInTheDocument();
+  expect(screen.queryByText("Current name · Auditor")).not.toBeInTheDocument();
+});
+it("renders recorded identity as text instead of markup", async () => {
+  const bridge = api();
+  bridge.runs = vi.fn().mockResolvedValue([
+    {
+      ...run,
+      status: "complete",
+      events: [
+        {
+          actor: "ellis",
+          actorName: "<img src=x onerror=alert(1)>",
+          actorRole: "Reviewer",
+          text: "Safe display",
+          at: "2026-10-12T12:00:00.000Z",
+        },
+      ],
+    },
+  ]);
+  const { container } = render(<RunPanel api={bridge} task={task} />);
+  expect(
+    await screen.findByText("<img src=x onerror=alert(1)> · Reviewer"),
+  ).toBeInTheDocument();
+  expect(container.querySelector(".run-event img")).toBeNull();
+});
 function api() {
   return {
     cloudImages: vi.fn(),
@@ -80,6 +157,57 @@ function api() {
     startRun: vi.fn().mockResolvedValue({ ...run, status: "building" }),
   } as unknown as DesktopAPI;
 }
+it("offers a fresh source choice and blocks consent when task details changed", async () => {
+  const bridge = api();
+  bridge.runs = vi.fn().mockResolvedValue([
+    {
+      ...run,
+      taskSnapshot: {
+        title: "Old title",
+        description: task.description,
+        mode: task.mode,
+      },
+    },
+  ]);
+  render(<RunPanel api={bridge} task={task} />);
+  expect(
+    await screen.findByText(/Task details changed after this run/),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("checkbox", { name: /I approve this upload/ }),
+  ).toBeDisabled();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Change project source" }),
+  );
+  expect(
+    screen.getByRole("radio", { name: "Existing project" }),
+  ).toBeInTheDocument();
+  expect(bridge.startRun).not.toHaveBeenCalled();
+});
+it("shows compact run settings without empty token accounting in the task room", async () => {
+  const openSettings = vi.fn();
+  render(
+    <RunPanel
+      api={api()}
+      task={task}
+      settingsView="summary"
+      onOpenSettings={openSettings}
+    />,
+  );
+  const usage = await screen.findByRole("button", { name: /Run usage/ });
+  expect(screen.queryByLabelText("Model token usage")).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("region", { name: "Run usage policy" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: /Usage alerts/ }),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: /Model cost estimates/ }),
+  ).toBeInTheDocument();
+  fireEvent.click(usage);
+  expect(openSettings).toHaveBeenCalledOnce();
+});
 it("shows measured, pending and unknown usage separately", async () => {
   const bridge = api();
   bridge.usageForRun = vi.fn().mockResolvedValue({

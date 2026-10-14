@@ -6,8 +6,607 @@ import { expect, it } from "vitest";
 import { Store } from "../src/main/store";
 import { DatabaseSync } from "node:sqlite";
 import type { Run } from "../src/shared/runs";
+import { initialTeam } from "../src/shared/contracts";
 import { defaultUsageAlertPolicy } from "../src/shared/usage-alerts";
 import { emptyCostSettings } from "../src/shared/model-cost";
+
+it("persists fixed-cast membership and keeps each earlier task roster after restart", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scully-variable-team-"));
+  let db: Store | undefined;
+  try {
+    const path = join(dir, "test.sqlite");
+    db = new Store(path);
+    const originalTask = db.createTask({
+      title: "Original",
+      description: "",
+      mode: "work",
+    });
+    const firstSnapshot = db.teamForTask(originalTask.id);
+    const originalTeam = db.defaultTeam();
+    const lean = db.saveTeam({
+      name: originalTeam.name,
+      ...originalTeam.roster!,
+      memberIds: ["pearl", "maya", "ellis"],
+      activeTesterId: null,
+      expectedDefaultTeamId: originalTeam.id,
+      saveMode: "overwrite",
+    });
+    const leanTask = db.createTask({
+      title: "Lean",
+      description: "",
+      mode: "work",
+    });
+    db.saveTeam({
+      name: lean.name,
+      ...lean.roster!,
+      memberIds: [...lean.roster!.memberIds, "sloane"],
+      expectedDefaultTeamId: lean.id,
+      saveMode: "overwrite",
+    });
+    db.close();
+    db = new Store(path);
+    expect(db.defaultTeam().members).toHaveLength(4);
+    expect(db.defaultTeam().members.at(-1)).toMatchObject({
+      id: "sloane",
+      runRole: "reserve",
+    });
+    expect(db.teamForTask(originalTask.id)).toEqual(firstSnapshot);
+    expect(db.teamForTask(leanTask.id).members).toEqual(lean.members);
+  } finally {
+    db?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("updates one library team while preserving task snapshots, deletion recovery and the team limit", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scully-team-library-"));
+  let db: Store | undefined;
+  try {
+    const path = join(dir, "test.sqlite");
+    db = new Store(path);
+    const original = db.defaultTeam();
+    const task = db.createTask({
+      title: "Before edit",
+      description: "",
+      mode: "work",
+    });
+    const snapshot = db.teamForTask(task.id);
+    const revised = db.saveTeam({
+      name: "Night watch",
+      ...original.roster!,
+      memberIds: [...original.roster!.memberIds, "meryl"],
+      activeAuditorId: "meryl",
+      expectedDefaultTeamId: original.id,
+      saveMode: "overwrite",
+    });
+    expect(revised.id).toBe(original.id);
+    expect(db.teamForTask(task.id)).toEqual(snapshot);
+    expect(
+      db.savedTeams().filter((team) => team.kind === "library"),
+    ).toHaveLength(1);
+    expect(() => db!.deleteTeam(revised.id)).toThrow(/another team/i);
+    const separate = db.saveTeam({
+      name: "Release",
+      ...revised.roster!,
+      expectedDefaultTeamId: revised.id,
+      saveMode: "new",
+    });
+    db.setDefaultTeam(separate.id);
+    db.deleteTeam(revised.id);
+    expect(
+      db.savedTeams().find((team) => team.id === revised.id)?.deletedAt,
+    ).toBeTruthy();
+    expect(() => db!.setDefaultTeam(revised.id)).toThrow();
+    db.restoreTeam(revised.id);
+    expect(db.teamForTask(task.id)).toEqual(snapshot);
+    db.close();
+    db = new Store(path);
+    expect(db.defaultTeam().id).toBe(separate.id);
+    expect(db.teamForTask(task.id)).toEqual(snapshot);
+    expect(
+      db.savedTeams().filter((team) => team.kind === "library"),
+    ).toHaveLength(2);
+  } finally {
+    db?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("limits available teams to 20 and validates deletion and restoration boundaries", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scully-team-limit-"));
+  let db: Store | undefined;
+  try {
+    db = new Store(join(dir, "test.sqlite"));
+    const first = db.defaultTeam();
+    for (let index = 1; index < 20; index++) {
+      const current = db.defaultTeam();
+      db.saveTeam({
+        name: `Team ${index}`,
+        ...current.roster!,
+        expectedDefaultTeamId: current.id,
+        saveMode: "new",
+      });
+    }
+    const current = db.defaultTeam();
+    expect(() =>
+      db!.saveTeam({
+        name: "Team 20",
+        ...current.roster!,
+        expectedDefaultTeamId: current.id,
+        saveMode: "new",
+      }),
+    ).toThrow(/up to 20/i);
+    expect(() => db!.deleteTeam("unknown")).toThrow(/not found/i);
+    expect(() => db!.restoreTeam(first.id)).toThrow(/already available/i);
+    db.deleteTeam(first.id);
+    expect(() => db!.restoreTeam(first.id)).not.toThrow();
+    db.deleteTeam(first.id);
+    db.saveTeam({
+      name: "Replacement",
+      ...current.roster!,
+      expectedDefaultTeamId: current.id,
+      saveMode: "new",
+    });
+    expect(() => db!.restoreTeam(first.id)).toThrow(/up to 20/i);
+    expect(
+      db.savedTeams().find((team) => team.id === first.id)?.deletedAt,
+    ).toBeTruthy();
+    const available = db.defaultTeam();
+    expect(() =>
+      db!.saveTeam({
+        name: "Team 1",
+        ...available.roster!,
+        expectedDefaultTeamId: first.id,
+        saveMode: "overwrite",
+      }),
+    ).toThrow(/current team changed/i);
+  } finally {
+    db?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("rejects restore when an available team already uses the deleted name", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scully-team-name-"));
+  let db: Store | undefined;
+  try {
+    db = new Store(join(dir, "test.sqlite"));
+    const original = db.defaultTeam();
+    const other = db.saveTeam({
+      name: "Other",
+      ...original.roster!,
+      expectedDefaultTeamId: original.id,
+      saveMode: "new",
+    });
+    db.deleteTeam(original.id);
+    db.saveTeam({
+      name: original.name,
+      ...other.roster!,
+      expectedDefaultTeamId: other.id,
+      saveMode: "new",
+    });
+    expect(() => db!.restoreTeam(original.id)).toThrow(
+      /already uses that name/i,
+    );
+    expect(
+      db.savedTeams().find((team) => team.id === original.id)?.deletedAt,
+    ).toBeTruthy();
+  } finally {
+    db?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("migrates old task bindings into snapshots and preserves the selected library team", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scully-team-migrate-v9-"));
+  let db: Store | undefined;
+  try {
+    const path = join(dir, "test.sqlite");
+    db = new Store(path);
+    const task = db.createTask({
+      title: "Before migration",
+      description: "",
+      mode: "plan",
+    });
+    const snapshot = db.teamForTask(task.id);
+    db.close();
+    db = undefined;
+    const raw = new DatabaseSync(path);
+    raw.exec("DROP TABLE team_library; PRAGMA user_version=9");
+    raw
+      .prepare("UPDATE team_default SET teamId=? WHERE singleton=1")
+      .run(snapshot.id);
+    raw.close();
+    db = new Store(path);
+    const current = db.defaultTeam();
+    expect(current.id).not.toBe(snapshot.id);
+    expect(current.roster?.memberIds).toEqual([
+      "pearl",
+      "maya",
+      "ellis",
+      "jun",
+    ]);
+    db.saveTeam({
+      name: "After migration",
+      ...current.roster!,
+      expectedDefaultTeamId: current.id,
+      saveMode: "overwrite",
+    });
+    expect(db.teamForTask(task.id)).toEqual(snapshot);
+  } finally {
+    db?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("saves immutable named team versions and binds each task to its creation team", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scully-saved-teams-"));
+  let db: Store | undefined;
+  try {
+    db = new Store(join(dir, "test.sqlite"));
+    const original = db
+      .load()
+      .savedTeams!.find((team) => team.id === db!.load().defaultTeamId)!;
+    const first = db.createTask({
+      title: "First",
+      description: "",
+      mode: "work",
+    });
+    const firstSnapshot = db.teamForTask(first.id);
+    const next = db.saveTeam({
+      name: "Security team",
+      ...original.roster!,
+      memberIds: [...original.roster!.memberIds, "meryl"],
+      activeAuditorId: "meryl",
+    });
+    expect(next).toMatchObject({ name: "Security team", version: 1 });
+    expect(() =>
+      db!.saveTeam({
+        name: "Another team",
+        ...next.roster!,
+        expectedDefaultTeamId: original.id,
+        saveMode: "new",
+      }),
+    ).toThrow(/current team changed/i);
+    expect(() =>
+      db!.saveTeam({
+        name: "security TEAM",
+        ...next.roster!,
+        expectedDefaultTeamId: next.id,
+        saveMode: "new",
+      }),
+    ).toThrow(/different name/i);
+    const revised = db.saveTeam({
+      name: "Security team",
+      ...next.roster!,
+      memberIds: [...next.roster!.memberIds, "tessa"],
+      activeBuilderId: "tessa",
+      expectedDefaultTeamId: next.id,
+      saveMode: "overwrite",
+    });
+    expect(revised.version).toBe(2);
+    const second = db.createTask({
+      title: "Second",
+      description: "",
+      mode: "work",
+    });
+    const secondSnapshot = db.teamForTask(second.id);
+    expect(db.teamForTask(first.id).members).toEqual(original.members);
+    expect(db.teamForTask(second.id).members).toEqual(revised.members);
+    db.setDefaultTeam(original.id);
+    expect(db.load().teammates).toEqual(original.members);
+    expect(db.teamForTask(second.id).members).toEqual(revised.members);
+    expect(() => db!.saveTeam({ name: "", ...revised.roster! })).toThrow();
+    expect(() =>
+      db!.saveTeam({ name: "Broken", ...revised.roster!, memberIds: ["maya"] }),
+    ).toThrow();
+    expect(() => db!.setDefaultTeam("missing")).toThrow();
+    db.close();
+    db = new Store(join(dir, "test.sqlite"));
+    expect(db.teamForTask(first.id).id).toBe(firstSnapshot.id);
+    expect(db.teamForTask(second.id).id).toBe(secondSnapshot.id);
+    expect(
+      db.load().savedTeams?.filter((team) => team.kind === "library"),
+    ).toHaveLength(2);
+  } finally {
+    db?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("keeps an updated team in one family and a new team in another after reopen", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scully-team-families-"));
+  let db: Store | undefined;
+  try {
+    const path = join(dir, "test.sqlite");
+    db = new Store(path);
+    const original = db.defaultTeam();
+    const firstTask = db.createTask({
+      title: "First",
+      description: "",
+      mode: "plan",
+    });
+    const firstSnapshot = db.teamForTask(firstTask.id);
+    const updated = db.saveTeam({
+      name: "Cerberus",
+      ...original.roster!,
+      expectedDefaultTeamId: original.id,
+      saveMode: "overwrite",
+    });
+    expect(updated.familyId).toBe(original.familyId);
+    expect(updated.version).toBe(2);
+    const separate = db.saveTeam({
+      name: "Release reviewers",
+      ...updated.roster!,
+      expectedDefaultTeamId: updated.id,
+      saveMode: "new",
+    });
+    expect(separate.familyId).not.toBe(updated.familyId);
+    expect(separate.version).toBe(1);
+    const nextTask = db.createTask({
+      title: "Second",
+      description: "",
+      mode: "plan",
+    });
+    const nextSnapshot = db.teamForTask(nextTask.id);
+    expect(db.teamForTask(firstTask.id)).toEqual(firstSnapshot);
+    expect(nextSnapshot.members).toEqual(separate.members);
+    db.close();
+    db = new Store(path);
+    expect(db.defaultTeam().familyId).toBe(separate.familyId);
+    expect(
+      db
+        .savedTeams()
+        .filter(
+          (team) =>
+            team.kind === "library" && team.familyId === original.familyId,
+        ),
+    ).toHaveLength(1);
+    expect(db.teamForTask(firstTask.id)).toEqual(firstSnapshot);
+  } finally {
+    db?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("groups old same-name team states during the version 8 migration", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scully-team-family-migrate-"));
+  let db: Store | undefined;
+  try {
+    const path = join(dir, "test.sqlite");
+    const old = new DatabaseSync(path);
+    old.exec(
+      "CREATE TABLE teammates (id TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL, bio TEXT NOT NULL, instructions TEXT NOT NULL, portraitId TEXT NOT NULL); CREATE TABLE saved_teams (id TEXT PRIMARY KEY, name TEXT NOT NULL, version INTEGER NOT NULL, createdAt TEXT NOT NULL, members TEXT NOT NULL); CREATE TABLE team_default (singleton INTEGER PRIMARY KEY, teamId TEXT NOT NULL); CREATE TABLE task_teams (taskId TEXT PRIMARY KEY, teamId TEXT NOT NULL); PRAGMA user_version=8",
+    );
+    const insert = old.prepare("INSERT INTO saved_teams VALUES (?,?,?,?,?)");
+    insert.run(
+      "old-1",
+      "Scully team",
+      1,
+      "2026-10-12T00:00:00Z",
+      JSON.stringify(initialTeam),
+    );
+    insert.run(
+      "old-2",
+      "Scully team",
+      2,
+      "2026-10-12T01:00:00Z",
+      JSON.stringify(initialTeam),
+    );
+    insert.run(
+      "new-1",
+      "Other team",
+      1,
+      "2026-10-12T02:00:00Z",
+      JSON.stringify(initialTeam),
+    );
+    old.prepare("INSERT INTO team_default VALUES (1,?)").run("old-2");
+    old.close();
+    db = new Store(path);
+    const states = db.savedTeams();
+    expect(states.find((team) => team.id === "old-1")!.familyId).toBe(
+      states.find((team) => team.id === "old-2")!.familyId,
+    );
+    expect(states.find((team) => team.id === "new-1")!.familyId).not.toBe(
+      states.find((team) => team.id === "old-2")!.familyId,
+    );
+  } finally {
+    db?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("keeps recorded actor identity when profile edits are rejected and after database reopen", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scully-event-identity-"));
+  let db: Store | undefined;
+  try {
+    db = new Store(join(dir, "test.sqlite"));
+    const task = db.createTask({
+      title: "History",
+      description: "",
+      mode: "work",
+    });
+    const reviewer = initialTeam.find((member) => member.id === "ellis")!;
+    db.saveRun({
+      id: "identity-run",
+      taskId: task.id,
+      status: "complete",
+      events: [
+        {
+          actor: "ellis",
+          actorName: "Earlier reviewer",
+          actorRole: "Auditor",
+          actorPortraitId: reviewer.portraitId,
+          text: "Reviewed",
+          at: "2026-10-12T12:00:00.000Z",
+        },
+      ],
+    } as Run);
+    expect(() =>
+      db!.updateTeammate({ ...reviewer, name: "New reviewer" }),
+    ).toThrow(/cannot be edited/i);
+    db.close();
+    db = new Store(join(dir, "test.sqlite"));
+    expect(
+      db.load().teammates.find((member) => member.id === "ellis"),
+    ).toMatchObject({ name: "Ellis", role: "Auditor" });
+    expect(db.runs(task.id)[0].events[0]).toMatchObject({
+      actorName: "Earlier reviewer",
+      actorRole: "Auditor",
+      actorPortraitId: reviewer.portraitId,
+    });
+  } finally {
+    db?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("edits a saved task, locks its mode after a run exists, and deletes only its own records", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scully-task-lifecycle-"));
+  let db: Store | undefined;
+  try {
+    db = new Store(join(dir, "test.sqlite"));
+    const first = db.createTask({
+      title: " First ",
+      description: "",
+      mode: "plan",
+    });
+    const other = db.createTask({
+      title: "Keep",
+      description: "",
+      mode: "work",
+    });
+    expect(
+      db.updateTask(first.id, {
+        title: "Changed",
+        description: "Detail",
+        mode: "work",
+      }),
+    ).toMatchObject({
+      id: first.id,
+      title: "Changed",
+      description: "Detail",
+      mode: "work",
+      createdAt: first.createdAt,
+    });
+    db.saveRun({
+      id: "first-run",
+      taskId: first.id,
+      status: "prepared",
+      calls: 0,
+    } as Run);
+    db.saveRun({
+      id: "other-run",
+      taskId: other.id,
+      status: "complete",
+    } as Run);
+    db.configureUsageAlerts("first-run", defaultUsageAlertPolicy);
+    db.configureCost("first-run", "model", emptyCostSettings);
+    db.configureUsageAlerts("other-run", defaultUsageAlertPolicy);
+    expect(() =>
+      db!.updateTask(first.id, { title: "No", description: "", mode: "plan" }),
+    ).toThrow();
+    expect(
+      db.updateTask(first.id, {
+        title: "Renamed",
+        description: "Updated",
+        mode: "work",
+      }).title,
+    ).toBe("Renamed");
+    expect(() =>
+      db!.updateTask("missing", { title: "X", description: "", mode: "work" }),
+    ).toThrow();
+    expect(() => db!.deleteTask("missing")).toThrow();
+    db.deleteTask(first.id);
+    expect(db.load().tasks.map((task) => task.id)).toEqual([other.id]);
+    expect(db.runs(first.id)).toEqual([]);
+    expect(db.runs(other.id)).toHaveLength(1);
+    db.close();
+    const raw = new DatabaseSync(join(dir, "test.sqlite"));
+    for (const table of [
+      "runs",
+      "usage_requests",
+      "usage_totals",
+      "usage_alerts",
+      "usage_cost_settings",
+      "usage_cost_totals",
+    ]) {
+      const key = table === "runs" ? "id" : "runId";
+      expect(
+        raw
+          .prepare(`SELECT count(*) AS n FROM ${table} WHERE ${key}=?`)
+          .get("first-run"),
+      ).toMatchObject({ n: 0 });
+    }
+    expect(
+      raw
+        .prepare("SELECT count(*) AS n FROM usage_alerts WHERE runId=?")
+        .get("other-run"),
+    ).toMatchObject({ n: 1 });
+    raw.close();
+    db = new Store(join(dir, "test.sqlite"));
+    expect(db.load().tasks.map((task) => task.id)).toEqual([other.id]);
+  } finally {
+    db?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("refuses to edit or delete a task with in-flight work", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scully-task-active-"));
+  let db: Store | undefined;
+  try {
+    db = new Store(join(dir, "test.sqlite"));
+    const task = db.createTask({
+      title: "Active",
+      description: "",
+      mode: "work",
+    });
+    db.saveRun({
+      id: "active-run",
+      taskId: task.id,
+      status: "building",
+    } as Run);
+    expect(() =>
+      db!.updateTask(task.id, {
+        title: "Changed",
+        description: "",
+        mode: "work",
+      }),
+    ).toThrow();
+    expect(() => db!.deleteTask(task.id)).toThrow();
+    expect(db.load().tasks).toHaveLength(1);
+    expect(db.runs(task.id)).toHaveLength(1);
+  } finally {
+    db?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("keeps completed task and recovery records available", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scully-task-recovery-"));
+  let db: Store | undefined;
+  try {
+    db = new Store(join(dir, "test.sqlite"));
+    const task = db.createTask({
+      title: "Reviewed",
+      description: "",
+      mode: "work",
+    });
+    db.saveRun({
+      id: "reviewed-run",
+      taskId: task.id,
+      status: "complete",
+      calls: 1,
+    } as Run);
+    expect(() => db!.deleteTask(task.id)).toThrow("saved work");
+    expect(db.load().tasks).toHaveLength(1);
+    expect(db.runs(task.id)).toHaveLength(1);
+  } finally {
+    db?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 it("keeps model cost rates per request through parallel calls, rate changes and restart", () => {
   const dir = mkdtempSync(join(tmpdir(), "scully-cost-"));
@@ -235,28 +834,186 @@ it("reserves projected exposure before parallel dispatch and marks interrupted u
     rmSync(dir, { recursive: true, force: true });
   }
 });
-it("persists real SQLite tasks and profiles across reopen without duplicating defaults", () => {
+it("persists real SQLite tasks and fixed roster across reopen without duplicating defaults", () => {
   const dir = mkdtempSync(join(tmpdir(), "scully-store-"));
   let db: Store | undefined;
   try {
     db = new Store(join(dir, "test.sqlite"));
-    expect(db.load().teammates).toHaveLength(3);
+    expect(db.load().teammates).toHaveLength(4);
     const task = db.createTask({
       title: "Build it",
       description: "Test persistence",
       mode: "plan",
     });
-    db.updateTeammate({ ...db.load().teammates[0], name: "Maya Edited" });
+    const original = db.defaultTeam();
+    db.saveTeam({
+      name: original.name,
+      ...original.roster!,
+      memberIds: [...original.roster!.memberIds, "tessa"],
+      expectedDefaultTeamId: original.id,
+      saveMode: "overwrite",
+    });
     db.close();
     db = undefined;
     db = new Store(join(dir, "test.sqlite"));
     expect(db.load().tasks).toEqual([task]);
-    expect(db.load().teammates).toHaveLength(3);
-    expect(db.load().teammates[0].name).toBe("Maya Edited");
+    expect(db.load().teammates).toHaveLength(5);
+    expect(db.load().teammates.at(-1)?.name).toBe("Tessa");
     expect(() =>
       db!.createTask({ title: " ", mode: "plan", description: "" }),
     ).toThrow();
     expect(db.load().tasks).toHaveLength(1);
+  } finally {
+    db?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("keeps custom v6 profiles in historical snapshots while the new default uses fixed characters", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scully-portrait-migration-"));
+  const path = join(dir, "test.sqlite");
+  let db: Store | undefined;
+  try {
+    const old = new DatabaseSync(path);
+    old.exec(
+      "CREATE TABLE teammates (id TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL, bio TEXT NOT NULL, instructions TEXT NOT NULL); PRAGMA user_version=6",
+    );
+    old
+      .prepare("INSERT INTO teammates VALUES (?,?,?,?,?)")
+      .run(
+        "ellis",
+        "Ellis Edited",
+        "Custom auditor",
+        "Custom bio",
+        "Custom instructions",
+      );
+    old.close();
+    db = new Store(path);
+    expect(db.defaultTeam().members.map(({ id }) => id)).toEqual([
+      "pearl",
+      "maya",
+      "ellis",
+      "jun",
+    ]);
+    const earlier = db.savedTeams().find((team) => team.kind === "snapshot")!;
+    expect(earlier.members.find(({ id }) => id === "ellis")).toMatchObject({
+      name: "Ellis Edited",
+      role: "Custom auditor",
+      bio: "Custom bio",
+      instructions: "Custom instructions",
+      portraitId: "portrait-02",
+    });
+    db.close();
+    db = new Store(path);
+    expect(
+      db.savedTeams().find((team) => team.id === earlier.id)?.members,
+    ).toEqual(earlier.members);
+  } finally {
+    db?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("keeps fixed portraits and rejects profile or image-path changes across restart", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scully-portrait-choice-"));
+  const path = join(dir, "test.sqlite");
+  let db: Store | undefined;
+  try {
+    db = new Store(path);
+    const ellis = db.load().teammates.find(({ id }) => id === "ellis")!;
+    expect(() =>
+      db!.updateTeammate({ ...ellis, portraitId: "file:///secret" }),
+    ).toThrow(/cannot be edited/i);
+    expect(
+      db.load().teammates.find(({ id }) => id === "ellis")!.portraitId,
+    ).toBe("portrait-02");
+    expect(() =>
+      db!.updateTeammate({ ...ellis, portraitId: "portrait-10" }),
+    ).toThrow(/cannot be edited/i);
+    db.close();
+    db = new Store(path);
+    expect(
+      db.load().teammates.find(({ id }) => id === "ellis")!.portraitId,
+    ).toBe("portrait-02");
+  } finally {
+    db?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("rejects old style and profile mutation paths while preserving activity across restart", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scully-team-style-"));
+  const path = join(dir, "test.sqlite");
+  let db: Store | undefined;
+  try {
+    db = new Store(path);
+    db.saveRun({
+      id: "run-style",
+      taskId: "task",
+      events: [{ actor: "maya", text: "Saved", at: "2026-10-12T00:00:00Z" }],
+    } as Run);
+    expect(() => db!.applyTeamStyle("test-first")).toThrow(/cannot be edited/i);
+    expect(() =>
+      db!.updateTeammate({ ...db!.load().teammates[1], name: "Changed" }),
+    ).toThrow(/cannot be edited/i);
+    expect(db.load().activity.byTeammate.maya.recordedEvents).toBe(1);
+    db.close();
+    db = new Store(path);
+    expect(db.load().teammates.map(({ name }) => name)).toEqual([
+      "Pearl",
+      "Maya",
+      "Ellis",
+      "Jun",
+    ]);
+    expect(db.load().activity.byTeammate.maya.recordedEvents).toBe(1);
+    expect(() => db!.applyTeamStyle("risk-review")).toThrow(
+      /cannot be edited/i,
+    );
+  } finally {
+    db?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("loads measured teammate activity from saved runs after a SQLite restart", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scully-activity-"));
+  const path = join(dir, "test.sqlite");
+  let db: Store | undefined;
+  try {
+    db = new Store(path);
+    db.saveRun({
+      id: "run-1",
+      taskId: "task",
+      events: [
+        { actor: "maya", text: "Draft saved", at: "2026-10-12T00:00:00Z" },
+        { actor: "maya", text: "Review requested", at: "2026-10-12T00:01:00Z" },
+        { actor: "system", text: "Paused", at: "2026-10-12T00:02:00Z" },
+      ],
+    } as Run);
+    db.close();
+    db = undefined;
+    db = new Store(path);
+    expect(db.load().activity).toMatchObject({
+      scannedRuns: 1,
+      partial: false,
+      byTeammate: { maya: { recordedEvents: 2, runsWithEvents: 1 } },
+    });
+    db.close();
+    db = undefined;
+    const raw = new DatabaseSync(path);
+    raw
+      .prepare("INSERT INTO runs VALUES (?, ?, ?)")
+      .run("bad", "task", "not json");
+    raw
+      .prepare("INSERT INTO runs VALUES (?, ?, ?)")
+      .run("large", "task", "x".repeat(2000001));
+    raw.close();
+    db = new Store(path);
+    expect(db.load().activity).toMatchObject({
+      scannedRuns: 3,
+      partial: true,
+      byTeammate: { maya: { recordedEvents: 2, runsWithEvents: 1 } },
+    });
   } finally {
     db?.close();
     rmSync(dir, { recursive: true, force: true });

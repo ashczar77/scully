@@ -1,6 +1,15 @@
 import { build as bundle } from "esbuild";
 import { build as renderer } from "vite";
+import { copyFile, mkdir } from "node:fs/promises";
+import { join } from "node:path";
 await renderer();
+await mkdir("dist/branding", { recursive: true });
+await mkdir("dist/fonts", { recursive: true });
+await copyFile(
+  "assets/branding/scully-friendly-nerd-transparent-v1.png",
+  "dist/branding/scully.png",
+);
+await copyFile("assets/fonts/OFL.txt", "dist/fonts/ChelseaMarket-OFL.txt");
 await bundle({
   entryPoints: {
     main: "src/main/main.ts",

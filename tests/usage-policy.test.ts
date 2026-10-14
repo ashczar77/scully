@@ -5,6 +5,30 @@ import {
   defaultUsagePolicy,
   expandsUsage,
 } from "../src/shared/usage-policy";
+import { makeCoordination } from "../src/shared/coordination";
+import { initialTeam } from "../src/shared/contracts";
+
+it("uses the assigned writer count when calculating consent ceilings", () => {
+  const lean = { coordination: makeCoordination(initialTeam.slice(0, 2)) };
+  expect(
+    defaultUsagePolicy(lean as any, "work", "model", 2048).requestCeiling,
+  ).toBe(2);
+  expect(
+    defaultUsagePolicy(lean as any, "plan", "model", 2048).requestCeiling,
+  ).toBe(3);
+  expect(
+    chooseUsagePolicy(lean, "work", "model", { preset: "thorough" })
+      .requestCeiling,
+  ).toBe(3);
+  expect(() =>
+    chooseUsagePolicy(lean, "work", "model", {
+      preset: "custom",
+      outputTokens: 1024,
+      requestCeiling: 2,
+      earlyReviews: true,
+    }),
+  ).toThrow();
+});
 
 it("shows exact preset ceilings for work, planning and correction journeys", () => {
   const work = {};
@@ -98,6 +122,7 @@ it("rejects custom ceilings below required work and invalid output settings", ()
 it("detects expanded allowance while preserving the legacy default", () => {
   const old = defaultUsagePolicy({}, "work", "model", 2048);
   expect(old.requestCeiling).toBe(4);
+  expect(old.preset).toBe("balanced");
   expect(
     expandsUsage(
       old,

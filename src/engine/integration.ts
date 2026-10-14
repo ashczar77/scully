@@ -18,6 +18,7 @@ export function integrate(
   assignments: Assignment[],
   rules: OwnershipRule[] = [],
 ) {
+  const writers = assignments.map((assignment) => assignment.owner);
   const conflicts: { path: string; detail: string }[] = [];
   const claimed = new Map<string, string>();
   const files: SourceFile[] = [];
@@ -35,7 +36,7 @@ export function integrate(
           detail: `Overlapping writers: ${claimed.get(previous)} and ${assignment.owner}. Nothing was integrated.`,
         });
       claimed.set(path, assignment.owner);
-      if (ownerFor(file.path, rules) !== assignment.owner)
+      if (ownerFor(file.path, rules, writers) !== assignment.owner)
         conflicts.push({
           path: file.path,
           detail: `${assignment.owner} edited outside the assigned scope. Nothing was integrated.`,

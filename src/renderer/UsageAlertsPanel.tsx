@@ -14,12 +14,16 @@ export function UsageAlertsPanel({
   api,
   onSaveTokens,
   onStop,
+  compact = false,
+  onOpenSettings = () => {},
 }: {
   run: Run;
   usage: UsageSnapshot | null;
   api: DesktopAPI;
   onSaveTokens: () => void;
   onStop: () => void;
+  compact?: boolean;
+  onOpenSettings?: () => void;
 }) {
   const [snapshot, setSnapshot] = useState<UsageAlertSnapshot | null>(null);
   const [draft, setDraft] = useState<UsageAlertPolicy>(defaultUsageAlertPolicy);
@@ -75,6 +79,39 @@ export function UsageAlertsPanel({
       setBusy(false);
     }
   }
+  if (compact)
+    return (
+      <div className="run-setting-summary-item">
+        <button className="run-setting-card" onClick={onOpenSettings}>
+          <span>Usage alerts</span>
+          <strong>{policy.budgetTokens.toLocaleString()} token budget</strong>
+          <small>
+            {policy.mode === "pause" ? "Pause at limit" : "Warn only"} · Change
+            in Settings
+          </small>
+        </button>
+        {snapshot?.state.latest && (
+          <p role="alert" className="attention">
+            {snapshot.state.latest.text}
+          </p>
+        )}
+        {snapshot?.state.pauseId && snapshot.waiting && (
+          <div className="choice-grid">
+            <button disabled={busy} onClick={continueOnce}>
+              Continue once
+            </button>
+            <button className="secondary" disabled={busy} onClick={onStop}>
+              Stop
+            </button>
+          </div>
+        )}
+        {error && (
+          <p role="alert" className="error">
+            {error}
+          </p>
+        )}
+      </div>
+    );
   return (
     <section className="settings-card" aria-label="Usage alerts and pauses">
       <h3>Usage alerts and pauses</h3>

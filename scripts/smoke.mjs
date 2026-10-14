@@ -21,10 +21,108 @@ try {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.getByRole("heading", { name: "Team room." }).waitFor();
+  await page.getByRole("heading", { name: "Start your first task." }).waitFor();
+  const roomHeading = await page.locator(".room-heading").boundingBox();
+  const welcome = await page.locator(".room-empty").boundingBox();
+  assert(roomHeading && welcome);
+  assert(
+    welcome.y >= roomHeading.y + roomHeading.height &&
+      welcome.y <= roomHeading.y + roomHeading.height + 90,
+    "The welcome card should sit close below the room heading",
+  );
   assert.equal(
-    await page.getByRole("button", { name: "Send message" }).isDisabled(),
+    await page.locator(".brand span").evaluate(async (wordmark) => {
+      await document.fonts.ready;
+      return (
+        getComputedStyle(wordmark).fontFamily.includes("Chelsea Market") &&
+        document.fonts.check('27px "Chelsea Market"')
+      );
+    }),
     true,
   );
+  const emptyMark = await page.locator(".room-empty-icon").boundingBox();
+  const emptyLabel = await page.locator(".room-empty .eyebrow").boundingBox();
+  assert(emptyMark && emptyLabel);
+  assert(emptyMark.y + emptyMark.height <= emptyLabel.y);
+  assert.equal(await page.getByText("Build password reset").count(), 0);
+  assert.equal(
+    await page
+      .locator(".brand-logo")
+      .evaluate((image) => image.naturalWidth > 0),
+    true,
+  );
+  assert(
+    ((await page.locator(".brand-logo").boundingBox())?.width ?? 0) >= 40,
+    "Scully's top-bar logo should be legible beside the wordmark",
+  );
+  const logoBounds = await page.locator(".brand-logo").boundingBox();
+  const wordBounds = await page.locator(".brand span").boundingBox();
+  assert(logoBounds && wordBounds);
+  assert(
+    wordBounds.x - (logoBounds.x + logoBounds.width) <= 3,
+    "The wordmark should sit close to the alien head",
+  );
+  assert.equal(
+    await page
+      .locator(".project-mark img")
+      .evaluate((image) => image.naturalWidth > 0),
+    true,
+  );
+  assert.equal(await page.locator(".team-sidebar .edit-profile").count(), 0);
+  await page.getByRole("button", { name: "Manage team" }).waitFor();
+  assert.equal(
+    await page.getByRole("button", { name: "Send message" }).count(),
+    0,
+  );
+  const startingViewport = page.viewportSize();
+  await page.setViewportSize({ width: 1400, height: 1900 });
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Run usage" }).click();
+  const emptySettingsHeading = await page
+    .getByRole("heading", { name: "Settings", exact: true })
+    .boundingBox();
+  const emptySettingsSwitch = await page
+    .getByRole("button", { name: "Run usage", exact: true })
+    .boundingBox();
+  assert(emptySettingsHeading && emptySettingsSwitch);
+  assert(
+    emptySettingsSwitch.y <
+      emptySettingsHeading.y + emptySettingsHeading.height + 120,
+    "Run usage switcher should stay directly below the heading without a selected task",
+  );
+  await page.getByRole("heading", { name: "Choose a task" }).waitFor();
+  const indicator = page.locator(".settings-section-indicator");
+  assert.notEqual(
+    await indicator.evaluate(
+      (element) => getComputedStyle(element).transitionDuration,
+    ),
+    "0s",
+  );
+  await page.waitForTimeout(300);
+  const indicatorBounds = await indicator.boundingBox();
+  assert(indicatorBounds);
+  assert(
+    Math.abs(
+      indicatorBounds.x +
+        indicatorBounds.width / 2 -
+        (emptySettingsSwitch.x + emptySettingsSwitch.width / 2),
+    ) < 6,
+    "The sliding selection should settle under Run usage",
+  );
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  assert.equal(
+    await indicator.evaluate(
+      (element) => getComputedStyle(element).transitionDuration,
+    ),
+    "0s",
+  );
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.screenshot({
+    path: "test-results/run-usage-empty.png",
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: "Room", exact: true }).click();
+  if (startingViewport) await page.setViewportSize(startingViewport);
   const isolation = await page.evaluate(() => ({
     node: typeof window.require,
     bridge: Object.keys(window.scully),
@@ -41,8 +139,15 @@ try {
       "submitCloud",
       "refreshCloud",
       "createTask",
+      "updateTask",
+      "deleteTask",
       "load",
       "updateTeammate",
+      "applyTeamStyle",
+      "saveTeam",
+      "setDefaultTeam",
+      "deleteTeam",
+      "restoreTeam",
       "selectSource",
       "prepareRun",
       "runs",
@@ -80,17 +185,185 @@ try {
       "onRun",
     ].sort(),
   );
+  const taskDivider = page.getByRole("separator", {
+    name: "Resize task panel",
+  });
+  const teamDivider = page.getByRole("separator", {
+    name: "Resize team panel",
+  });
+  const taskBefore = Number(await taskDivider.getAttribute("aria-valuenow"));
+  const dividerBounds = await taskDivider.boundingBox();
+  assert(dividerBounds);
+  await page.mouse.move(
+    dividerBounds.x + dividerBounds.width / 2,
+    dividerBounds.y + 80,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    dividerBounds.x + dividerBounds.width / 2 + 20,
+    dividerBounds.y + 80,
+    { steps: 5 },
+  );
+  await page.mouse.up();
+  assert(
+    Number(await taskDivider.getAttribute("aria-valuenow")) > taskBefore,
+    "Dragging should widen the task panel",
+  );
+  await teamDivider.focus();
+  const teamBefore = Number(await teamDivider.getAttribute("aria-valuenow"));
+  await page.keyboard.press("ArrowRight");
+  assert.equal(
+    Number(await teamDivider.getAttribute("aria-valuenow")),
+    teamBefore - 20,
+    "Keyboard resizing should narrow the team panel",
+  );
+  for (let index = 0; index < 20; index++)
+    await teamDivider.press("ArrowRight");
+  assert.equal(await teamDivider.getAttribute("aria-valuenow"), "240");
+  assert.equal(
+    await page
+      .locator(".team-cards")
+      .evaluate(
+        (cards) =>
+          getComputedStyle(cards).gridTemplateColumns.split(" ").length,
+      ),
+    1,
+    "Narrow team panels should show readable member rows",
+  );
+  const narrowArt = await page
+    .locator(".team-sidebar .profile-art")
+    .boundingBox();
+  assert(narrowArt);
+  assert(Math.abs(narrowArt.width / narrowArt.height - 1.14) < 0.1);
+  await page.screenshot({
+    path: "test-results/team-panel-narrow.png",
+    fullPage: true,
+  });
+  for (let index = 0; index < 20; index++) await teamDivider.press("ArrowLeft");
+  assert(Number(await teamDivider.getAttribute("aria-valuenow")) >= 400);
+  assert.equal(
+    await page
+      .locator(".team-cards")
+      .evaluate(
+        (cards) =>
+          getComputedStyle(cards).gridTemplateColumns.split(" ").length,
+      ),
+    3,
+  );
+  const wideArt = await page
+    .locator(".team-sidebar .profile-art")
+    .boundingBox();
+  assert(wideArt);
+  assert(Math.abs(wideArt.width / wideArt.height - 1.14) < 0.1);
+  const memberPortrait = await page
+    .locator(".team-card .portrait")
+    .first()
+    .boundingBox();
+  assert(memberPortrait);
+  assert(Math.abs(memberPortrait.width / memberPortrait.height - 0.75) < 0.1);
+  await teamDivider.evaluate((divider) => divider.blur());
+  assert.equal(
+    await teamDivider.evaluate(
+      (divider) => getComputedStyle(divider, "::after").width,
+    ),
+    "1px",
+    "The visible divider should be one pixel wide",
+  );
+  await page.screenshot({
+    path: "test-results/team-panel-wide.png",
+    fullPage: true,
+  });
+  await teamDivider.press("Home");
+  const savedPanelLayout = await page.evaluate(() =>
+    localStorage.getItem("scully-panel-layout-v1"),
+  );
+  assert(savedPanelLayout);
   await page.screenshot({ path: "test-results/room.png", fullPage: true });
   await page.getByRole("button", { name: "New task", exact: false }).click();
+  const newTaskDialog = page.getByRole("dialog", {
+    name: "What shall we build?",
+  });
+  assert.equal(
+    await newTaskDialog.evaluate(
+      (dialog) => getComputedStyle(dialog).overflowY,
+    ),
+    "hidden",
+  );
+  assert.equal(
+    await newTaskDialog
+      .locator(".new-task-scroll")
+      .evaluate((scroll) => getComputedStyle(scroll).scrollbarWidth),
+    "none",
+  );
+  await newTaskDialog.screenshot({ path: "test-results/new-task-dialog.png" });
   await page.getByLabel("Task title").fill("Persistence smoke test");
   await page
     .getByLabel("What should the team know?")
     .fill("Keep existing work intact.");
   await page.getByRole("button", { name: "Save task", exact: true }).click();
   await page.getByText("Your task has a home.").waitFor();
+  await page.getByRole("button", { name: "Edit task" }).click();
+  await page
+    .getByRole("dialog", { name: "Edit task" })
+    .getByLabel("What should the team know?")
+    .fill("Keep existing work intact and review it.");
+  await page.getByRole("button", { name: "Save changes" }).click();
+  assert.equal(
+    (await page.evaluate(async () => (await window.scully.load()).tasks[0]))
+      .description,
+    "Keep existing work intact and review it.",
+  );
+  await page.getByRole("button", { name: "New task", exact: false }).click();
+  await page.getByLabel("Task title").fill("Disposable smoke task");
+  await page.getByRole("button", { name: "Save task", exact: true }).click();
+  const disposableId = await page.evaluate(
+    async () => (await window.scully.load()).tasks[0].id,
+  );
+  await page.getByRole("button", { name: "Prepare private workspace" }).click();
+  await page.getByRole("button", { name: "Delete task" }).click();
+  const deleteDialog = page.getByRole("dialog", { name: "Delete task?" });
+  await deleteDialog.getByRole("button", { name: "Delete task" }).click();
+  await page.getByRole("heading", { name: "Choose a saved task." }).waitFor();
+  assert.equal(
+    await page.evaluate(
+      async (id) => (await window.scully.runs(id)).length,
+      disposableId,
+    ),
+    0,
+  );
+  await page
+    .getByRole("button", { name: "Persistence smoke test", exact: true })
+    .click();
   await page.getByRole("button", { name: "Prepare private workspace" }).click();
   await page.getByRole("button", { name: "Request plan" }).waitFor();
-  await page.getByText(/0 input \+ 0 output tokens reported/).waitFor();
+  await page.getByRole("button", { name: "Change project source" }).click();
+  await page.getByRole("radio", { name: "New project" }).waitFor();
+  await page.getByRole("button", { name: "Prepare private workspace" }).click();
+  await page.getByRole("button", { name: "Request plan" }).waitFor();
+  assert.equal(
+    await page
+      .getByRole("checkbox", { name: /I approve this upload/ })
+      .isChecked(),
+    false,
+  );
+  assert.equal(
+    await page.getByText(/0 input \+ 0 output tokens reported/).count(),
+    0,
+  );
+  await page.getByRole("button", { name: /Run usage/ }).click();
+  const settingsHeadingBounds = await page
+    .getByRole("heading", { name: "Settings", exact: true })
+    .boundingBox();
+  const settingsSwitchBounds = await page
+    .getByRole("button", { name: "Run usage", exact: true })
+    .boundingBox();
+  assert(settingsHeadingBounds && settingsSwitchBounds);
+  assert(
+    settingsSwitchBounds.y <
+      settingsHeadingBounds.y + settingsHeadingBounds.height + 120,
+    "Run usage switcher should stay directly below the settings heading",
+  );
+  await page.getByRole("region", { name: "Run usage policy" }).waitFor();
   await page.getByRole("region", { name: "Usage alerts and pauses" }).waitFor();
   await page.getByText("Configure usage alerts", { exact: true }).click();
   await page.getByLabel("Run token budget").fill("12000");
@@ -103,6 +376,11 @@ try {
   await costPanel.getByText(/USD warning budget: \$2.50/).waitFor();
   await costPanel.getByText(/Nebius Sandboxes: 0 check attempts/).waitFor();
   await costPanel.getByText(/Tavily: not connected in this build/).waitFor();
+  await page.getByRole("button", { name: "Room", exact: true }).click();
+  await page.getByRole("button", { name: /12,000 token budget/ }).waitFor();
+  await page
+    .getByRole("button", { name: /\$2\.50 USD warning budget/ })
+    .waitFor();
   await page.getByRole("region", { name: "Team ownership" }).waitFor();
   assert(
     (
@@ -171,6 +449,17 @@ try {
   await page.getByLabel("Task title").fill("Existing project smoke test");
   await page.getByRole("button", { name: "Save task", exact: true }).click();
   await page.getByLabel("Existing project", { exact: true }).check();
+  const sourceButton = await page
+    .getByRole("button", { name: "Choose source folder" })
+    .boundingBox();
+  const prepareButton = await page
+    .getByRole("button", { name: "Prepare private workspace" })
+    .boundingBox();
+  assert(sourceButton && prepareButton);
+  assert(
+    prepareButton.y >= sourceButton.y + sourceButton.height + 12,
+    "Source selection and preparation should be on separate rows",
+  );
   await page.getByRole("button", { name: "Choose source folder" }).click();
   await page.getByRole("checkbox", { name: "main.py" }).check();
   await page.getByRole("button", { name: "Prepare private workspace" }).click();
@@ -216,7 +505,7 @@ try {
         description: "",
         mode: "work",
       },
-      team: [],
+      team: snapshot.teamSnapshot.members,
       config: {
         key: "not-a-real-key",
         model: "not-a-real-model",
@@ -541,12 +830,157 @@ try {
   await page
     .getByRole("region", { name: "Review and apply" })
     .screenshot({ path: "test-results/apply-result.png" });
-  await page.getByRole("button", { name: "Edit profile", exact: true }).click();
-  await page.getByLabel("Name", { exact: true }).fill("Ellis Test");
-  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+  await page.getByRole("button", { name: "Manage team" }).click();
+  await page
+    .getByRole("region", { name: "Team settings" })
+    .screenshot({ path: "test-results/team-settings.png" });
   await page.getByRole("button", { name: "Open full profile" }).click();
   await page.getByText("Working instructions", { exact: true }).waitFor();
+  const fullArt = await page
+    .locator(".full-profile .profile-art")
+    .boundingBox();
+  const fullPortrait = await page
+    .locator(".full-profile .profile-art .portrait")
+    .boundingBox();
+  assert(fullArt && fullPortrait);
+  assert(Math.abs(fullArt.width - fullPortrait.width) < 2);
+  assert(Math.abs(fullArt.height - fullPortrait.height) < 2);
+  let activityBeforeRestart = await page.evaluate(
+    async () => (await window.scully.load()).activity,
+  );
+  assert(activityBeforeRestart.scannedRuns > 0);
+  assert.equal(
+    await page
+      .locator(".full-profile .profile-stats strong")
+      .first()
+      .textContent(),
+    String(activityBeforeRestart.byTeammate.ellis.recordedEvents),
+  );
+  await page
+    .locator(".full-profile")
+    .getByRole("button", { name: "Refresh activity" })
+    .click();
   await page.screenshot({ path: "test-results/profile.png", fullPage: true });
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  const savedTeamsPanel = page.getByRole("region", { name: "Team settings" });
+  const teamCostPreview = savedTeamsPanel.getByRole("region", {
+    name: "Team and cost preview",
+  });
+  await teamCostPreview.getByText(/4 required model requests/).waitFor();
+  await savedTeamsPanel
+    .getByRole("button", { name: "Choose team members" })
+    .click();
+  const rosterDialog = page.getByRole("dialog", {
+    name: "Choose team members",
+  });
+  assert.equal(
+    await rosterDialog.locator(".fixed-character-choice").count(),
+    16,
+  );
+  assert.equal(await rosterDialog.getByRole("checkbox").count(), 0);
+  const coordinatorCard = await rosterDialog
+    .getByRole("button", { name: "Pearl, Coordinator" })
+    .boundingBox();
+  assert(coordinatorCard && coordinatorCard.width > 250);
+  await rosterDialog.getByRole("button", { name: /Sloane/ }).click();
+  await rosterDialog.getByRole("button", { name: /Tessa/ }).click();
+  await rosterDialog
+    .getByLabel("Builder for current runs")
+    .selectOption("tessa");
+  await rosterDialog.locator(".roster-scroll").evaluate((scroll) => {
+    scroll.scrollTop = 0;
+  });
+  await rosterDialog.screenshot({
+    path: "test-results/fixed-character-roster.png",
+  });
+  await rosterDialog.getByRole("button", { name: "Save team roster" }).click();
+  await savedTeamsPanel
+    .getByRole("heading", { name: "Team members (6/16)" })
+    .waitFor();
+  await teamCostPreview.getByText(/4 required model requests/).waitFor();
+  const teamAfterRoster = await page.evaluate(
+    async () => (await window.scully.load()).teammates,
+  );
+  assert.equal(
+    teamAfterRoster.find((person) => person.id === "sloane").runRole,
+    "reserve",
+  );
+  assert.equal(
+    teamAfterRoster.find((person) => person.id === "tessa").runRole,
+    "builder",
+  );
+  assert.equal(
+    teamAfterRoster.find((person) => person.id === "maya").runRole,
+    "reserve",
+  );
+  await savedTeamsPanel.getByRole("button", { name: "Create team" }).click();
+  await page
+    .getByRole("dialog", { name: "Create team" })
+    .getByRole("textbox", { name: "Team name" })
+    .fill("Desktop smoke team");
+  await page
+    .getByRole("dialog", { name: "Create team" })
+    .getByRole("button", { name: "Create team" })
+    .click();
+  await savedTeamsPanel
+    .getByRole("heading", { name: "Desktop smoke team" })
+    .waitFor();
+  await savedTeamsPanel.screenshot({ path: "test-results/team-library.png" });
+  const teamJourney = await page.evaluate(async () => {
+    const before = await window.scully.load();
+    const task = await window.scully.createTask({
+      title: "Saved team snapshot check",
+      description: "",
+      mode: "work",
+    });
+    const run = await window.scully.prepareRun(task.id, null, []);
+    const current = before.savedTeams.find(
+      (saved) => saved.id === before.defaultTeamId,
+    );
+    const edited = await window.scully.saveTeam({
+      name: "Edited desktop team",
+      ...current.roster,
+      expectedDefaultTeamId: current.id,
+      saveMode: "overwrite",
+    });
+    const previous = before.savedTeams.find(
+      (saved) => saved.kind === "library" && saved.name === "Scully team",
+    );
+    await window.scully.setDefaultTeam(previous.id);
+    await window.scully.deleteTeam(edited.id);
+    const deleted = await window.scully.load();
+    await window.scully.restoreTeam(edited.id);
+    const after = await window.scully.load();
+    return { task, run, before, after, edited, deleted };
+  });
+  assert.notEqual(
+    teamJourney.task.teamConfigId,
+    teamJourney.before.defaultTeamId,
+  );
+  assert.equal(teamJourney.run.teamSnapshot.id, teamJourney.task.teamConfigId);
+  assert.equal(teamJourney.edited.id, teamJourney.before.defaultTeamId);
+  assert.equal(teamJourney.run.teamSnapshot.name, "Desktop smoke team");
+  assert.ok(
+    teamJourney.deleted.savedTeams.find(
+      (saved) => saved.id === teamJourney.edited.id,
+    ).deletedAt,
+  );
+  assert.equal(
+    teamJourney.after.savedTeams.find(
+      (saved) => saved.id === teamJourney.edited.id,
+    ).deletedAt,
+    null,
+  );
+  assert.notEqual(
+    teamJourney.after.defaultTeamId,
+    teamJourney.task.teamConfigId,
+  );
+  assert.equal(
+    teamJourney.after.tasks.find((task) => task.id === teamJourney.task.id)
+      .teamConfigId,
+    teamJourney.task.teamConfigId,
+  );
+  activityBeforeRestart = teamJourney.after.activity;
   await assert.rejects(
     page.evaluate(() =>
       window.scully.createTask({ title: "", description: "", mode: "work" }),
@@ -568,13 +1002,30 @@ try {
   app = null;
   app = await launch();
   page = await app.firstWindow();
+  await page.getByRole("heading", { name: "Team room." }).waitFor();
+  assert.equal(
+    await page.evaluate(() => localStorage.getItem("scully-panel-layout-v1")),
+    savedPanelLayout,
+    "Panel widths should persist after restart",
+  );
+  assert.deepEqual(
+    await page.evaluate(async () => (await window.scully.load()).activity),
+    activityBeforeRestart,
+  );
+  assert.deepEqual(
+    await page.evaluate(async () => (await window.scully.load()).teammates),
+    teamAfterRoster,
+  );
+  await page
+    .getByRole("img", { name: /Ellis portrait: Brown curls and glasses/ })
+    .first()
+    .waitFor();
   await page
     .getByRole("button", { name: "Persistence smoke test", exact: true })
     .click();
-  await page.getByText(/Budget: 12,000 tokens/).waitFor();
+  await page.getByRole("button", { name: /12,000 token budget/ }).waitFor();
   await page
-    .getByRole("region", { name: "Model cost estimates" })
-    .getByText(/USD warning budget: \$2.50/)
+    .getByRole("button", { name: /\$2\.50 USD warning budget/ })
     .waitFor();
   await page
     .getByRole("button", { name: "Existing project smoke test", exact: true })
@@ -622,7 +1073,11 @@ try {
     path: "test-results/corrective-attempt.png",
     fullPage: true,
   });
-  await page.getByText("Ellis Test", { exact: true }).first().waitFor();
+  await page.getByText("Saved for this task", { exact: true }).waitFor();
+  await page
+    .locator(".team-sidebar")
+    .getByRole("heading", { name: "Scully team" })
+    .waitFor();
   await page
     .getByRole("button", { name: "Persistence smoke test", exact: true })
     .click();
@@ -645,6 +1100,7 @@ try {
     ]);
   assert(!JSON.stringify(localMetrics).includes("source-fixture"));
   await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "App & connection" }).click();
   await page
     .getByRole("button", { name: "Refresh local metrics", exact: true })
     .click();
@@ -676,16 +1132,14 @@ try {
       outputTokens: 1024,
     }),
   );
-  await page.getByLabel("Jun · Test engineer", { exact: true }).check();
+  await page.getByLabel("Jun · Tester", { exact: true }).check();
   await page
     .getByRole("button", { name: "Review reply upload", exact: true })
     .click();
   await page
     .getByRole("heading", { name: "Approve one read-only reply" })
     .waitFor();
-  await page
-    .getByText("Reply from: Jun · Test engineer", { exact: true })
-    .waitFor();
+  await page.getByText("Reply from: Jun · Tester", { exact: true }).waitFor();
   assert.equal(
     await page
       .getByRole("button", { name: "Request read-only reply", exact: true })
@@ -712,12 +1166,16 @@ try {
     .getByRole("heading", { name: "Revised plan context", exact: true })
     .waitFor();
   await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Run usage" }).click();
+  await page.getByRole("button", { name: "Apply Save tokens" }).click();
+  await page.getByText(/Current: Save tokens/).waitFor();
   await page.getByRole("button", { name: "Room", exact: true }).click();
   await page
     .getByRole("heading", { name: "Revised plan context", exact: true })
     .waitFor();
-  await page.getByRole("button", { name: "Apply Save tokens" }).click();
-  await page.getByText(/Current: Save tokens/).waitFor();
+  await page
+    .getByRole("button", { name: /1,024 output tokens per request/ })
+    .waitFor();
   assert.equal(
     await page
       .getByRole("button", { name: "Request plan", exact: true })
@@ -738,12 +1196,14 @@ try {
   await page
     .getByRole("heading", { name: "Revised plan context", exact: true })
     .waitFor();
-  await page.getByText(/Current: Save tokens/).waitFor();
+  await page
+    .getByRole("button", { name: /1,024 output tokens per request/ })
+    .waitFor();
   await page
     .getByText("Use a command line interface instead", { exact: true })
     .waitFor();
   console.log(
-    "PASS: desktop launch, renderer isolation, both project intakes, usage preset and cost budget persistence, upload approval, source preservation, offline coordinator, command review/stale rejection/restart expiry, local fixture execution with fresh permission and persisted results, task/profile persistence. No live provider request.",
+    "PASS: desktop launch, renderer isolation, both project intakes, usage preset and cost budget persistence, upload approval, source preservation, offline coordinator, command review/stale rejection/restart expiry, local fixture execution with fresh permission and persisted results, fixed roster, activity and team persistence. No live provider request.",
   );
 } finally {
   if (app) await app.close();

@@ -1,4 +1,6 @@
 import { safePath, type SourceFile, type Finding } from "./runs";
+import { initialTeam, type Teammate } from "./contracts";
+import { runRole } from "./teams";
 export type OwnershipRule = { path: string; directory: boolean; owner: Writer };
 export type CoordinationSettings = { ownership: string; chunkReviews: boolean };
 export type ChunkReview = {
@@ -8,7 +10,7 @@ export type ChunkReview = {
   summary: string;
   findings: Finding[];
 };
-export type Writer = "maya" | "jun";
+export type Writer = string;
 export type Assignment = {
   owner: Writer;
   scope: string;
@@ -21,8 +23,8 @@ export type Coordination = {
   settings?: CoordinationSettings;
   chunkReviews?: ChunkReview[];
   assignments: Assignment[];
-  integrator: "maya";
-  auditor: "ellis";
+  integrator: string;
+  auditor: string;
   conflicts: { path: string; detail: string }[];
   integratedRevision: string;
   auditedRevision: string;
@@ -32,7 +34,10 @@ export type Coordination = {
     writerTotalMs: number;
   };
 };
-export function parseCoordinationSettings(value: unknown): {
+export function parseCoordinationSettings(
+  value: unknown,
+  writers: readonly string[] = ["maya", "jun"],
+): {
   settings: CoordinationSettings;
   rules: OwnershipRule[];
 } {
@@ -49,9 +54,11 @@ export function parseCoordinationSettings(value: unknown): {
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean)) {
-    const match = /^(maya|jun)\s+(.+)$/.exec(line);
-    if (!match)
-      throw new Error("Use one rule per line: maya path or jun folder/");
+    const match = /^([a-z][a-z0-9-]{0,63})\s+(.+)$/.exec(line);
+    if (!match || !writers.includes(match[1]))
+      throw new Error(
+        `Use an assigned writer ID followed by a file or folder path: ${writers.join(" or ")}`,
+      );
     const directory = match[2].endsWith("/");
     const path = directory ? match[2].slice(0, -1) : match[2];
     safePath(path);
@@ -73,41 +80,60 @@ export function parseCoordinationSettings(value: unknown): {
     rules,
   };
 }
-export function ownerFor(path: string, rules: OwnershipRule[] = []): Writer {
+export function ownerFor(
+  path: string,
+  rules: OwnershipRule[] = [],
+  writers: readonly string[] = ["maya", "jun"],
+): Writer {
   const match = rules.find(
     (r) =>
       r.path.toLowerCase() === path.toLowerCase() ||
       (r.directory &&
         path.toLowerCase().startsWith(r.path.toLowerCase() + "/")),
   );
-  return match?.owner || (isTestPath(path) ? "jun" : "maya");
+  return (
+    match?.owner || (isTestPath(path) && writers[1] ? writers[1] : writers[0])
+  );
 }
 export function isTestPath(path: string) {
   return /(^|\/)(__tests__|tests?|specs?)(\/|$)|(^|\/)test_[^/]+$|(?:[._](?:test|spec)|Test|Tests)\.[^/]+$/i.test(
     path,
   );
 }
-export function makeCoordination(): Coordination {
+export function makeCoordination(
+  team: readonly Teammate[] = initialTeam,
+): Coordination {
+  const builder = team.find((member) => runRole(member) === "builder");
+  const auditor = team.find((member) => runRole(member) === "auditor");
+  const tester = team.find((member) => runRole(member) === "tester");
+  if (!builder || !auditor)
+    throw new Error("A builder and independent auditor are required");
   return {
     assignments: [
       {
-        owner: "maya",
-        scope: "Implementation and supporting files, excluding test paths",
+        owner: builder.id,
+        scope: tester
+          ? "Implementation and supporting files, excluding test paths"
+          : "Implementation and test files",
         status: "waiting",
         summary: "",
         files: [],
       },
-      {
-        owner: "jun",
-        scope:
-          "Test paths only (test/tests/spec directories or recognised test/spec filenames)",
-        status: "waiting",
-        summary: "",
-        files: [],
-      },
+      ...(tester
+        ? [
+            {
+              owner: tester.id,
+              scope:
+                "Test paths only (test/tests/spec directories or recognised test/spec filenames)",
+              status: "waiting" as const,
+              summary: "",
+              files: [],
+            },
+          ]
+        : []),
     ],
-    integrator: "maya",
-    auditor: "ellis",
+    integrator: builder.id,
+    auditor: auditor.id,
     conflicts: [],
     integratedRevision: "",
     auditedRevision: "",
@@ -118,12 +144,14 @@ export function requestLimit(run: {
   coordination?: Coordination;
   correction?: unknown;
   usagePolicy?: { requestCeiling: number };
+  plan?: string;
 }) {
   if (run.usagePolicy) return run.usagePolicy.requestCeiling;
   if (run.correction) return 2;
-  return run.coordination
-    ? run.coordination.settings?.chunkReviews
-      ? 6
-      : 4
-    : 3;
+  if (!run.coordination) return 3;
+  const writers = run.coordination.assignments.length;
+  return (
+    (writers === 2 ? 4 : writers + 1 + (run.plan ? 1 : 0)) +
+    (run.coordination.settings?.chunkReviews ? writers : 0)
+  );
 }

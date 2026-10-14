@@ -5,16 +5,20 @@ import {
   type AuditKind,
 } from "../shared/audits";
 import type { Run, RunAPI } from "../shared/runs";
+import { initialTeam, type Teammate } from "../shared/contracts";
 import { assessLocalCriterion } from "../shared/check-criteria";
+import { runRole } from "../shared/teams";
 import { FindingDecisionPanel } from "./FindingDecisionPanel";
 export function SpecialistPanel({
   run,
   api,
   relatedRuns = [],
+  team = initialTeam,
 }: {
   run: Run;
   api: RunAPI;
   relatedRuns?: Run[];
+  team?: Teammate[];
 }) {
   const [focus, setFocus] = useState<AuditKind | null>(null);
   const [approved, setApproved] = useState(false);
@@ -29,7 +33,9 @@ export function SpecialistPanel({
     <section className="settings-card" aria-label="Specialist audits">
       <h3>Dispatch a specialist</h3>
       <p>
-        Ellis can review testing, security or maintainability. Each dispatch is
+        {team.find((member) => runRole(member) === "auditor")?.name ||
+          "The auditor"}{" "}
+        can review testing, security or maintainability. Each dispatch is
         read-only and allows one builder response if findings are raised.
         Discussion alone never resolves a finding.
       </p>

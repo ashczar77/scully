@@ -16,12 +16,16 @@ export function UsagePolicyPanel({
   session,
   api,
   onUpdate,
+  compact = false,
+  onOpenSettings = () => {},
 }: {
   run: Run;
   mode: "plan" | "work";
   session: SessionInfo | null;
   api: DesktopAPI;
   onUpdate: (run: Run) => void;
+  compact?: boolean;
+  onOpenSettings?: () => void;
 }) {
   const current =
     run.usagePolicy ||
@@ -79,6 +83,18 @@ export function UsagePolicyPanel({
   } catch {
     /* Form validation appears on save. */
   }
+  if (compact)
+    return (
+      <button className="run-setting-card" onClick={onOpenSettings}>
+        <span>Run usage</span>
+        <strong>
+          {current.outputTokens.toLocaleString()} output tokens per request
+        </strong>
+        <small>
+          {current.requestCeiling} coordinator requests · Change in Settings
+        </small>
+      </button>
+    );
   return (
     <section className="settings-card" aria-label="Run usage policy">
       <h3>Run usage</h3>

@@ -32,6 +32,16 @@ import {
   type ModelRate,
 } from "../shared/model-cost";
 import { interruptAudits } from "../shared/audits";
+import { summarizeTeamActivity } from "../shared/team-activity";
+import type { SavedTeam } from "../shared/teams";
+import {
+  parseFixedRoster,
+  parseSaveFixedTeam,
+  rosterMembers,
+  starterRoster,
+} from "../shared/fixed-teams";
+import { inspectFixedCastMigration } from "./fixed-cast-migration";
+import { emitMetric, noopSink, type MetricSink } from "../shared/telemetry";
 import type { TeamMessage, TeamReply } from "../shared/messages";
 import {
   initialTeam,
@@ -41,18 +51,32 @@ import {
   type Workspace,
   type Teammate,
 } from "../shared/contracts";
+type LibraryTeamRow = {
+  id: string;
+  familyId: string;
+  name: string;
+  version: number;
+  createdAt: string;
+  memberIds: string;
+  activeBuilderId: string;
+  activeAuditorId: string;
+  activeTesterId: string | null;
+  deletedAt: string | null;
+};
 export class Store {
   private db: DatabaseSync;
   constructor(
     path: string,
     private now: () => Date = () => new Date(),
+    private migrationSink: MetricSink = noopSink,
+    private migrationClock: () => number = () => performance.now(),
   ) {
     this.db = new DatabaseSync(path);
     this.db.exec("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=3000;");
     const version = (
       this.db.prepare("PRAGMA user_version").get() as { user_version: number }
     ).user_version;
-    if (version > 6) {
+    if (version > 11) {
       this.db.close();
       throw new Error("Workspace database is newer than this application");
     }
@@ -100,43 +124,610 @@ export class Store {
         throw error;
       }
     }
+    if (version < 7) {
+      this.db.exec("BEGIN");
+      try {
+        this.db.exec(
+          "ALTER TABLE teammates ADD COLUMN portraitId TEXT NOT NULL DEFAULT 'portrait-01'; UPDATE teammates SET portraitId='portrait-02' WHERE id='ellis'; UPDATE teammates SET portraitId='portrait-03' WHERE id='jun'; PRAGMA user_version=7; COMMIT",
+        );
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
+    if (version < 8) {
+      this.db.exec("BEGIN");
+      try {
+        this.db.exec(
+          "CREATE TABLE saved_teams (id TEXT PRIMARY KEY, name TEXT NOT NULL, version INTEGER NOT NULL, createdAt TEXT NOT NULL, members TEXT NOT NULL); CREATE UNIQUE INDEX saved_team_name_version ON saved_teams(name,version); CREATE TABLE team_default (singleton INTEGER PRIMARY KEY CHECK(singleton=1), teamId TEXT NOT NULL); CREATE TABLE task_teams (taskId TEXT PRIMARY KEY, teamId TEXT NOT NULL)",
+        );
+        const existing = this.db
+          .prepare("SELECT * FROM teammates ORDER BY rowid")
+          .all() as Teammate[];
+        const members = [
+          ...existing,
+          ...initialTeam.filter(
+            (member) => !existing.some((saved) => saved.id === member.id),
+          ),
+        ];
+        const id = randomUUID();
+        this.db
+          .prepare("INSERT INTO saved_teams VALUES (?,?,?,?,?)")
+          .run(
+            id,
+            "Scully team",
+            1,
+            this.now().toISOString(),
+            JSON.stringify(members),
+          );
+        this.db.prepare("INSERT INTO team_default VALUES (1,?)").run(id);
+        this.db
+          .prepare("INSERT INTO task_teams SELECT id,? FROM tasks")
+          .run(id);
+        this.db.exec("PRAGMA user_version=8; COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
+    if (version < 9) {
+      this.db.exec("BEGIN");
+      try {
+        this.db.exec(
+          "ALTER TABLE saved_teams ADD COLUMN familyId TEXT; UPDATE saved_teams SET familyId=(SELECT first.id FROM saved_teams AS first WHERE first.name=saved_teams.name ORDER BY first.rowid LIMIT 1); CREATE INDEX saved_team_family ON saved_teams(familyId); PRAGMA user_version=9; COMMIT",
+        );
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
+    if (version < 10) {
+      this.db.exec("BEGIN");
+      try {
+        this.db.exec(
+          "CREATE TABLE team_library (id TEXT PRIMARY KEY, familyId TEXT NOT NULL UNIQUE, name TEXT NOT NULL, version INTEGER NOT NULL, createdAt TEXT NOT NULL, members TEXT NOT NULL, deletedAt TEXT); CREATE INDEX team_library_available ON team_library(deletedAt); DROP INDEX IF EXISTS saved_team_name_version; PRAGMA user_version=10",
+        );
+        const rows = this.db
+          .prepare("SELECT * FROM saved_teams ORDER BY rowid DESC")
+          .all() as {
+          id: string;
+          familyId: string;
+          name: string;
+          version: number;
+          createdAt: string;
+          members: string;
+        }[];
+        const oldDefault = this.db
+          .prepare("SELECT teamId FROM team_default WHERE singleton=1")
+          .get() as { teamId: string };
+        const selected = rows.find((row) => row.id === oldDefault.teamId);
+        if (!selected) throw new Error("Default team is missing");
+        const families = new Map<string, (typeof rows)[number]>();
+        for (const row of rows)
+          if (!families.has(row.familyId)) families.set(row.familyId, row);
+        families.set(selected.familyId, selected);
+        let currentId = "";
+        const insert = this.db.prepare(
+          "INSERT INTO team_library VALUES (?,?,?,?,?,?,NULL)",
+        );
+        for (const row of families.values()) {
+          const id = randomUUID();
+          insert.run(
+            id,
+            row.familyId,
+            row.name,
+            row.version,
+            row.createdAt,
+            row.members,
+          );
+          if (row.familyId === selected.familyId) currentId = id;
+        }
+        this.db
+          .prepare("UPDATE team_default SET teamId=? WHERE singleton=1")
+          .run(currentId);
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
+    if (version < 11) {
+      let started = 0;
+      try {
+        started = this.migrationClock();
+      } catch {
+        /* optional diagnostics */
+      }
+      let outcome: "returned" | "threw" = "threw";
+      this.db.exec("BEGIN");
+      try {
+        inspectFixedCastMigration(this.db);
+        this.db.exec(
+          "CREATE TABLE team_library_fixed (id TEXT PRIMARY KEY, familyId TEXT NOT NULL UNIQUE, name TEXT NOT NULL, version INTEGER NOT NULL, createdAt TEXT NOT NULL, memberIds TEXT NOT NULL, activeBuilderId TEXT NOT NULL, activeAuditorId TEXT NOT NULL, activeTesterId TEXT, deletedAt TEXT);",
+        );
+        const id = randomUUID();
+        this.db
+          .prepare(
+            "INSERT INTO team_library_fixed VALUES (?,?,?,?,?,?,?,?,?,NULL)",
+          )
+          .run(
+            id,
+            randomUUID(),
+            "Scully team",
+            1,
+            this.now().toISOString(),
+            JSON.stringify(starterRoster.memberIds),
+            starterRoster.activeBuilderId,
+            starterRoster.activeAuditorId,
+            starterRoster.activeTesterId,
+          );
+        this.db.exec(
+          "DROP TABLE team_library; ALTER TABLE team_library_fixed RENAME TO team_library; CREATE INDEX team_library_available ON team_library(deletedAt)",
+        );
+        this.db
+          .prepare("UPDATE team_default SET teamId=? WHERE singleton=1")
+          .run(id);
+        this.db.exec("PRAGMA user_version=11; COMMIT");
+        outcome = "returned";
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        this.db.close();
+        throw error;
+      } finally {
+        try {
+          emitMetric(this.migrationSink, {
+            version: 1,
+            operation: "team:migrate",
+            outcome,
+            durationMs: Math.max(0, this.migrationClock() - started),
+          });
+        } catch {
+          /* optional diagnostics */
+        }
+      }
+    }
     const insert = this.db.prepare(
-      "INSERT OR IGNORE INTO teammates VALUES (?, ?, ?, ?, ?)",
+      "INSERT OR IGNORE INTO teammates (id,name,role,bio,instructions,portraitId) VALUES (?, ?, ?, ?, ?, ?)",
     );
     initialTeam.forEach((t) =>
-      insert.run(t.id, t.name, t.role, t.bio, t.instructions),
+      insert.run(t.id, t.name, t.role, t.bio, t.instructions, t.portraitId),
     );
   }
   load(): Workspace {
+    const defaultTeam = this.defaultTeam();
     return {
       tasks: this.db
-        .prepare("SELECT * FROM tasks ORDER BY createdAt DESC, rowid DESC")
+        .prepare(
+          "SELECT tasks.*, task_teams.teamId AS teamConfigId FROM tasks LEFT JOIN task_teams ON task_teams.taskId=tasks.id ORDER BY tasks.createdAt DESC, tasks.rowid DESC",
+        )
         .all() as Task[],
-      teammates: this.db
-        .prepare("SELECT * FROM teammates ORDER BY rowid")
-        .all() as Teammate[],
+      teammates: defaultTeam.members,
+      savedTeams: this.savedTeams(),
+      defaultTeamId: defaultTeam.id,
+      activity: summarizeTeamActivity(
+        this.db
+          .prepare(
+            "SELECT CASE WHEN length(CAST(data AS BLOB)) <= 2000000 THEN data ELSE NULL END AS data FROM runs ORDER BY rowid DESC LIMIT 2001",
+          )
+          .iterate() as Iterable<{ data: string | null }>,
+      ),
     };
   }
   createTask(value: unknown): Task {
     const input = parseTask(value);
+    const team = this.defaultTeam();
     const task = {
       ...input,
       id: randomUUID(),
       createdAt: new Date().toISOString(),
+      teamConfigId: randomUUID(),
     };
-    this.db
-      .prepare("INSERT INTO tasks VALUES (?, ?, ?, ?, ?)")
-      .run(task.id, task.title, task.description, task.mode, task.createdAt);
+    this.db.exec("BEGIN");
+    try {
+      this.insertTaskSnapshot(task.teamConfigId, team);
+      this.db
+        .prepare("INSERT INTO tasks VALUES (?, ?, ?, ?, ?)")
+        .run(task.id, task.title, task.description, task.mode, task.createdAt);
+      this.db
+        .prepare("INSERT INTO task_teams VALUES (?,?)")
+        .run(task.id, task.teamConfigId);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
     return task;
   }
+  updateTask(id: unknown, value: unknown): Task {
+    if (typeof id !== "string" || id.length > 100)
+      throw new Error("Invalid task ID");
+    const input = parseTask(value);
+    const current = this.db
+      .prepare("SELECT * FROM tasks WHERE id=?")
+      .get(id) as Task | undefined;
+    if (!current) throw new Error("Task not found");
+    const runs = this.runs(id);
+    if (runs.some((run) => this.runIsInFlight(run)))
+      throw new Error("Stop in-flight work before editing this task");
+    if (runs.length && input.mode !== current.mode)
+      throw new Error("The start mode is locked after preparing a run");
+    this.db.exec("BEGIN");
+    try {
+      const saveSnapshot = this.db.prepare("UPDATE runs SET data=? WHERE id=?");
+      for (const run of runs)
+        if (!run.taskSnapshot) {
+          run.taskSnapshot = {
+            title: current.title,
+            description: current.description,
+            mode: current.mode,
+          };
+          saveSnapshot.run(JSON.stringify(run), run.id);
+        }
+      this.db
+        .prepare("UPDATE tasks SET title=?, description=?, mode=? WHERE id=?")
+        .run(input.title, input.description, input.mode, id);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return { ...current, ...input, teamConfigId: this.teamForTask(id).id };
+  }
+  private runIsInFlight(run: Run): boolean {
+    return (
+      ["planning", "building", "auditing"].includes(run.status) ||
+      !!run.replies?.some((reply) => reply.status === "answering") ||
+      !!run.executions?.some((execution) => execution.status === "running") ||
+      !!run.cloudExecutions?.some((execution) =>
+        ["uploading", "submission_unknown", "submitted"].includes(
+          execution.status,
+        ),
+      ) ||
+      !!this.db
+        .prepare(
+          "SELECT 1 FROM usage_requests WHERE runId=? AND status='pending' LIMIT 1",
+        )
+        .get(run.id)
+    );
+  }
+  deleteTask(id: unknown): { deletedRuns: number } {
+    if (typeof id !== "string" || id.length > 100)
+      throw new Error("Invalid task ID");
+    if (!this.db.prepare("SELECT 1 FROM tasks WHERE id=?").get(id))
+      throw new Error("Task not found");
+    const runs = this.runs(id);
+    if (runs.some((run) => this.runIsInFlight(run)))
+      throw new Error("Stop in-flight work before deleting this task");
+    if (
+      runs.some(
+        (run) =>
+          run.status !== "prepared" ||
+          run.calls !== 0 ||
+          this.usageForRun(run.id).requests !== 0,
+      )
+    )
+      throw new Error(
+        "This task has saved work. Keep its run and recovery records until archive support is available.",
+      );
+    this.db.exec("BEGIN");
+    try {
+      for (const run of runs) {
+        for (const table of [
+          "usage_requests",
+          "usage_totals",
+          "usage_alerts",
+          "usage_cost_settings",
+          "usage_cost_totals",
+        ])
+          this.db.prepare(`DELETE FROM ${table} WHERE runId=?`).run(run.id);
+      }
+      this.db.prepare("DELETE FROM runs WHERE taskId=?").run(id);
+      this.db.prepare("DELETE FROM task_teams WHERE taskId=?").run(id);
+      this.db.prepare("DELETE FROM tasks WHERE id=?").run(id);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return { deletedRuns: runs.length };
+  }
   updateTeammate(value: unknown): Teammate {
-    const t = parseTeammate(value);
+    void value;
+    throw new Error("Built-in character profiles cannot be edited");
+  }
+  applyTeamStyle(value: unknown): Teammate[] {
+    void value;
+    throw new Error("Built-in character profiles cannot be edited");
+  }
+  savedTeams(): SavedTeam[] {
+    const library = (
+      this.db
+        .prepare("SELECT * FROM team_library ORDER BY rowid DESC")
+        .all() as LibraryTeamRow[]
+    ).map((row) => this.libraryTeam(row));
+    const snapshots = (
+      this.db
+        .prepare("SELECT * FROM saved_teams ORDER BY rowid DESC")
+        .all() as {
+        id: string;
+        name: string;
+        version: number;
+        createdAt: string;
+        members: string;
+        familyId: string;
+      }[]
+    ).map((row) => ({
+      ...row,
+      kind: "snapshot" as const,
+      members: this.snapshotMembers(row.members),
+    }));
+    return [...library, ...snapshots];
+  }
+  private snapshotMembers(json: string): Teammate[] {
+    const value: unknown = JSON.parse(json);
+    if (!Array.isArray(value) || value.length < 2 || value.length > 16)
+      throw new Error("Saved team snapshot is invalid");
+    const members = value.map(parseTeammate);
+    if (new Set(members.map(({ id }) => id)).size !== members.length)
+      throw new Error("Saved team snapshot has duplicate members");
+    return members;
+  }
+  private libraryTeam(row: LibraryTeamRow): SavedTeam {
+    const roster = parseFixedRoster({
+      memberIds: JSON.parse(row.memberIds),
+      activeBuilderId: row.activeBuilderId,
+      activeAuditorId: row.activeAuditorId,
+      activeTesterId: row.activeTesterId,
+    });
+    return {
+      id: row.id,
+      familyId: row.familyId,
+      kind: "library",
+      deletedAt: row.deletedAt,
+      name: row.name,
+      version: row.version,
+      createdAt: row.createdAt,
+      roster,
+      members: rosterMembers(roster),
+    };
+  }
+  private insertTaskSnapshot(id: string, team: SavedTeam) {
     this.db
       .prepare(
-        "UPDATE teammates SET name=?, role=?, bio=?, instructions=? WHERE id=?",
+        "INSERT INTO saved_teams (id,name,version,createdAt,members,familyId) VALUES (?,?,?,?,?,?)",
       )
-      .run(t.name, t.role, t.bio, t.instructions, t.id);
-    return t;
+      .run(
+        id,
+        team.name,
+        team.version,
+        team.createdAt,
+        JSON.stringify(team.members),
+        team.familyId || team.id,
+      );
+  }
+  private getLibraryTeam(id: string): SavedTeam {
+    const row = this.db
+      .prepare("SELECT * FROM team_library WHERE id=?")
+      .get(id) as LibraryTeamRow | undefined;
+    if (!row) throw new Error("Saved team not found");
+    return this.libraryTeam(row);
+  }
+  private getTeam(id: string): SavedTeam {
+    const row = this.db
+      .prepare("SELECT * FROM saved_teams WHERE id=?")
+      .get(id) as
+      | {
+          id: string;
+          name: string;
+          version: number;
+          createdAt: string;
+          members: string;
+          familyId: string;
+        }
+      | undefined;
+    if (!row) throw new Error("Saved team not found");
+    return {
+      ...row,
+      members: this.snapshotMembers(row.members),
+    };
+  }
+  defaultTeam(): SavedTeam {
+    const row = this.db
+      .prepare("SELECT teamId FROM team_default WHERE singleton=1")
+      .get() as { teamId: string } | undefined;
+    if (!row) throw new Error("Default team is missing");
+    const team = this.getLibraryTeam(row.teamId);
+    if (team.deletedAt) throw new Error("Default team is deleted");
+    return team;
+  }
+  teamForTask(taskId: string): SavedTeam {
+    const row = this.db
+      .prepare("SELECT teamId FROM task_teams WHERE taskId=?")
+      .get(taskId) as { teamId: string } | undefined;
+    if (!row) throw new Error("Task team is missing");
+    return this.getTeam(row.teamId);
+  }
+  saveTeam(value: unknown): SavedTeam {
+    const input = parseSaveFixedTeam(value);
+    const current = this.defaultTeam();
+    const mode =
+      input.saveMode ||
+      (input.name.toLowerCase() === current.name.toLowerCase()
+        ? "overwrite"
+        : "new");
+    if (
+      input.expectedDefaultTeamId &&
+      input.expectedDefaultTeamId !== current.id
+    )
+      throw new Error("The current team changed. Review it before saving.");
+    this.db.exec("BEGIN");
+    try {
+      if (
+        this.db
+          .prepare(
+            "SELECT 1 FROM team_library WHERE deletedAt IS NULL AND lower(name)=lower(?) AND id<>?",
+          )
+          .get(input.name, mode === "overwrite" ? current.id : "")
+      )
+        throw new Error(
+          mode === "new"
+            ? "Use a different name for a new team"
+            : "A saved team already uses that name",
+        );
+      let next: SavedTeam;
+      if (mode === "new") {
+        const count = (
+          this.db
+            .prepare(
+              "SELECT COUNT(*) AS count FROM team_library WHERE deletedAt IS NULL",
+            )
+            .get() as { count: number }
+        ).count;
+        if (count >= 20)
+          throw new Error(
+            "You can have up to 20 available teams. Delete a team before creating another.",
+          );
+        next = {
+          id: randomUUID(),
+          familyId: randomUUID(),
+          kind: "library",
+          deletedAt: null,
+          name: input.name,
+          version: 1,
+          createdAt: this.now().toISOString(),
+          roster: {
+            memberIds: input.memberIds,
+            activeBuilderId: input.activeBuilderId,
+            activeAuditorId: input.activeAuditorId,
+            activeTesterId: input.activeTesterId,
+          },
+          members: rosterMembers(input),
+        };
+        this.db
+          .prepare("INSERT INTO team_library VALUES (?,?,?,?,?,?,?,?,?,NULL)")
+          .run(
+            next.id,
+            next.familyId || next.id,
+            next.name,
+            next.version,
+            next.createdAt,
+            JSON.stringify(input.memberIds),
+            input.activeBuilderId,
+            input.activeAuditorId,
+            input.activeTesterId,
+          );
+      } else {
+        next = {
+          ...current,
+          name: input.name,
+          roster: {
+            memberIds: input.memberIds,
+            activeBuilderId: input.activeBuilderId,
+            activeAuditorId: input.activeAuditorId,
+            activeTesterId: input.activeTesterId,
+          },
+          members: rosterMembers(input),
+          version: current.version + 1,
+        };
+        this.db
+          .prepare(
+            "UPDATE team_library SET name=?, version=?, memberIds=?, activeBuilderId=?, activeAuditorId=?, activeTesterId=? WHERE id=? AND deletedAt IS NULL",
+          )
+          .run(
+            next.name,
+            next.version,
+            JSON.stringify(input.memberIds),
+            input.activeBuilderId,
+            input.activeAuditorId,
+            input.activeTesterId,
+            next.id,
+          );
+      }
+      this.applyDefaultTeam(next);
+      this.db.exec("COMMIT");
+      return next;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+  setDefaultTeam(id: unknown): SavedTeam {
+    if (typeof id !== "string" || id.length > 100)
+      throw new Error("Invalid team ID");
+    const team = this.getLibraryTeam(id);
+    if (team.deletedAt) throw new Error("Deleted team cannot be selected");
+    this.db.exec("BEGIN");
+    try {
+      this.applyDefaultTeam(team);
+      this.db.exec("COMMIT");
+      return team;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+  deleteTeam(id: unknown): SavedTeam {
+    if (typeof id !== "string" || !id || id.length > 100)
+      throw new Error("Invalid team ID");
+    this.db.exec("BEGIN");
+    try {
+      const team = this.getLibraryTeam(id);
+      if (team.deletedAt) throw new Error("Team is already deleted");
+      if (this.defaultTeam().id === id)
+        throw new Error(
+          "Choose another team for new tasks before deleting this one",
+        );
+      const deletedAt = this.now().toISOString();
+      this.db
+        .prepare("UPDATE team_library SET deletedAt=? WHERE id=?")
+        .run(deletedAt, id);
+      this.db.exec("COMMIT");
+      return { ...team, deletedAt };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+  restoreTeam(id: unknown): SavedTeam {
+    if (typeof id !== "string" || !id || id.length > 100)
+      throw new Error("Invalid team ID");
+    this.db.exec("BEGIN");
+    try {
+      const team = this.getLibraryTeam(id);
+      if (!team.deletedAt) throw new Error("Team is already available");
+      const count = (
+        this.db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM team_library WHERE deletedAt IS NULL",
+          )
+          .get() as { count: number }
+      ).count;
+      if (count >= 20)
+        throw new Error(
+          "You can have up to 20 available teams. Delete one before restoring another.",
+        );
+      if (
+        this.db
+          .prepare(
+            "SELECT 1 FROM team_library WHERE deletedAt IS NULL AND lower(name)=lower(?)",
+          )
+          .get(team.name)
+      )
+        throw new Error("An available team already uses that name");
+      this.db
+        .prepare("UPDATE team_library SET deletedAt=NULL WHERE id=?")
+        .run(id);
+      this.db.exec("COMMIT");
+      return { ...team, deletedAt: null };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+  private applyDefaultTeam(team: SavedTeam) {
+    this.db
+      .prepare("UPDATE team_default SET teamId=? WHERE singleton=1")
+      .run(team.id);
   }
   close() {
     this.db.close();

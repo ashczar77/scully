@@ -26,6 +26,7 @@ it("waits until work stops and makes review explicitly non-authorizing", async (
       {
         id: "s",
         actor: "ellis",
+        actorName: "Earlier reviewer",
         text: "Consider documentation examples",
         revision: "abc",
       },
@@ -36,6 +37,9 @@ it("waits until work stops and makes review explicitly non-authorizing", async (
   const { rerender } = render(<SuggestionsPanel run={run} api={api} />);
   expect(screen.queryByText("Suggestions for later")).not.toBeInTheDocument();
   rerender(<SuggestionsPanel run={{ ...run, status: "complete" }} api={api} />);
+  expect(
+    screen.getByText("Earlier reviewer · snapshot abc"),
+  ).toBeInTheDocument();
   expect(
     screen.getByText(/does not approve implementation/),
   ).toBeInTheDocument();

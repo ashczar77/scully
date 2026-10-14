@@ -24,6 +24,11 @@ export function CoordinationPanel({
   const c = run.coordination;
   if (!c) return null;
   const name = (id: string) => team.find((t) => t.id === id)?.name || id;
+  const writers = c.assignments.map((assignment) => assignment.owner);
+  const examples = writers.map(
+    (id, index) =>
+      `${id} ${index === 0 ? "src/feature.ts" : "tests/feature.test.ts"}`,
+  );
   return (
     <section className="settings-card" aria-label="Team ownership">
       <h3>Team ownership</h3>
@@ -36,9 +41,10 @@ export function CoordinationPanel({
         <details>
           <summary>Configure ownership and early reviews</summary>
           <p>
-            Optional overrides. Defaults stay automatic. Use one rule per line:
-            maya path/to/file or jun folder/. Folder rules cover the subtree;
-            overlapping rules are rejected.
+            Optional overrides. Defaults stay automatic. Use one rule per line
+            with an assigned writer ID and a file or folder path. Assigned
+            writers: {writers.map((id) => `${name(id)} (${id})`).join(", ")}.
+            Folder rules cover the subtree; overlapping rules are rejected.
           </p>
           <label>
             Ownership overrides
@@ -51,9 +57,7 @@ export function CoordinationPanel({
                 setOwnership(e.target.value);
                 invalidateConsent?.();
               }}
-              placeholder={
-                "jun src/verification/\nmaya tests/fixtures/config.json"
-              }
+              placeholder={examples.join("\n")}
             />
           </label>
           <label className="consent">
@@ -68,10 +72,10 @@ export function CoordinationPanel({
             Review each completed writer chunk while other work continues
           </label>
           <p>
-            Early reviews add up to two requests: at most five for Start
-            working, six with Plan first. They do not replace the final combined
-            audit. No changes take effect until saved; saving never starts a
-            run.
+            Early reviews add up to {writers.length} additional{" "}
+            {writers.length === 1 ? "request" : "requests"}. They do not replace
+            the final combined audit. No changes take effect until saved; saving
+            never starts a run.
           </p>
           <button
             className="secondary"

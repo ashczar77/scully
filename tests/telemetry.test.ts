@@ -64,6 +64,40 @@ it("records storage inspection without paths or inventory values", () => {
     durationMs: 4,
   });
 });
+it("records team style application without profile content or the selected style", () => {
+  expect(
+    sanitizeMetric({
+      version: 1,
+      operation: "teammate:style",
+      outcome: "returned",
+      durationMs: 3,
+      style: "risk-review",
+      instructions: "private profile instructions",
+    }),
+  ).toEqual({
+    version: 1,
+    operation: "teammate:style",
+    outcome: "returned",
+    durationMs: 3,
+  });
+});
+it("records profile updates without the selected portrait or instructions", () => {
+  expect(
+    sanitizeMetric({
+      version: 1,
+      operation: "teammate:update",
+      outcome: "returned",
+      durationMs: 2,
+      portraitId: "portrait-10",
+      instructions: "private instructions",
+    }),
+  ).toEqual({
+    version: 1,
+    operation: "teammate:update",
+    outcome: "returned",
+    durationMs: 2,
+  });
+});
 it("caps retained events, expires old entries and returns defensive copies", () => {
   let now = 1;
   const store = new LocalMetrics(() => now);

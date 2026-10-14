@@ -28,10 +28,10 @@ Scully brings implementation, testing and review into one visible room. Start fr
 | Apply and recovery    | Approve exact draft files for a chosen destination. Originals and a manifest are retained; read-only recovery inspection helps assess partial writes.                   |
 
 <p align="center">
-  <img src="assets/team-portraits.png" alt="Illustrated portraits of the default team: Maya, Ellis and Jun" width="780">
+  <img src="assets/team-portraits.png" alt="Illustrated portraits of Maya, Ellis and Jun from Scully's fixed character roster" width="780">
 </p>
 
-The example room is illustrative. Actual model work requires a Nebius key, an accessible model ID, explicit upload approval and an account with suitable billing controls. Model responses are untrusted proposals. A passing check or a zero process exit is not proof of correctness.
+The first launch shows an empty task list and the current team profiles. Team settings lets you choose from 16 fixed characters, save their roster under a team name, and create separate named teams. Every team includes Pearl, at least one builder and one independent auditor. The current dispatcher calls one selected builder, one selected auditor and an optional selected tester; other characters are available without an automatic model request. The available library holds up to 20 teams. You can delete a team from that library and restore it later after selecting another default team. Each task keeps its own saved team details, even if its team is edited or deleted later. This version keeps one local task collection, with a separate project source choice for each task. Actual model work requires a Nebius key, an accessible model ID, explicit upload approval and an account with suitable billing controls. Model responses are untrusted proposals. A passing check or a zero process exit is not proof of correctness.
 
 ## Quick start
 
@@ -44,9 +44,9 @@ npm start
 
 In the app:
 
-1. Explore the labelled example room or create a task with **New task**.
+1. Create a task with **New task**. Edit its title or details later, or delete it from the task room before model work starts. A new installation has no saved tasks or run activity.
 2. Choose **New project** or **Existing project**. Existing intake shares a selected, bounded source snapshot rather than a full checkout.
-3. Use **Plan first** or **Start working**. Review the exact upload and request allowance before approving any model call.
+3. Use **Plan first** or **Start working**. Run usage, alerts and model cost settings have defaults and can be changed in Settings after preparing a run. Review the exact upload and request allowance before approving any model call.
 4. Inspect the draft, findings and checks. Local commands and cloud experiments each require their own permission.
 5. Choose a destination, review the exact file changes and approve application only when ready.
 
@@ -72,7 +72,7 @@ The desktop smoke test uses a temporary workspace and stores screenshots under i
 - Model uploads, local command execution, cloud checks and file application have separate reviews. Reviews are bound to the relevant snapshot and expire; they do not transfer to another action.
 - Local commands run under your account in a fresh partial copy. That copy is not a security sandbox, and approved programs may access local files and the network.
 - Applying several files is not atomic. Scully retains originals and a manifest and offers read-only recovery inspection; it does not automatically overwrite later edits during recovery.
-- Scully does not commit, push or open a pull request. Settings shows a read-only inventory of draft branches, backups and execution copies. Cleanup controls are not yet available.
+- Scully does not commit, push or open a pull request. Deleting a task before work starts removes its saved task, prepared runs, usage settings and cost settings. Tasks with saved work keep their run and recovery records. Settings shows a read-only inventory of local draft, check and recovery files. Artifact cleanup controls are not yet available.
 
 ## Project layout
 
@@ -95,7 +95,7 @@ The header uses the transparent logo, so only the alien head appears on the read
 | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | <img src="assets/branding/scully-friendly-nerd-transparent-v1.png" alt="Scully transparent logo" width="110"> | <img src="assets/branding/scully-friendly-nerd-charcoal-v1.png" alt="Scully charcoal logo" width="110"> |
 
-The [team portraits](assets/team-portraits.png) are part of the current desktop room.
+The [team portraits](assets/team-portraits.png) are part of the current desktop room. The in-app wordmark uses [Chelsea Market](assets/fonts/ChelseaMarket-Regular.ttf), distributed under its [SIL Open Font License](assets/fonts/OFL.txt).
 
 A [light-background logo](assets/branding/scully-friendly-nerd-light-v1.png) is also saved for future use.
 

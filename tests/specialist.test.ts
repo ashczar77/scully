@@ -3,7 +3,7 @@ import { expect, it, vi } from "vitest";
 import { executeSpecialist } from "../src/engine/specialist";
 import { snapshotRevision } from "../src/engine/integration";
 import type { Run } from "../src/shared/runs";
-import type { Task } from "../src/shared/contracts";
+import { initialTeam, type Task } from "../src/shared/contracts";
 import { commandRevision } from "../src/engine/revision";
 import { parseFindingChecks } from "../src/shared/audits";
 it("honours remaining command capacity and binds expected observations into approvals", () => {
@@ -72,7 +72,22 @@ it("adds finding-bound proposals, expires old approvals and keeps the two-reques
         },
       ],
     });
-  const result = await executeSpecialist(run, task, { complete }, vi.fn());
+  const team = initialTeam.map((member) =>
+    member.id === "ellis"
+      ? { ...member, name: "Security specialist", role: "Security reviewer" }
+      : member,
+  );
+  const result = await executeSpecialist(
+    run,
+    task,
+    { complete },
+    vi.fn(),
+    team,
+  );
+  expect(result.events.find((event) => event.actor === "ellis")).toMatchObject({
+    actorName: "Security specialist",
+    actorRole: "Security reviewer",
+  });
   expect(result.specialistAudits![0].status).toBe("needs-review");
   expect(result.commands).toHaveLength(2);
   expect(result.commands![0].decision).toBe("expired");

@@ -16,15 +16,18 @@ export type UsagePolicyChoice = {
 };
 
 export function requiredCalls(
-  run: Pick<Run, "correction" | "redirection">,
+  run: Pick<Run, "correction" | "redirection"> &
+    Partial<Pick<Run, "coordination">>,
   mode: "plan" | "work",
 ) {
   if (run.correction) return 2;
-  return mode === "plan" || run.redirection ? 4 : 3;
+  const writers = run.coordination?.assignments.length || 2;
+  return writers + 1 + (mode === "plan" || run.redirection ? 1 : 0);
 }
 
 export function chooseUsagePolicy(
-  run: Pick<Run, "correction" | "redirection">,
+  run: Pick<Run, "correction" | "redirection"> &
+    Partial<Pick<Run, "coordination">>,
   mode: "plan" | "work",
   model: string,
   value: unknown,
@@ -33,6 +36,7 @@ export function chooseUsagePolicy(
     throw new Error("Invalid usage policy");
   const input = value as UsagePolicyChoice;
   const minimum = requiredCalls(run, mode);
+  const earlyReviewCalls = run.coordination?.assignments.length || 2;
   const correction = !!run.correction;
   let outputTokens: number;
   let requestCeiling: number;
@@ -45,12 +49,16 @@ export function chooseUsagePolicy(
       break;
     case "balanced":
       outputTokens = 2048;
-      requestCeiling = correction ? 2 : Math.max(4, minimum);
+      requestCeiling = correction
+        ? 2
+        : earlyReviewCalls === 1
+          ? minimum
+          : Math.max(4, minimum);
       earlyReviews = false;
       break;
     case "thorough":
       outputTokens = 4096;
-      requestCeiling = minimum + (correction ? 0 : 2);
+      requestCeiling = minimum + (correction ? 0 : earlyReviewCalls);
       earlyReviews = !correction;
       break;
     case "custom":
@@ -66,7 +74,7 @@ export function chooseUsagePolicy(
     outputTokens < 512 ||
     outputTokens > 4096 ||
     !Number.isSafeInteger(requestCeiling) ||
-    requestCeiling < minimum + (earlyReviews ? 2 : 0) ||
+    requestCeiling < minimum + (earlyReviews ? earlyReviewCalls : 0) ||
     requestCeiling > (correction ? 2 : 6) ||
     typeof earlyReviews !== "boolean" ||
     (correction && earlyReviews)
@@ -88,17 +96,20 @@ export function defaultUsagePolicy(
   outputTokens: number,
 ): UsagePolicy {
   const minimum = requiredCalls(run, mode);
+  const writers = run.coordination?.assignments.length || 2;
   const earlyReviews =
     !!run.coordination?.settings?.chunkReviews && !run.correction;
   return {
-    preset: "custom",
+    preset: outputTokens === 2048 && !earlyReviews ? "balanced" : "custom",
     model,
     outputTokens,
     requestCeiling: run.correction
       ? 2
       : earlyReviews
-        ? Math.max(6, minimum + 2)
-        : Math.max(4, minimum),
+        ? minimum + writers
+        : writers === 1
+          ? minimum
+          : Math.max(4, minimum),
     earlyReviews,
   };
 }

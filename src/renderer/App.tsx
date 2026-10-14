@@ -2,78 +2,174 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type FormEvent,
+  type KeyboardEvent,
+  type PointerEvent,
   type ReactNode,
 } from "react";
 import {
   ArrowLeft,
   ArrowRight,
-  ArrowUp,
   Check,
-  Code2,
-  FlaskConical,
   GitBranch,
   LayoutGrid,
   MessageSquare,
   Plus,
   Settings2,
   ShieldCheck,
-  Sparkles,
-  Target,
   X,
   Monitor,
-  BookOpen,
   Pencil,
   Users,
   CircleHelp,
+  Gauge,
+  PlugZap,
+  Activity,
+  BookText,
+  Braces,
+  ClipboardCheck,
+  Compass,
+  Crosshair,
+  FileText,
+  Fingerprint,
+  Lightbulb,
+  LockKeyhole,
+  MousePointer2,
+  Palette,
+  RefreshCcw,
+  Search,
+  Server,
+  Sparkles,
+  Workflow,
+  Zap,
+  type LucideIcon,
 } from "lucide-react";
 import type { DesktopAPI, Teammate, Workspace } from "../shared/contracts";
-import portraits from "../../assets/team-portraits.png";
+import {
+  characterById,
+  characterCatalog,
+  type CharacterId,
+} from "../shared/character-catalog";
+import {
+  catalogTeammate,
+  rosterMembers,
+  type FixedRoster,
+} from "../shared/fixed-teams";
+import { runRole } from "../shared/teams";
+import { Portrait } from "./Portrait";
+import scullyLogo from "../../assets/branding/scully-friendly-nerd-transparent-v1.png";
 import { RunPanel, ConnectionSettings } from "./RunPanel";
 import { MetricsPanel } from "./MetricsPanel";
 import { StoragePanel } from "./StoragePanel";
+import { RunSettings } from "./RunSettings";
+import { TeamPreview } from "./TeamPreview";
+import type { SessionInfo } from "../shared/runs";
 
 type Page = "Room" | "Changes" | "Preview" | "Settings" | "Profile";
+type SettingsSection = "team" | "run" | "app";
+const settingsSections = [
+  { id: "team", label: "Team", icon: Users },
+  { id: "run", label: "Run usage", icon: Gauge },
+  { id: "app", label: "App & connection", icon: PlugZap },
+] as const;
+const rosterGroups = [
+  {
+    role: "coordinator",
+    title: "Coordinator",
+    description:
+      "Pearl keeps decisions and handoffs organized. She is part of every team.",
+  },
+  {
+    role: "builder",
+    title: "Builders",
+    description:
+      "Each builder can own a complete full-stack change. Choose one or more based on the work.",
+  },
+  {
+    role: "tester",
+    title: "Testers",
+    description:
+      "They exercise real journeys and reproduce failures independently.",
+  },
+  {
+    role: "auditor",
+    title: "Auditors",
+    description:
+      "An independent auditor reviews evidence before technical completion.",
+  },
+  {
+    role: "specialist",
+    title: "Specialists",
+    description:
+      "Keep expertise available for planning or focused questions. Selection alone makes no model request.",
+  },
+] as const;
 const navigation = [
   { name: "Room", icon: MessageSquare },
   { name: "Changes", icon: GitBranch },
   { name: "Preview", icon: Monitor },
   { name: "Settings", icon: Settings2 },
 ] as const;
-function Portrait({
-  person,
-  className = "",
-}: {
-  person: Teammate;
-  className?: string;
-}) {
-  return (
-    <span
-      role="img"
-      aria-label={`${person.name} portrait`}
-      className={`portrait ${className}`}
-      style={{
-        backgroundImage: `url(${portraits})`,
-        backgroundPosition: `${person.id === "maya" ? 0 : person.id === "ellis" ? 50 : 100}% center`,
-      }}
-    />
+const panelStorageKey = "scully-panel-layout-v1";
+const panelDefaults = { task: 242, team: 330 };
+const panelMin = { task: 180, team: 240 };
+const panelMax = { task: 420, team: 520 };
+const roomMin = 420;
+const dividerSpace = 12;
+type PanelSide = "task" | "team";
+type PanelWidths = { task: number; team: number };
+function clampPanelWidths(value: PanelWidths, available: number): PanelWidths {
+  const width = Math.max(
+    available,
+    panelMin.task + panelMin.team + roomMin + dividerSpace,
   );
+  let task = Math.min(panelMax.task, Math.max(panelMin.task, value.task));
+  let team = Math.min(panelMax.team, Math.max(panelMin.team, value.team));
+  const roomSpace = width - roomMin - dividerSpace;
+  task = Math.min(task, roomSpace - team);
+  team = Math.min(team, roomSpace - task);
+  return { task: Math.round(task), team: Math.round(team) };
+}
+function savedPanelWidths(): PanelWidths {
+  try {
+    const value = JSON.parse(localStorage.getItem(panelStorageKey) || "null");
+    if (value && Number.isFinite(value.task) && Number.isFinite(value.team))
+      return {
+        task: Math.round(
+          Math.min(panelMax.task, Math.max(panelMin.task, value.task)),
+        ),
+        team: Math.round(
+          Math.min(panelMax.team, Math.max(panelMin.team, value.team)),
+        ),
+      };
+  } catch {
+    // Layout storage is optional and may be unavailable or malformed.
+  }
+  return panelDefaults;
 }
 function Modal({
   title,
   children,
   onClose,
+  className = "",
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
+  className?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     ref.current?.showModal();
   }, []);
   return (
-    <dialog ref={ref} onCancel={onClose} aria-labelledby="modal-title">
+    <dialog
+      ref={ref}
+      className={className}
+      onCancel={onClose}
+      aria-labelledby="modal-title"
+    >
       <div className="modal-heading">
         <h2 id="modal-title">{title}</h2>
         <button
@@ -88,57 +184,181 @@ function Modal({
     </dialog>
   );
 }
+const characterHighlights: Record<
+  CharacterId,
+  readonly [
+    { label: string; icon: LucideIcon; tone: "teal" | "amber" | "blue" },
+    { label: string; icon: LucideIcon; tone: "teal" | "amber" | "blue" },
+  ]
+> = {
+  maya: [
+    { label: "Whole journey", icon: Workflow, tone: "teal" },
+    { label: "Clear changes", icon: Braces, tone: "blue" },
+  ],
+  tessa: [
+    { label: "Vertical slices", icon: Braces, tone: "teal" },
+    { label: "Early feedback", icon: Zap, tone: "amber" },
+  ],
+  adrian: [
+    { label: "Full stack", icon: Braces, tone: "teal" },
+    { label: "Fast recovery", icon: RefreshCcw, tone: "amber" },
+  ],
+  jun: [
+    { label: "User journeys", icon: MousePointer2, tone: "blue" },
+    { label: "Repeat actions", icon: RefreshCcw, tone: "amber" },
+  ],
+  malik: [
+    { label: "Unexpected inputs", icon: Sparkles, tone: "amber" },
+    { label: "Clear repros", icon: ClipboardCheck, tone: "blue" },
+  ],
+  ellis: [
+    { label: "Reproducible evidence", icon: ClipboardCheck, tone: "blue" },
+    { label: "Open questions", icon: Search, tone: "amber" },
+  ],
+  meryl: [
+    { label: "Upgrade safety", icon: RefreshCcw, tone: "blue" },
+    { label: "Handoff risks", icon: Workflow, tone: "amber" },
+  ],
+  sloane: [
+    { label: "Interface direction", icon: Palette, tone: "teal" },
+    { label: "First use", icon: MousePointer2, tone: "amber" },
+  ],
+  nadine: [
+    { label: "Accessible journeys", icon: MousePointer2, tone: "teal" },
+    { label: "Keyboard use", icon: Fingerprint, tone: "blue" },
+  ],
+  rafi: [
+    { label: "System contracts", icon: Server, tone: "blue" },
+    { label: "Performance", icon: Activity, tone: "amber" },
+  ],
+  carmen: [
+    { label: "Clear documentation", icon: BookText, tone: "teal" },
+    { label: "Stakeholder updates", icon: FileText, tone: "blue" },
+  ],
+  kiran: [
+    { label: "Auth boundaries", icon: LockKeyhole, tone: "amber" },
+    { label: "Preventive review", icon: ShieldCheck, tone: "blue" },
+  ],
+  jess: [
+    { label: "Scoped attacks", icon: Crosshair, tone: "amber" },
+    { label: "Verified findings", icon: Fingerprint, tone: "blue" },
+  ],
+  nico: [
+    { label: "Original sources", icon: Search, tone: "blue" },
+    { label: "Evidence gaps", icon: Lightbulb, tone: "amber" },
+  ],
+  james: [
+    { label: "Release checks", icon: ClipboardCheck, tone: "teal" },
+    { label: "Rollback", icon: RefreshCcw, tone: "amber" },
+  ],
+  pearl: [
+    { label: "Decision routing", icon: Compass, tone: "teal" },
+    { label: "Dependencies", icon: Workflow, tone: "blue" },
+  ],
+};
+function CharacterBadges({ id }: { id: string }) {
+  const highlights = characterHighlights[id as CharacterId];
+  if (!highlights) return null;
+  return (
+    <div className="capabilities" aria-label="Strengths">
+      {highlights.map(({ label, icon: Icon, tone }) => (
+        <span className={`capability-badge ${tone}`} key={label}>
+          <Icon size={14} aria-hidden="true" /> {label}
+        </span>
+      ))}
+    </div>
+  );
+}
 function Profile({
   person,
+  activity,
   full,
   onOpen,
-  onEdit,
+  onRefreshActivity,
+  activityLoading,
+  activityError,
 }: {
   person: Teammate;
+  activity: import("../shared/team-activity").TeamActivity;
   full?: boolean;
   onOpen?: () => void;
-  onEdit: () => void;
+  onRefreshActivity: () => void;
+  activityLoading: boolean;
+  activityError: string;
 }) {
+  const counts = activity.byTeammate[person.id] || {
+    recordedEvents: 0,
+    runsWithEvents: 0,
+  };
+  const catalogPerson = characterById(person.id);
   return (
     <section
       className={`profile-card ${full ? "full-profile" : ""}`}
       aria-label={`${person.name} profile`}
     >
-      <div className="profile-art">
-        <Portrait person={person} />
-        <button className="edit-profile" onClick={onEdit}>
-          <Pencil size={13} /> Edit profile
-        </button>
-      </div>
-      <div className="profile-body">
-        <div className="profile-title">
-          <div>
+      {full ? (
+        <div className="profile-hero">
+          <div className="profile-art">
+            <Portrait person={person} />
+          </div>
+          <div className="profile-hero-copy">
+            <span className="eyebrow">MEET YOUR TEAMMATE</span>
             <h2>{person.name}</h2>
-            <span>{person.role}</span>
+            <span className="profile-role">{person.role}</span>
+            <p>{person.bio}</p>
+            <CharacterBadges id={person.id} />
           </div>
-          <span className="idle-badge">Ready</span>
         </div>
-        <p>{person.bio}</p>
+      ) : (
+        <div className="profile-art">
+          <Portrait person={person} />
+        </div>
+      )}
+      <div className="profile-body">
+        {!full && (
+          <>
+            <div className="profile-title">
+              <div>
+                <div className="profile-name-row">
+                  <h2>{person.name}</h2>
+                </div>
+                <span>{person.role}</span>
+              </div>
+            </div>
+            <p>{person.bio}</p>
+            <CharacterBadges id={person.id} />
+          </>
+        )}
+        {full && catalogPerson && (
+          <section className="profile-story" aria-label="Background">
+            <span className="eyebrow">BACKGROUND</span>
+            <p>{catalogPerson.background}</p>
+          </section>
+        )}
         <div className="profile-stats">
-          <span className="eyebrow">Statistics not aggregated yet</span>
+          <span className="eyebrow">SAVED RUN ACTIVITY</span>
           <div>
             <span>
-              <strong>-</strong>Reviews
+              <strong>{counts.recordedEvents}</strong>Recorded events
             </span>
             <span>
-              <strong>-</strong>Findings
-            </span>
-            <span>
-              <strong>-</strong>Tasks run
+              <strong>{counts.runsWithEvents}</strong>Runs with events
             </span>
           </div>
-        </div>
-        <div className="activity">
-          <span className="eyebrow">CURRENT ACTIVITY</span>
           <p>
-            <span className="dot muted-dot" /> See the task room for run
-            activity
+            Across {activity.scannedRuns} recent saved{" "}
+            {activity.scannedRuns === 1 ? "run" : "runs"}
+            {activity.partial ? " (partial count)" : ""}. Events are saved
+            messages and handoffs, not verified work or completed tasks.
           </p>
+          <button
+            className="secondary"
+            onClick={onRefreshActivity}
+            disabled={activityLoading}
+          >
+            {activityLoading ? "Refreshing activity..." : "Refresh activity"}
+          </button>
+          {activityError && <p role="alert">{activityError}</p>}
         </div>
         {full && (
           <>
@@ -152,14 +372,6 @@ function Profile({
             </p>
           </>
         )}
-        <div className="capabilities">
-          <span>
-            <BookOpen size={14} /> Code review
-          </span>
-          <span>
-            <ShieldCheck size={14} /> Evidence first
-          </span>
-        </div>
         {!full && (
           <button className="secondary wide" onClick={onOpen}>
             Open full profile <ArrowRight size={15} />
@@ -174,11 +386,99 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [error, setError] = useState("");
   const [page, setPage] = useState<Page>("Room");
+  const [settingsSection, setSettingsSection] =
+    useState<SettingsSection>("team");
   const [personId, setPersonId] = useState("ellis");
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [settingsRunId, setSettingsRunId] = useState<string | null>(null);
   const [newTask, setNewTask] = useState(false);
-  const [editing, setEditing] = useState(false);
+  const [taskDraft, setTaskDraft] = useState({
+    title: "",
+    description: "",
+    mode: "plan" as "plan" | "work",
+  });
+  const [previewSession, setPreviewSession] = useState<SessionInfo | null>(
+    null,
+  );
+  const [resumeTaskSetup, setResumeTaskSetup] = useState(false);
+  const [teamNameEditing, setTeamNameEditing] = useState(false);
+  const [rosterEditing, setRosterEditing] = useState(false);
+  const [rosterDraft, setRosterDraft] = useState<FixedRoster | null>(null);
+  const [newTeamCreating, setNewTeamCreating] = useState(false);
+  const [teamDeleting, setTeamDeleting] = useState<string | null>(null);
+  const [deletedTeamPage, setDeletedTeamPage] = useState(0);
+  const [newTeamName, setNewTeamName] = useState("");
+  const [taskEditing, setTaskEditing] = useState(false);
+  const [taskDeleting, setTaskDeleting] = useState(false);
+  const [taskRunCount, setTaskRunCount] = useState<number | null>(null);
+  const [taskViewRevision, setTaskViewRevision] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityError, setActivityError] = useState("");
+  const [panelWidths, setPanelWidths] = useState(savedPanelWidths);
+  const [availableWidth, setAvailableWidth] = useState(() => window.innerWidth);
+  const displayPanelWidths = clampPanelWidths(panelWidths, availableWidth);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const draggingPanel = useRef<PanelSide | null>(null);
+  useEffect(() => {
+    try {
+      localStorage.setItem(panelStorageKey, JSON.stringify(panelWidths));
+    } catch {
+      // A blocked storage write must not break the room layout.
+    }
+  }, [panelWidths]);
+  useEffect(() => {
+    const onResize = () =>
+      setAvailableWidth(gridRef.current?.clientWidth || window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  function setPanelWidth(side: PanelSide, desired: number) {
+    const available = gridRef.current?.clientWidth || window.innerWidth;
+    setPanelWidths((current) => {
+      const other = side === "task" ? "team" : "task";
+      const max = Math.min(
+        panelMax[side],
+        Math.max(
+          panelMin[side],
+          available - roomMin - dividerSpace - displayPanelWidths[other],
+        ),
+      );
+      return {
+        ...current,
+        [side]: Math.round(Math.min(max, Math.max(panelMin[side], desired))),
+      };
+    });
+  }
+  function panelKeyDown(side: PanelSide, event: KeyboardEvent<HTMLDivElement>) {
+    const direction = side === "task" ? 1 : -1;
+    if (event.key === "Home") {
+      event.preventDefault();
+      setPanelWidth(side, panelDefaults[side]);
+    } else if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+      event.preventDefault();
+      const step = event.key === "ArrowRight" ? direction : -direction;
+      setPanelWidth(side, displayPanelWidths[side] + step * 20);
+    }
+  }
+  function panelPointerMove(
+    side: PanelSide,
+    event: PointerEvent<HTMLDivElement>,
+  ) {
+    if (
+      draggingPanel.current !== side ||
+      !gridRef.current ||
+      !Number.isFinite(event.clientX)
+    )
+      return;
+    const bounds = gridRef.current.getBoundingClientRect();
+    setPanelWidth(
+      side,
+      side === "task"
+        ? event.clientX - bounds.left - 3
+        : bounds.right - event.clientX - 3,
+    );
+  }
   useEffect(() => {
     if (!api) {
       setError(
@@ -202,19 +502,64 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
       active = false;
     };
   }, [api]);
+  useEffect(() => {
+    if (
+      !api ||
+      (!newTask && !(page === "Settings" && settingsSection === "team"))
+    )
+      return;
+    let active = true;
+    api.session().then(
+      (session) => {
+        if (active) setPreviewSession(session);
+      },
+      () => {
+        if (active) setPreviewSession(null);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [api, newTask, page, settingsSection]);
   if (!workspace)
     return (
       <div className="loading">
-        <Sparkles size={36} />
+        <img
+          className="loading-logo"
+          src={scullyLogo}
+          alt="Scully alien head"
+        />
         <h1>Scully</h1>
         <p role={error ? "alert" : "status"}>
           {error || "Opening your workspace..."}
         </p>
       </div>
     );
-  const person = workspace.teammates.find((t) => t.id === personId)!;
   const task = workspace.tasks.find((t) => t.id === taskId);
-  const team = workspace.teammates;
+  const savedTeams = workspace.savedTeams || [
+    {
+      id: "legacy-default",
+      name: "Scully team",
+      version: 1,
+      createdAt: "",
+      members: workspace.teammates,
+    },
+  ];
+  const defaultTeam =
+    savedTeams.find((saved) => saved.id === workspace.defaultTeamId) ||
+    savedTeams[0];
+  const availableTeams = savedTeams.filter(
+    (saved) => saved.kind !== "snapshot" && !saved.deletedAt,
+  );
+  const deletedTeams = savedTeams.filter(
+    (saved) => saved.kind === "library" && !!saved.deletedAt,
+  );
+  const taskTeam = task
+    ? savedTeams.find((saved) => saved.id === task.teamConfigId) || defaultTeam
+    : defaultTeam;
+  const visibleTeam = page === "Settings" ? defaultTeam : taskTeam;
+  const team = visibleTeam.members;
+  const person = team.find((t) => t.id === personId) || team[0];
   async function createTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -228,7 +573,10 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
       });
       setWorkspace((w) => w && { ...w, tasks: [created, ...w.tasks] });
       setTaskId(created.id);
+      setSettingsRunId(null);
       setNewTask(false);
+      setTaskDraft({ title: "", description: "", mode: "plan" });
+      setResumeTaskSetup(false);
       setPage("Room");
     } catch {
       setError(
@@ -238,31 +586,244 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
       setBusy(false);
     }
   }
-  async function saveProfile(event: FormEvent<HTMLFormElement>) {
+  async function openTaskEdit() {
+    if (!task) return;
+    setError("");
+    setTaskRunCount(null);
+    setTaskEditing(true);
+    try {
+      setTaskRunCount((await api!.runs(task.id)).length);
+    } catch {
+      setError("Could not check saved runs. Editing is unavailable for now.");
+    }
+  }
+  async function saveTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!task || taskRunCount === null) return;
     const form = new FormData(event.currentTarget);
     setBusy(true);
     setError("");
     try {
-      const updated = await api!.updateTeammate({
-        id: person.id,
-        name: String(form.get("name")),
-        role: String(form.get("role")),
-        bio: String(form.get("bio")),
-        instructions: String(form.get("instructions")),
+      const updated = await api!.updateTask(task.id, {
+        title: String(form.get("title")),
+        description: String(form.get("description")),
+        mode:
+          taskRunCount > 0
+            ? task.mode
+            : form.get("mode") === "work"
+              ? "work"
+              : "plan",
       });
       setWorkspace(
         (w) =>
           w && {
             ...w,
-            teammates: w.teammates.map((t) =>
-              t.id === updated.id ? updated : t,
+            tasks: w.tasks.map((item) =>
+              item.id === updated.id ? updated : item,
             ),
           },
       );
-      setEditing(false);
+      setTaskViewRevision((value) => value + 1);
+      setTaskEditing(false);
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Could not update this task.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function deleteTask() {
+    if (!task) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api!.deleteTask(task.id);
+      setWorkspace(
+        (w) =>
+          w && { ...w, tasks: w.tasks.filter((item) => item.id !== task.id) },
+      );
+      setTaskId(null);
+      setSettingsRunId(null);
+      setTaskDeleting(false);
+      setPage("Room");
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Could not delete this task.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  function openRosterEditor() {
+    setError("");
+    setRosterDraft(
+      defaultTeam.roster
+        ? {
+            ...defaultTeam.roster,
+            memberIds: [...defaultTeam.roster.memberIds],
+          }
+        : null,
+    );
+    setRosterEditing(true);
+  }
+  function toggleCharacter(id: CharacterId) {
+    if (!rosterDraft || id === "pearl") return;
+    const included = rosterDraft.memberIds.includes(id);
+    if (!included) {
+      setRosterDraft({
+        ...rosterDraft,
+        memberIds: [...rosterDraft.memberIds, id],
+      });
+      return;
+    }
+    const memberIds = rosterDraft.memberIds.filter(
+      (memberId) => memberId !== id,
+    );
+    const replacement = (role: "builder" | "auditor") =>
+      memberIds.find(
+        (memberId) =>
+          characterCatalog.find((character) => character.id === memberId)
+            ?.role === role,
+      );
+    if (id === rosterDraft.activeBuilderId && !replacement("builder")) return;
+    if (id === rosterDraft.activeAuditorId && !replacement("auditor")) return;
+    setRosterDraft({
+      memberIds,
+      activeBuilderId:
+        id === rosterDraft.activeBuilderId
+          ? replacement("builder")!
+          : rosterDraft.activeBuilderId,
+      activeAuditorId:
+        id === rosterDraft.activeAuditorId
+          ? replacement("auditor")!
+          : rosterDraft.activeAuditorId,
+      activeTesterId:
+        id === rosterDraft.activeTesterId ? null : rosterDraft.activeTesterId,
+    });
+  }
+  async function saveRoster(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!rosterDraft) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api!.saveTeam({
+        name: defaultTeam.name,
+        ...rosterDraft,
+        expectedDefaultTeamId: defaultTeam.id,
+        saveMode: "overwrite",
+      });
+      setWorkspace(await api!.load());
+      setRosterEditing(false);
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Could not save team roster.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function refreshActivity() {
+    setActivityLoading(true);
+    setActivityError("");
+    try {
+      const refreshed = await api!.load();
+      setWorkspace((w) => w && { ...w, activity: refreshed.activity });
     } catch {
-      setError("Could not save the profile. Please try again.");
+      setActivityError("Saved activity could not be refreshed. Try again.");
+    } finally {
+      setActivityLoading(false);
+    }
+  }
+  async function changeTeamName(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const name = String(form.get("teamName")).trim();
+    if (!name || name === defaultTeam.name) {
+      setTeamNameEditing(false);
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await api!.saveTeam({
+        name,
+        ...defaultTeam.roster!,
+        expectedDefaultTeamId: defaultTeam.id,
+        saveMode: "overwrite",
+      });
+      setWorkspace(await api!.load());
+      setTeamNameEditing(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not save team.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function createTeam(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await api!.saveTeam({
+        name: newTeamName.trim(),
+        ...defaultTeam.roster!,
+        expectedDefaultTeamId: defaultTeam.id,
+        saveMode: "new",
+      });
+      setWorkspace(await api!.load());
+      setNewTeamCreating(false);
+      setNewTeamName("");
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Could not create team.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function deleteSavedTeam(id: string) {
+    setBusy(true);
+    setError("");
+    try {
+      await api!.deleteTeam(id);
+      setWorkspace(await api!.load());
+      setTeamDeleting(null);
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Could not delete team.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function restoreSavedTeam(id: string) {
+    setBusy(true);
+    setError("");
+    try {
+      await api!.restoreTeam(id);
+      setWorkspace(await api!.load());
+      if (deletedTeamPage * 10 >= deletedTeams.length - 1)
+        setDeletedTeamPage((page) => Math.max(0, page - 1));
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Could not restore team.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function useSavedTeam(id: string) {
+    setBusy(true);
+    setError("");
+    try {
+      await api!.setDefaultTeam(id);
+      setWorkspace(await api!.load());
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Could not select team.",
+      );
     } finally {
       setBusy(false);
     }
@@ -275,14 +836,32 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
           onClick={() => setPage("Room")}
           aria-label="Scully home"
         >
-          <Sparkles size={25} />
+          <img
+            className="brand-logo"
+            src={scullyLogo}
+            alt="Scully alien head"
+          />
           <span>Scully</span>
         </button>
-        <nav aria-label="Main navigation">
+        <nav
+          aria-label="Main navigation"
+          style={
+            {
+              "--nav-index": navigation.findIndex(
+                ({ name }) => name === (page === "Profile" ? "Room" : page),
+              ),
+            } as CSSProperties
+          }
+        >
+          <span className="main-nav-indicator" aria-hidden="true" />
           {navigation.map(({ name, icon: Icon }) => (
             <button
               key={name}
-              className={page === name ? "active" : ""}
+              className={
+                page === name || (page === "Profile" && name === "Room")
+                  ? "active"
+                  : ""
+              }
               aria-current={page === name ? "page" : undefined}
               onClick={() => setPage(name)}
             >
@@ -298,15 +877,24 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
           You
         </div>
       </header>
-      <div className="workspace-grid">
+      <div
+        className="workspace-grid"
+        ref={gridRef}
+        style={
+          {
+            "--task-panel-width": `${displayPanelWidths.task}px`,
+            "--team-panel-width": `${displayPanelWidths.team}px`,
+          } as CSSProperties
+        }
+      >
         <aside className="project-sidebar">
           <div className="project-heading">
             <span className="project-mark">
-              <Sparkles size={22} />
+              <img src={scullyLogo} alt="Scully alien head" />
             </span>
             <div>
-              <strong>Your workspace</strong>
-              <small>Engineering, together</small>
+              <strong>Scully home</strong>
+              <small>Tasks and team</small>
             </div>
           </div>
           <button
@@ -318,27 +906,23 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
           >
             <Plus size={17} /> New task <span>↗</span>
           </button>
-          <div className="sidebar-label">WORKSPACE</div>
+          <div className="sidebar-label">HOME</div>
           <button
             className={`sidebar-item ${taskId === null ? "selected" : ""}`}
             onClick={() => {
               setTaskId(null);
+              setSettingsRunId(null);
               setPage("Room");
             }}
           >
-            <LayoutGrid size={17} /> Explore the room{" "}
-            <span className="tiny-badge">Demo</span>
+            <LayoutGrid size={17} /> Overview
           </button>
           <div className="sidebar-label task-label">
             YOUR TASKS <span>{workspace.tasks.length}</span>
           </div>
           <div className="task-list">
             {workspace.tasks.length === 0 ? (
-              <p className="quiet-note">
-                A fresh start.
-                <br />
-                Your next idea belongs here.
-              </p>
+              <p className="quiet-note">No tasks yet. Create one to begin.</p>
             ) : (
               workspace.tasks.map((t) => (
                 <button
@@ -346,6 +930,7 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
                   className={`sidebar-item task-item ${taskId === t.id ? "selected" : ""}`}
                   onClick={() => {
                     setTaskId(t.id);
+                    setSettingsRunId(null);
                     setPage("Room");
                   }}
                 >
@@ -355,36 +940,14 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
               ))
             )}
           </div>
-          <div className="current-task">
-            <span className="eyebrow">
-              {task ? "SAVED TASK" : "EXAMPLE TASK"}
-            </span>
-            <h3>{task?.title || "Build password reset"}</h3>
-            <p>
-              {task?.description ||
-                "Add a secure reset flow to the existing app."}
-            </p>
-            <ol className="steps">
-              {["Plan agreed", "Building", "Reviewing", "Ready for you"].map(
-                (s, i) => (
-                  <li
-                    key={s}
-                    className={
-                      !task && i < 2
-                        ? "done"
-                        : !task && i === 2
-                          ? "current"
-                          : ""
-                    }
-                  >
-                    <span>{!task && i < 2 ? <Check size={12} /> : i + 1}</span>
-                    {s}
-                  </li>
-                ),
-              )}
-            </ol>
-            {task && <small>Run status is shown in the task room.</small>}
-          </div>
+          {task && (
+            <div className="current-task">
+              <span className="eyebrow">SAVED TASK</span>
+              <h3>{task.title}</h3>
+              {task.description && <p>{task.description}</p>}
+              <small>Run status is shown in the task room.</small>
+            </div>
+          )}
           <div className="permission-card">
             <ShieldCheck size={18} />
             <div>
@@ -392,7 +955,7 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
               <small>
                 Local commands require fresh approval.
                 <br />
-                Publishing requires approval.
+                Publishing is not available yet.
               </small>
             </div>
           </div>
@@ -400,6 +963,26 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
             <span className="dot muted-dot" /> Local workspace <span>v0.2</span>
           </div>
         </aside>
+        <div
+          className="panel-divider"
+          role="separator"
+          aria-label="Resize task panel"
+          aria-orientation="vertical"
+          aria-valuemin={panelMin.task}
+          aria-valuemax={panelMax.task}
+          aria-valuenow={displayPanelWidths.task}
+          tabIndex={0}
+          title="Drag to resize the task panel. Use arrow keys for small steps."
+          onKeyDown={(event) => panelKeyDown("task", event)}
+          onPointerDown={(event) => {
+            draggingPanel.current = "task";
+            event.currentTarget.setPointerCapture?.(event.pointerId);
+          }}
+          onPointerMove={(event) => panelPointerMove("task", event)}
+          onPointerUp={() => (draggingPanel.current = null)}
+          onPointerCancel={() => (draggingPanel.current = null)}
+          onLostPointerCapture={() => (draggingPanel.current = null)}
+        />
         <main className="main-panel">
           {page === "Room" && (
             <>
@@ -409,123 +992,82 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
                   <h1>
                     Team room<span className="heading-dot">.</span>
                   </h1>
-                  <p>{task?.title || "Good work happens in good company."}</p>
+                  <p>{task?.title || "Your tasks and team, in one place."}</p>
                 </div>
                 <span className="team-count">
-                  <Users size={16} /> 3 teammates
-                </span>
-              </div>
-              <div className="preview-banner">
-                <FlaskConical size={17} />
-                <span>
-                  {task
-                    ? "Private drafts · applying changes requires your approval."
-                    : "Example conversation · a preview of how your team will work."}
+                  <Users size={16} /> {team.length}{" "}
+                  {team.length === 1 ? "teammate" : "teammates"}
                 </span>
               </div>
               {task ? (
-                <RunPanel key={task.id} api={api!} task={task} team={team} />
-              ) : (
-                <div className="conversation">
-                  <div className="day-divider">
-                    <span /> A look inside the room <span />
-                  </div>
-                  <Message
-                    person={team[0]}
-                    time="10:14"
-                    onSelect={() => setPersonId("maya")}
-                  >
-                    Reset flow is ready for review. I kept the existing auth
-                    patterns.
-                  </Message>
-                  <Message
-                    person={team[1]}
-                    time="10:18"
-                    onSelect={() => setPersonId("ellis")}
-                  >
-                    The reset token can be reused. I’m checking that against the
-                    new tests.
-                  </Message>
-                  <Message
-                    person={team[0]}
-                    time="10:27"
-                    onSelect={() => setPersonId("maya")}
-                  >
-                    Confirmed. I’ve added single-use token handling.
-                  </Message>
-                  <div className="evidence-card">
-                    <span className="evidence-icon">
-                      <FlaskConical size={22} />
-                    </span>
-                    <div>
-                      <strong>
-                        Single-use token check{" "}
-                        <span className="pill">Example</span>
-                      </strong>
-                      <p>Reusing a consumed token is rejected.</p>
-                    </div>
-                    <Check size={18} />
-                  </div>
-                  <Message
-                    person={team[2]}
-                    time="10:35"
-                    onSelect={() => setPersonId("jun")}
-                  >
-                    Checking expired tokens and repeat submissions next.
-                  </Message>
-                  <div className="room-callout">
-                    <span className="callout-icon">
-                      <Target size={20} />
-                    </span>
-                    <div>
-                      <strong>
-                        A second pair of eyes. Whenever you need it.
-                      </strong>
-                      <p>Specialist reviews will be one click away.</p>
-                    </div>
-                  </div>
-                </div>
-              )}
-              {!task && (
-                <div className="composer-area">
-                  <div className="audit-actions">
-                    {[
-                      { text: "Check goal", icon: Target },
-                      { text: "Review code", icon: Code2 },
-                      { text: "Try to break it", icon: FlaskConical },
-                    ].map(({ text, icon: Icon }) => (
-                      <button
-                        key={text}
-                        disabled
-                        title="Available when the agent runtime is connected"
-                      >
-                        <Icon size={16} />
-                        {text}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="composer">
-                    <Plus size={19} />
-                    <textarea
-                      aria-label="Message the team"
-                      disabled
-                      placeholder="Message the team or @ a teammate..."
-                      rows={1}
-                    />
-                    <button disabled aria-label="Send message">
-                      <ArrowUp size={21} />
+                <>
+                  <div className="task-actions" aria-label="Task actions">
+                    <button className="secondary" onClick={openTaskEdit}>
+                      <Pencil size={14} /> Edit task
+                    </button>
+                    <button
+                      className="secondary danger-action"
+                      onClick={() => {
+                        setError("");
+                        setTaskDeleting(true);
+                      }}
+                    >
+                      Delete task
                     </button>
                   </div>
-                  <div className="composer-caption">
+                  <div className="preview-banner">
+                    <ShieldCheck size={17} />
                     <span>
-                      Mid-task messaging is planned for the coordination
-                      milestone.
-                    </span>
-                    <span>
-                      Private by default <ShieldCheck size={11} />
+                      Private drafts · applying changes requires your approval.
                     </span>
                   </div>
-                </div>
+                  <RunPanel
+                    key={`${task.id}:${taskViewRevision}`}
+                    api={api!}
+                    task={task}
+                    team={team}
+                    settingsView="summary"
+                    onOpenSettings={(runId) => {
+                      setSettingsRunId(runId);
+                      setSettingsSection("run");
+                      setPage("Settings");
+                    }}
+                  />
+                </>
+              ) : (
+                <section className="room-empty" aria-label="Task overview">
+                  <span className="room-empty-icon">
+                    <LayoutGrid size={28} />
+                  </span>
+                  <span className="eyebrow">
+                    {workspace.tasks.length ? "YOUR TASKS" : "START HERE"}
+                  </span>
+                  <h2>
+                    {workspace.tasks.length
+                      ? "Choose a saved task."
+                      : "Start your first task."}
+                  </h2>
+                  <p>
+                    {workspace.tasks.length
+                      ? "Select a task in the sidebar to continue where you left off, or create another one."
+                      : "Create a task, choose a project source, then review exactly what Scully will share before any model request."}
+                  </p>
+                  <button
+                    className="primary"
+                    onClick={() => {
+                      setError("");
+                      setNewTask(true);
+                    }}
+                  >
+                    {workspace.tasks.length
+                      ? "Create another task"
+                      : "Create your first task"}
+                    <ArrowRight size={16} />
+                  </button>
+                  <small>
+                    Nothing is sent to a model until you approve a run.
+                  </small>
+                </section>
               )}
             </>
           )}
@@ -534,18 +1076,13 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
               <button className="back-button" onClick={() => setPage("Room")}>
                 <ArrowLeft size={16} /> Back to room
               </button>
-              <div className="page-heading">
-                <span className="eyebrow">MEET YOUR TEAMMATE</span>
-                <h1>{person.name}</h1>
-                <p>A clear role. A shared goal.</p>
-              </div>
               <Profile
                 person={person}
+                activity={workspace.activity}
                 full
-                onEdit={() => {
-                  setError("");
-                  setEditing(true);
-                }}
+                onRefreshActivity={refreshActivity}
+                activityLoading={activityLoading}
+                activityError={activityError}
               />
             </>
           )}
@@ -557,6 +1094,12 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
                 task={task}
                 team={team}
                 changes
+                settingsView="summary"
+                onOpenSettings={(runId) => {
+                  setSettingsRunId(runId);
+                  setSettingsSection("run");
+                  setPage("Settings");
+                }}
               />
             ) : (
               <EmptyPage
@@ -570,7 +1113,7 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
             <EmptyPage
               icon={<Monitor size={30} />}
               title="See what you’re building."
-              text="Your running project will appear here when preview support is connected. For now, explore the room or save your first task."
+              text="Your running project will appear here when preview support is connected. For now, return to your workspace or save a task."
               note="No application preview is running."
             />
           )}
@@ -581,36 +1124,326 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
                 <h1>Settings</h1>
                 <p>Safe defaults, visible boundaries.</p>
               </div>
-              <section className="settings-card">
-                <h2>Execution & permissions</h2>
-                <Setting
-                  title="Local commands"
-                  detail="Approve each command individually"
+              <nav
+                className="settings-sections"
+                aria-label="Settings sections"
+                style={
+                  {
+                    "--settings-index": settingsSections.findIndex(
+                      (section) => section.id === settingsSection,
+                    ),
+                  } as CSSProperties
+                }
+              >
+                <span
+                  className="settings-section-indicator"
+                  aria-hidden="true"
                 />
-                <Setting
-                  title="Publishing"
-                  detail="Explicit approval before commit, push or pull request"
-                />
-                <Setting
-                  title="Agent connection"
-                  detail="Configure the session below; each run needs approval"
-                />
-                <Setting
-                  title="Theme"
-                  detail="Dark · light theme planned for later"
-                />
-              </section>
-              <ConnectionSettings api={api!} />
-              <MetricsPanel api={api!} />
-              <StoragePanel api={api!} />
+                {settingsSections.map(({ id, label, icon: Icon }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    className={`settings-section-button ${settingsSection === id ? "active" : ""}`}
+                    aria-current={settingsSection === id ? "page" : undefined}
+                    onClick={() => setSettingsSection(id)}
+                  >
+                    <Icon size={17} aria-hidden="true" />
+                    {label}
+                  </button>
+                ))}
+              </nav>
+              <div className="settings-content" key={settingsSection}>
+                {settingsSection === "run" && (
+                  <RunSettings api={api!} task={task} runId={settingsRunId} />
+                )}
+                {settingsSection === "team" && (
+                  <section className="settings-card" aria-label="Team settings">
+                    <div className="team-settings-heading">
+                      <h2>{defaultTeam.name}</h2>
+                      <button
+                        className="edit-profile"
+                        onClick={() => {
+                          setError("");
+                          setTeamNameEditing(true);
+                        }}
+                        aria-label="Change team name"
+                      >
+                        <Pencil size={15} />
+                      </button>
+                    </div>
+                    <p>
+                      This team is used for new tasks. Existing tasks keep the
+                      team they started with.
+                    </p>
+                    <div className="team-library-heading">
+                      <h3>Team members ({defaultTeam.members.length}/16)</h3>
+                      <button
+                        className="secondary"
+                        disabled={busy}
+                        onClick={openRosterEditor}
+                      >
+                        <Users size={16} /> Choose team members
+                      </button>
+                    </div>
+                    <ul className="team-member-list">
+                      {defaultTeam.members.map((member) => (
+                        <li key={member.id}>
+                          <span>
+                            <strong>{member.name}</strong> · {member.role}
+                            <small>
+                              {" "}
+                              ·{" "}
+                              {runRole(member) === "reserve"
+                                ? "Reserve, no automatic request"
+                                : `${runRole(member)} in runs`}
+                            </small>
+                          </span>
+                          <div className="team-library-actions">
+                            <span className="tiny-badge">
+                              {runRole(member) === "reserve"
+                                ? "Available"
+                                : "Active"}
+                            </span>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="muted">
+                      Current runs call one selected builder, one independent
+                      auditor and, when assigned, one tester. Pearl and other
+                      selected characters remain available without an automatic
+                      model request. More active agents require a later approved
+                      dispatch step.
+                    </p>
+                    <p className="muted">Preview for a new Plan first task:</p>
+                    <TeamPreview
+                      team={defaultTeam.members}
+                      mode="plan"
+                      session={previewSession}
+                      context="team"
+                    />
+                    <div className="command-actions">
+                      {resumeTaskSetup && (
+                        <button
+                          className="primary"
+                          onClick={() => {
+                            setNewTask(true);
+                            setResumeTaskSetup(false);
+                            setPage("Room");
+                          }}
+                        >
+                          Continue task setup
+                        </button>
+                      )}
+                    </div>
+                    <div className="team-library-heading">
+                      <h3>Saved teams ({availableTeams.length}/20)</h3>
+                      <button
+                        className="secondary"
+                        disabled={busy || availableTeams.length >= 20}
+                        onClick={() => {
+                          setError("");
+                          setNewTeamName("");
+                          setNewTeamCreating(true);
+                        }}
+                      >
+                        <Plus size={16} /> Create team
+                      </button>
+                    </div>
+                    <ul className="saved-team-list">
+                      {availableTeams.map((saved) => (
+                        <li key={saved.id}>
+                          <div>
+                            <strong>{saved.name}</strong>
+                            <small>
+                              {saved.members
+                                .map((member) => member.name)
+                                .join(", ")}
+                            </small>
+                          </div>
+                          <div className="team-library-actions">
+                            {saved.id === defaultTeam.id ? (
+                              <span className="tiny-badge">Current</span>
+                            ) : (
+                              <button
+                                className="secondary"
+                                disabled={busy}
+                                onClick={() => useSavedTeam(saved.id)}
+                              >
+                                Use for new tasks
+                              </button>
+                            )}
+                            <button
+                              className="secondary"
+                              disabled={busy || saved.id === defaultTeam.id}
+                              title={
+                                saved.id === defaultTeam.id
+                                  ? "Choose another team first"
+                                  : `Delete ${saved.name}`
+                              }
+                              onClick={() => {
+                                setError("");
+                                setTeamDeleting(saved.id);
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                    {availableTeams.length >= 20 && (
+                      <p className="muted">
+                        The 20-team limit is reached. Delete an available team
+                        to create or restore another.
+                      </p>
+                    )}
+                    <p className="muted saved-team-deletion-note">
+                      Choose another team for new tasks before deleting the
+                      current one. Existing tasks keep their saved team.
+                    </p>
+                    {deletedTeams.length > 0 && (
+                      <details className="team-history">
+                        <summary>Deleted teams ({deletedTeams.length})</summary>
+                        <ul className="saved-team-list">
+                          {deletedTeams
+                            .slice(
+                              deletedTeamPage * 10,
+                              deletedTeamPage * 10 + 10,
+                            )
+                            .map((saved) => (
+                              <li key={saved.id}>
+                                <div>
+                                  <strong>{saved.name}</strong>
+                                  <small>
+                                    {saved.members
+                                      .map((member) => member.name)
+                                      .join(", ")}
+                                  </small>
+                                </div>
+                                <button
+                                  className="secondary"
+                                  disabled={busy}
+                                  onClick={() => restoreSavedTeam(saved.id)}
+                                >
+                                  Restore team
+                                </button>
+                              </li>
+                            ))}
+                        </ul>
+                        {deletedTeams.length > 10 && (
+                          <div className="team-library-actions">
+                            <button
+                              className="secondary"
+                              disabled={deletedTeamPage === 0}
+                              onClick={() =>
+                                setDeletedTeamPage((page) => page - 1)
+                              }
+                            >
+                              Previous
+                            </button>
+                            <span>
+                              Page {deletedTeamPage + 1} of{" "}
+                              {Math.ceil(deletedTeams.length / 10)}
+                            </span>
+                            <button
+                              className="secondary"
+                              disabled={
+                                (deletedTeamPage + 1) * 10 >=
+                                deletedTeams.length
+                              }
+                              onClick={() =>
+                                setDeletedTeamPage((page) => page + 1)
+                              }
+                            >
+                              Next
+                            </button>
+                          </div>
+                        )}
+                      </details>
+                    )}
+                    {error &&
+                      !teamNameEditing &&
+                      !newTeamCreating &&
+                      !teamDeleting &&
+                      !rosterEditing && (
+                        <p role="alert" className="error">
+                          {error}
+                        </p>
+                      )}
+                  </section>
+                )}
+                {settingsSection === "app" && (
+                  <>
+                    <section className="settings-card">
+                      <h2>Execution & permissions</h2>
+                      <Setting
+                        title="Local commands"
+                        detail="Approve each command individually"
+                      />
+                      <Setting
+                        title="Publishing"
+                        detail="Explicit approval before commit, push or pull request"
+                      />
+                      <Setting
+                        title="Agent connection"
+                        detail="Configure the session below; each run needs approval"
+                      />
+                      <Setting
+                        title="Theme"
+                        detail="Dark · light theme planned for later"
+                      />
+                    </section>
+                    <ConnectionSettings api={api!} />
+                    <MetricsPanel api={api!} />
+                    <StoragePanel api={api!} />
+                  </>
+                )}
+              </div>
             </>
           )}
         </main>
+        <div
+          className="panel-divider"
+          role="separator"
+          aria-label="Resize team panel"
+          aria-orientation="vertical"
+          aria-valuemin={panelMin.team}
+          aria-valuemax={panelMax.team}
+          aria-valuenow={displayPanelWidths.team}
+          tabIndex={0}
+          title="Drag to resize the team panel. Use arrow keys for small steps."
+          onKeyDown={(event) => panelKeyDown("team", event)}
+          onPointerDown={(event) => {
+            draggingPanel.current = "team";
+            event.currentTarget.setPointerCapture?.(event.pointerId);
+          }}
+          onPointerMove={(event) => panelPointerMove("team", event)}
+          onPointerUp={() => (draggingPanel.current = null)}
+          onPointerCancel={() => (draggingPanel.current = null)}
+          onLostPointerCapture={() => (draggingPanel.current = null)}
+        />
         <aside className="team-sidebar">
           <div className="section-heading">
-            <h2>Your team</h2>
-            <span className="tiny-badge">3 members</span>
+            <h2>{visibleTeam.name}</h2>
+            <span className="tiny-badge">
+              {team.length} {team.length === 1 ? "member" : "members"}
+            </span>
           </div>
+          <p className="muted">
+            {task && page !== "Settings"
+              ? "Saved for this task"
+              : "Default for new tasks"}
+          </p>
+          <button
+            className="team-settings-link"
+            onClick={() => {
+              setSettingsSection("team");
+              setPage("Settings");
+            }}
+          >
+            <Settings2 size={14} /> Manage team
+          </button>
           <div className="team-cards">
             {team.map((t) => (
               <button
@@ -628,19 +1461,16 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
                       ? "Tester"
                       : t.role}
                 </small>
-                <span className="team-status">
-                  <span className="dot muted-dot" /> Ready
-                </span>
               </button>
             ))}
           </div>
           <Profile
             person={person}
+            activity={workspace.activity}
+            onRefreshActivity={refreshActivity}
+            activityLoading={activityLoading}
+            activityError={activityError}
             onOpen={() => setPage("Profile")}
-            onEdit={() => {
-              setError("");
-              setEditing(true);
-            }}
           />
           <div className="team-footnote">
             <CircleHelp size={15} />
@@ -656,19 +1486,124 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
         <Modal
           title="What shall we build?"
           onClose={() => !busy && setNewTask(false)}
+          className="new-task-dialog"
         >
-          <form onSubmit={createTask}>
-            <p className="muted">
-              Save an idea, then choose a project source and approve a bounded
-              run.
-            </p>
+          <form onSubmit={createTask} className="new-task-form">
+            <div className="new-task-scroll">
+              <p className="muted">
+                Save an idea, then choose a project source and approve a bounded
+                run.
+              </p>
+              <label>
+                Task title
+                <input
+                  name="title"
+                  value={taskDraft.title}
+                  onChange={(event) =>
+                    setTaskDraft((current) => ({
+                      ...current,
+                      title: event.target.value,
+                    }))
+                  }
+                  required
+                  maxLength={120}
+                  placeholder="e.g. Add a password reset flow"
+                  autoFocus
+                />
+              </label>
+              <label>
+                What should the team know?
+                <textarea
+                  name="description"
+                  value={taskDraft.description}
+                  onChange={(event) =>
+                    setTaskDraft((current) => ({
+                      ...current,
+                      description: event.target.value,
+                    }))
+                  }
+                  maxLength={4000}
+                  rows={4}
+                  placeholder="Describe the outcome and any constraints..."
+                />
+              </label>
+              <fieldset>
+                <legend>How would you like to begin?</legend>
+                <label className="radio-option">
+                  <input
+                    type="radio"
+                    name="mode"
+                    value="plan"
+                    checked={taskDraft.mode === "plan"}
+                    onChange={() =>
+                      setTaskDraft((current) => ({ ...current, mode: "plan" }))
+                    }
+                  />{" "}
+                  Plan first
+                </label>
+                <label className="radio-option">
+                  <input
+                    type="radio"
+                    name="mode"
+                    value="work"
+                    checked={taskDraft.mode === "work"}
+                    onChange={() =>
+                      setTaskDraft((current) => ({ ...current, mode: "work" }))
+                    }
+                  />{" "}
+                  Start working
+                </label>
+              </fieldset>
+              <div className="settings-card">
+                <strong>Team for this task: {defaultTeam.name}</strong>
+                <p>
+                  {defaultTeam.members
+                    .map((member) => `${member.name} (${member.role})`)
+                    .join(", ")}
+                </p>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => {
+                    setNewTask(false);
+                    setResumeTaskSetup(true);
+                    setSettingsSection("team");
+                    setPage("Settings");
+                  }}
+                >
+                  Edit team before creating task
+                </button>
+              </div>
+              <TeamPreview
+                team={defaultTeam.members}
+                mode={taskDraft.mode}
+                session={previewSession}
+              />
+            </div>
+            <div className="new-task-footer">
+              {error && (
+                <p role="alert" className="error">
+                  {error}
+                </p>
+              )}
+              <button className="primary wide" disabled={busy}>
+                {busy ? "Saving..." : "Save task"}
+                <ArrowRight size={16} />
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+      {taskEditing && task && (
+        <Modal title="Edit task" onClose={() => !busy && setTaskEditing(false)}>
+          <form onSubmit={saveTask}>
             <label>
               Task title
               <input
                 name="title"
+                defaultValue={task.title}
                 required
                 maxLength={120}
-                placeholder="e.g. Add a password reset flow"
                 autoFocus
               />
             </label>
@@ -676,126 +1611,383 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
               What should the team know?
               <textarea
                 name="description"
+                defaultValue={task.description}
                 maxLength={4000}
                 rows={4}
-                placeholder="Describe the outcome and any constraints..."
               />
             </label>
-            <fieldset>
+            <fieldset disabled={taskRunCount !== 0}>
               <legend>How would you like to begin?</legend>
               <label className="radio-option">
-                <input type="radio" name="mode" value="plan" defaultChecked />{" "}
+                <input
+                  type="radio"
+                  name="mode"
+                  value="plan"
+                  defaultChecked={task.mode === "plan"}
+                />{" "}
                 Plan first
               </label>
               <label className="radio-option">
-                <input type="radio" name="mode" value="work" /> Start working
+                <input
+                  type="radio"
+                  name="mode"
+                  value="work"
+                  defaultChecked={task.mode === "work"}
+                />{" "}
+                Start working
               </label>
             </fieldset>
+            {taskRunCount === null ? (
+              <p className="muted">Checking saved runs...</p>
+            ) : taskRunCount > 0 ? (
+              <p className="muted">
+                The start mode is locked after a run is prepared. Updated task
+                details apply to future requests, while saved work may reflect
+                the earlier wording.
+              </p>
+            ) : null}
             {error && (
               <p role="alert" className="error">
                 {error}
               </p>
             )}
-            <button className="primary wide" disabled={busy}>
-              {busy ? "Saving..." : "Save task"}
-              <ArrowRight size={16} />
+            <button
+              className="primary wide"
+              disabled={busy || taskRunCount === null}
+            >
+              {busy ? "Saving..." : "Save changes"}
             </button>
           </form>
         </Modal>
       )}
-      {editing && (
+      {taskDeleting && task && (
         <Modal
-          title={`Edit ${person.name}’s profile`}
-          onClose={() => !busy && setEditing(false)}
+          title="Delete task?"
+          onClose={() => !busy && setTaskDeleting(false)}
         >
-          <form onSubmit={saveProfile}>
+          <p>
+            Delete <strong>{task.title}</strong> and its saved runs, usage and
+            cost records? This cannot be undone.
+          </p>
+          <p className="muted">
+            This is available before model work starts. Tasks with saved work
+            keep their run and recovery records. Any existing local files and
+            files already applied to a project stay unchanged.
+          </p>
+          {error && (
+            <p role="alert" className="error">
+              {error}
+            </p>
+          )}
+          <div className="dialog-actions">
+            <button
+              className="secondary"
+              disabled={busy}
+              onClick={() => setTaskDeleting(false)}
+            >
+              Cancel
+            </button>
+            <button
+              className="primary danger-confirm"
+              disabled={busy}
+              onClick={deleteTask}
+            >
+              {busy ? "Deleting..." : "Delete task"}
+            </button>
+          </div>
+        </Modal>
+      )}
+      {rosterEditing && rosterDraft && (
+        <Modal
+          title="Choose team members"
+          onClose={() => !busy && setRosterEditing(false)}
+          className="roster-dialog"
+        >
+          <form onSubmit={saveRoster} className="roster-form">
+            <div className="roster-scroll">
+              <div className="roster-intro">
+                <p>
+                  Build the team for future tasks. Choose people for their
+                  strengths, then assign who works automatically below. Existing
+                  tasks keep their saved team.
+                </p>
+                <span className="roster-count">
+                  {rosterDraft.memberIds.length} of 16 selected
+                </span>
+              </div>
+              <div className="roster-catalog">
+                {rosterGroups.map((group) => (
+                  <section
+                    className="roster-group"
+                    aria-label={group.title}
+                    key={group.role}
+                  >
+                    <div className="roster-group-heading">
+                      <h3>{group.title}</h3>
+                      <p>{group.description}</p>
+                    </div>
+                    <div className="fixed-character-grid">
+                      {characterCatalog
+                        .filter((character) => character.role === group.role)
+                        .map((character) => {
+                          const selected = rosterDraft.memberIds.includes(
+                            character.id,
+                          );
+                          const lastRequired =
+                            selected &&
+                            (character.role === "builder" ||
+                              character.role === "auditor") &&
+                            rosterDraft.memberIds.filter(
+                              (id) =>
+                                characterById(id)?.role === character.role,
+                            ).length === 1;
+                          const required =
+                            character.id === "pearl" || lastRequired;
+                          return (
+                            <button
+                              key={character.id}
+                              type="button"
+                              className={`fixed-character-choice ${selected ? "selected" : ""}`}
+                              aria-pressed={selected}
+                              aria-label={`${character.name}, ${catalogTeammate(character.id).role}`}
+                              disabled={required}
+                              onClick={() => toggleCharacter(character.id)}
+                            >
+                              <Portrait
+                                person={catalogTeammate(character.id)}
+                              />
+                              <span className="fixed-character-copy">
+                                <span className="fixed-character-name">
+                                  <strong>{character.name}</strong>
+                                  <span className="fixed-character-state">
+                                    {required
+                                      ? "Required"
+                                      : selected
+                                        ? "Selected"
+                                        : "Add"}
+                                    {selected && (
+                                      <Check size={13} aria-hidden="true" />
+                                    )}
+                                  </span>
+                                </span>
+                                <span className="fixed-character-role">
+                                  {catalogTeammate(character.id).role}
+                                </span>
+                                <span className="fixed-character-brief">
+                                  {character.brief}
+                                </span>
+                                <span className="fixed-character-story">
+                                  {character.background}
+                                </span>
+                              </span>
+                            </button>
+                          );
+                        })}
+                    </div>
+                  </section>
+                ))}
+              </div>
+              <div className="roster-assignment-grid">
+                <label>
+                  Builder for current runs
+                  <select
+                    value={rosterDraft.activeBuilderId}
+                    onChange={(event) =>
+                      setRosterDraft({
+                        ...rosterDraft,
+                        activeBuilderId: event.target.value as CharacterId,
+                      })
+                    }
+                  >
+                    {characterCatalog
+                      .filter(
+                        (character) =>
+                          character.role === "builder" &&
+                          rosterDraft.memberIds.includes(character.id),
+                      )
+                      .map((character) => (
+                        <option key={character.id} value={character.id}>
+                          {character.name}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <label>
+                  Independent auditor for current runs
+                  <select
+                    value={rosterDraft.activeAuditorId}
+                    onChange={(event) =>
+                      setRosterDraft({
+                        ...rosterDraft,
+                        activeAuditorId: event.target.value as CharacterId,
+                      })
+                    }
+                  >
+                    {characterCatalog
+                      .filter(
+                        (character) =>
+                          character.role === "auditor" &&
+                          rosterDraft.memberIds.includes(character.id),
+                      )
+                      .map((character) => (
+                        <option key={character.id} value={character.id}>
+                          {character.name}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <label>
+                  Tester for current runs
+                  <select
+                    value={rosterDraft.activeTesterId || ""}
+                    onChange={(event) =>
+                      setRosterDraft({
+                        ...rosterDraft,
+                        activeTesterId: event.target.value
+                          ? (event.target.value as CharacterId)
+                          : null,
+                      })
+                    }
+                  >
+                    <option value="">No assigned tester</option>
+                    {characterCatalog
+                      .filter(
+                        (character) =>
+                          character.role === "tester" &&
+                          rosterDraft.memberIds.includes(character.id),
+                      )
+                      .map((character) => (
+                        <option key={character.id} value={character.id}>
+                          {character.name}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              </div>
+              <p className="muted">
+                Only assigned members receive automatic requests. Selected
+                specialists and other available members receive none until a
+                later dispatch step.
+              </p>
+              <TeamPreview
+                team={rosterMembers(rosterDraft)}
+                mode="plan"
+                session={previewSession}
+                context="team"
+              />
+            </div>
+            <div className="roster-footer">
+              {error && (
+                <p role="alert" className="error">
+                  {error}
+                </p>
+              )}
+              <button className="primary wide" disabled={busy}>
+                {busy ? "Saving..." : "Save team roster"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+      {teamNameEditing && (
+        <Modal
+          title="Change team name"
+          onClose={() => setTeamNameEditing(false)}
+        >
+          <form onSubmit={changeTeamName}>
             <label>
-              Name
+              Team name
               <input
-                name="name"
-                defaultValue={person.name}
+                name="teamName"
+                defaultValue={defaultTeam.name}
                 required
-                maxLength={40}
+                maxLength={80}
                 autoFocus
               />
             </label>
-            <label>
-              Role
-              <input
-                name="role"
-                defaultValue={person.role}
-                required
-                maxLength={60}
-              />
-            </label>
-            <label>
-              About
-              <textarea
-                name="bio"
-                defaultValue={person.bio}
-                required
-                maxLength={240}
-                rows={2}
-              />
-            </label>
-            <label>
-              Working instructions
-              <textarea
-                name="instructions"
-                defaultValue={person.instructions}
-                required
-                maxLength={2000}
-                rows={4}
-              />
-            </label>
-            <p className="muted">
-              Saved for future tasks. Instructions do not grant tool
-              permissions.
-            </p>
             {error && (
               <p role="alert" className="error">
                 {error}
               </p>
             )}
             <button className="primary wide" disabled={busy}>
-              {busy ? "Saving..." : "Save profile"}
-              <Check size={16} />
+              {busy ? "Saving..." : "Save changes"}
             </button>
           </form>
         </Modal>
       )}
+      {newTeamCreating && (
+        <Modal
+          title="Create team"
+          onClose={() => !busy && setNewTeamCreating(false)}
+        >
+          <form onSubmit={createTeam}>
+            <p>
+              The new team starts with {defaultTeam.name}'s members. You can
+              edit it after saving.
+            </p>
+            <label>
+              Team name
+              <input
+                value={newTeamName}
+                onChange={(event) => setNewTeamName(event.target.value)}
+                maxLength={80}
+                required
+                autoFocus
+                placeholder="Name this team"
+              />
+            </label>
+            {error && (
+              <p role="alert" className="error">
+                {error}
+              </p>
+            )}
+            <button
+              className="primary wide"
+              disabled={busy || !newTeamName.trim()}
+            >
+              {busy ? "Creating..." : "Create team"}
+            </button>
+          </form>
+        </Modal>
+      )}
+      {teamDeleting && (
+        <Modal
+          title="Delete team?"
+          onClose={() => !busy && setTeamDeleting(null)}
+        >
+          <p>
+            Delete{" "}
+            <strong>
+              {savedTeams.find((saved) => saved.id === teamDeleting)?.name}
+            </strong>{" "}
+            from available teams? Existing tasks keep their saved team. You can
+            restore this team later.
+          </p>
+          {error && (
+            <p role="alert" className="error">
+              {error}
+            </p>
+          )}
+          <div className="dialog-actions">
+            <button
+              className="secondary"
+              disabled={busy}
+              onClick={() => setTeamDeleting(null)}
+            >
+              Cancel
+            </button>
+            <button
+              className="primary danger-confirm"
+              disabled={busy}
+              onClick={() => deleteSavedTeam(teamDeleting)}
+            >
+              {busy ? "Deleting..." : "Delete team"}
+            </button>
+          </div>
+        </Modal>
+      )}
     </div>
-  );
-}
-function Message({
-  person,
-  time,
-  children,
-  onSelect,
-}: {
-  person: Teammate;
-  time: string;
-  children: ReactNode;
-  onSelect: () => void;
-}) {
-  return (
-    <article className="message">
-      <button
-        className="avatar-button"
-        onClick={onSelect}
-        aria-label={`View ${person.name}`}
-      >
-        <Portrait person={person} />
-      </button>
-      <div>
-        <div className="message-heading">
-          <strong>{person.name}</strong>
-          <span>{person.role}</span>
-          <time>{time}</time>
-        </div>
-        <div className="message-bubble">{children}</div>
-      </div>
-    </article>
   );
 }
 function EmptyPage({

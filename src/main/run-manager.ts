@@ -46,6 +46,7 @@ import {
   type SessionConfig,
   type SourceSelection,
 } from "../shared/runs";
+import type { SavedTeam } from "../shared/teams";
 export class RunManager {
   private config: SessionConfig | null = null;
   private selection: SourceSelection | null = null;
@@ -88,6 +89,31 @@ export class RunManager {
     private notifyUsageAlert: (alert: UsageAlert) => void = () => {},
   ) {
     store.recoverRuns();
+  }
+  private teamForRun(run: Run): SavedTeam {
+    const assigned = this.store.teamForTask(run.taskId);
+    if (
+      run.teamSnapshot &&
+      (run.teamSnapshot.id !== assigned.id ||
+        run.teamSnapshot.name !== assigned.name ||
+        run.teamSnapshot.version !== assigned.version ||
+        run.teamSnapshot.createdAt !== assigned.createdAt ||
+        JSON.stringify(run.teamSnapshot.members) !==
+          JSON.stringify(assigned.members))
+    )
+      throw new Error("Saved run team does not match this task");
+    return assigned;
+  }
+  private assertCoordinationTeam(run: Run, team: SavedTeam) {
+    if (!run.coordination) return;
+    const expected = makeCoordination(team.members);
+    if (
+      run.coordination.integrator !== expected.integrator ||
+      run.coordination.auditor !== expected.auditor ||
+      JSON.stringify(run.coordination.assignments.map(({ owner }) => owner)) !==
+        JSON.stringify(expected.assignments.map(({ owner }) => owner))
+    )
+      throw new Error("Run coordination does not match its saved team");
   }
   usageAlertsForRun(id: unknown) {
     const run = this.store.getRun(id);
@@ -208,7 +234,11 @@ export class RunManager {
       throw new Error(
         "Coordination settings are locked once work starts. Prepare a new run.",
       );
-    const { settings, rules } = parseCoordinationSettings(value);
+    this.assertCoordinationTeam(run, this.teamForRun(run));
+    const { settings, rules } = parseCoordinationSettings(
+      value,
+      run.coordination.assignments.map((assignment) => assignment.owner),
+    );
     run.coordination.settings = settings;
     run.coordination.rules = rules;
     if (
@@ -224,7 +254,8 @@ export class RunManager {
         preset: "custom",
         earlyReviews: settings.chunkReviews,
         requestCeiling:
-          requiredCalls(run, task.mode) + (settings.chunkReviews ? 2 : 0),
+          requiredCalls(run, task.mode) +
+          (settings.chunkReviews ? run.coordination.assignments.length : 0),
       };
     }
     this.save(run);
@@ -345,9 +376,16 @@ export class RunManager {
         paths.some((p) => !this.selection!.files.some((f) => f.path === p)))
     )
       throw new Error("Choose at least one available source file");
+    const assignedTeam = this.store.teamForTask(task.id);
     const run: Run = {
       id: randomUUID(),
       taskId: task.id,
+      taskSnapshot: {
+        title: task.title,
+        description: task.description,
+        mode: task.mode,
+      },
+      teamSnapshot: assignedTeam,
       sourceName: sourceId === null ? "New project" : this.selection!.name,
       files:
         sourceId === null
@@ -363,14 +401,14 @@ export class RunManager {
       calls: 0,
       model: "",
       outputTokens: 0,
-      coordination: makeCoordination(),
-      usagePolicy: defaultUsagePolicy(
-        {} as Run,
-        task.mode,
-        this.config?.model || "",
-        this.config?.outputTokens || 2048,
-      ),
+      coordination: makeCoordination(assignedTeam.members),
     };
+    run.usagePolicy = defaultUsagePolicy(
+      run,
+      task.mode,
+      this.config?.model || "",
+      this.config?.outputTokens || 2048,
+    );
     this.store.saveRun(run);
     return run;
   }
@@ -397,10 +435,12 @@ export class RunManager {
       (m) => m.id === messageId && m.intent === "continue",
     );
     const workspace = this.store.load();
+    const team = this.teamForRun(run);
+    this.assertCoordinationTeam(run, team);
     const profile =
       recipientId === undefined
         ? undefined
-        : workspace.teammates.find((t) => t.id === recipientId);
+        : team.members.find((t) => t.id === recipientId);
     if (recipientId !== undefined && !profile)
       throw new Error("Unknown reply recipient");
     const recipient = profile
@@ -678,6 +718,8 @@ export class RunManager {
     const child: Run = {
       id: randomUUID(),
       taskId: parent.taskId,
+      teamSnapshot:
+        parent.teamSnapshot || this.store.teamForTask(parent.taskId),
       sourceName: parent.sourceName,
       files: structuredClone(parent.files),
       status: "prepared",
@@ -690,7 +732,9 @@ export class RunManager {
       calls: 0,
       model: "",
       outputTokens: 0,
-      coordination: makeCoordination(),
+      coordination: makeCoordination(
+        (parent.teamSnapshot || this.store.teamForTask(parent.taskId)).members,
+      ),
       redirection: {
         parentId: parent.id,
         instructions: [...(parent.redirection?.instructions || []), input.text],
@@ -819,6 +863,8 @@ export class RunManager {
     const child: Run = {
       id: randomUUID(),
       taskId: parent.taskId,
+      teamSnapshot:
+        parent.teamSnapshot || this.store.teamForTask(parent.taskId),
       sourceName: parent.sourceName,
       files: structuredClone(parent.files),
       status: "prepared",
@@ -923,6 +969,18 @@ export class RunManager {
     const workspace = this.store.load();
     const task = workspace.tasks.find((t) => t.id === run.taskId);
     if (!task) throw new Error("Task not found");
+    if (
+      run.taskSnapshot &&
+      (run.taskSnapshot.title !== task.title ||
+        run.taskSnapshot.description !== task.description ||
+        run.taskSnapshot.mode !== task.mode)
+    )
+      throw new Error(
+        "Task details changed. Prepare a new run before uploading.",
+      );
+    const team = this.teamForRun(run);
+    this.assertCoordinationTeam(run, team);
+    run.teamSnapshot = team;
     run.usagePolicy = this.checkedRunPolicy(run, task.mode);
     if (
       !specialist &&
@@ -1042,6 +1100,7 @@ export class RunManager {
           message.run.usagePolicy = approvedRun.usagePolicy;
           message.run.model = approvedRun.model;
           message.run.outputTokens = approvedRun.outputTokens;
+          message.run.teamSnapshot = approvedRun.teamSnapshot;
           if (message.run.coordination && approvedRun.coordination) {
             message.run.coordination.settings =
               approvedRun.coordination.settings;
@@ -1068,7 +1127,7 @@ export class RunManager {
       specialist: !!specialist,
       run,
       task,
-      team: workspace.teammates,
+      team: team.members,
       config: { ...this.config, outputTokens: run.usagePolicy.outputTokens },
       outputRoot: join(this.dataRoot, "drafts", run.id),
     });

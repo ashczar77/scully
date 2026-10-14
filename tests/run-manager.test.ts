@@ -25,6 +25,221 @@ import { snapshotRevision } from "../src/engine/integration";
 import { findingKey } from "../src/shared/audits";
 import { defaultUsageAlertPolicy } from "../src/shared/usage-alerts";
 
+it("dispatches only assigned members from each task's saved team", () => {
+  const c = setup();
+  try {
+    c.manager.configure({
+      key: "fixture-key",
+      model: "model",
+      outputTokens: 1024,
+    });
+    const original = c.manager.prepare(c.task.id, null, []);
+    const current = c.store.defaultTeam();
+    const lean = c.store.saveTeam({
+      name: "Lean",
+      ...current.roster!,
+      memberIds: ["pearl", "maya", "ellis"],
+      activeTesterId: null,
+    });
+    const leanTask = c.store.createTask({
+      title: "Lean task",
+      description: "",
+      mode: "work",
+    });
+    const leanRun = c.manager.prepare(leanTask.id, null, []);
+    expect(leanRun.teamSnapshot?.members).toEqual(lean.members);
+    expect(leanRun.coordination?.assignments.map(({ owner }) => owner)).toEqual(
+      ["maya"],
+    );
+    expect(leanRun.coordination?.auditor).toBe("ellis");
+    expect(leanRun.usagePolicy?.requestCeiling).toBe(2);
+    c.store.saveTeam({
+      name: "Expanded",
+      ...lean.roster!,
+      memberIds: ["pearl", "maya", "ellis", "jun", "sloane"],
+      activeTesterId: "jun",
+    });
+    const expandedTask = c.store.createTask({
+      title: "Expanded task",
+      description: "",
+      mode: "work",
+    });
+    const expandedRun = c.manager.prepare(expandedTask.id, null, []);
+    expect(
+      expandedRun.coordination?.assignments.map(({ owner }) => owner),
+    ).toEqual(["maya", "jun"]);
+    expect(
+      expandedRun.coordination?.assignments.some(
+        ({ owner }) => owner === "sloane",
+      ),
+    ).toBe(false);
+    c.manager.start(leanRun.id, true);
+    const worker = vi.mocked(utilityProcess.fork).mock.results.at(-1)!.value;
+    expect(worker.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ team: lean.members }),
+    );
+    expect(c.store.teamForTask(c.task.id).members).toEqual(
+      original.teamSnapshot?.members,
+    );
+    expect(c.store.teamForTask(leanTask.id).members).toEqual(lean.members);
+  } finally {
+    c.cleanup();
+  }
+});
+
+it("uses the task's saved team for prepared and dispatched work after default edits", () => {
+  const c = setup();
+  try {
+    c.manager.configure({
+      key: "fixture-key",
+      model: "model",
+      outputTokens: 1024,
+    });
+    const original = c.store.teamForTask(c.task.id);
+    const oldRun = c.manager.prepare(c.task.id, null, []);
+    const revised = c.store.saveTeam({
+      name: "Revised team",
+      ...c.store.defaultTeam().roster!,
+      memberIds: [...c.store.defaultTeam().roster!.memberIds, "tessa"],
+      activeBuilderId: "tessa",
+    });
+    const laterTask = c.store.createTask({
+      title: "Later",
+      description: "",
+      mode: "work",
+    });
+    const newRun = c.manager.prepare(laterTask.id, null, []);
+    expect(oldRun.teamSnapshot?.id).toBe(original.id);
+    expect(newRun.teamSnapshot?.id).toBe(c.store.teamForTask(laterTask.id).id);
+    expect(newRun.teamSnapshot?.members).toEqual(revised.members);
+    c.store.saveRun({
+      ...oldRun,
+      teamSnapshot: { ...oldRun.teamSnapshot!, familyId: undefined },
+    });
+    c.manager.start(oldRun.id, true);
+    const worker = vi.mocked(utilityProcess.fork).mock.results.at(-1)!.value;
+    expect(worker.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ team: original.members }),
+    );
+    expect(worker.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ team: revised.members }),
+    );
+  } finally {
+    c.cleanup();
+  }
+});
+it("rejects a run whose saved team no longer matches its task before dispatch or reply review", () => {
+  const c = setup();
+  try {
+    c.manager.configure({
+      key: "fixture-key",
+      model: "model",
+      outputTokens: 1024,
+    });
+    const run = c.manager.prepare(c.task.id, null, []);
+    c.store.saveRun({
+      ...run,
+      teamSnapshot: {
+        ...run.teamSnapshot!,
+        members: run.teamSnapshot!.members.map((member) =>
+          member.id === "jun"
+            ? { ...member, instructions: "Altered instruction" }
+            : member,
+        ),
+      },
+    });
+    vi.mocked(utilityProcess.fork).mockClear();
+    expect(() => c.manager.start(run.id, true)).toThrow(
+      "Saved run team does not match this task",
+    );
+    expect(utilityProcess.fork).not.toHaveBeenCalled();
+    const noted = c.manager.sendTeamMessage(run.id, {
+      text: "What changed?",
+      intent: "continue",
+    });
+    expect(() =>
+      c.manager.reviewReply(run.id, noted.messages![0].id, "jun"),
+    ).toThrow("Saved run team does not match this task");
+  } finally {
+    c.cleanup();
+  }
+});
+it("does not accept a changed team snapshot from the worker", () => {
+  const c = setup();
+  try {
+    c.manager.configure({
+      key: "fixture-key",
+      model: "model",
+      outputTokens: 1024,
+    });
+    const prepared = c.manager.prepare(c.task.id, null, []);
+    const queued = c.manager.start(prepared.id, true);
+    const worker = vi.mocked(utilityProcess.fork).mock.results.at(-1)!.value;
+    worker.emit("message", {
+      run: {
+        ...queued,
+        teamSnapshot: { ...queued.teamSnapshot, id: "forged-team" },
+      },
+      done: true,
+    });
+    expect(c.store.getRun(prepared.id).teamSnapshot).toEqual(
+      prepared.teamSnapshot,
+    );
+  } finally {
+    c.cleanup();
+  }
+});
+it("rejects forged writer assignments before dispatch or ownership configuration", () => {
+  const c = setup();
+  try {
+    c.manager.configure({
+      key: "fixture-key",
+      model: "model",
+      outputTokens: 1024,
+    });
+    const run = c.manager.prepare(c.task.id, null, []);
+    run.coordination!.assignments[0].owner = "member-outsider";
+    c.store.saveRun(run);
+    vi.mocked(utilityProcess.fork).mockClear();
+    expect(() =>
+      c.manager.configureCoordination(run.id, {
+        ownership: "member-outsider src/",
+        chunkReviews: false,
+      }),
+    ).toThrow("does not match its saved team");
+    expect(() => c.manager.start(run.id, true)).toThrow(
+      "does not match its saved team",
+    );
+    expect(utilityProcess.fork).not.toHaveBeenCalled();
+  } finally {
+    c.cleanup();
+  }
+});
+
+it("rejects a prepared upload after task details change until a new run is prepared", () => {
+  const c = setup();
+  try {
+    c.manager.configure({
+      key: "fixture-key",
+      model: "model",
+      outputTokens: 1024,
+    });
+    const old = c.manager.prepare(c.task.id, null, []);
+    c.store.updateTask(c.task.id, {
+      title: "Revised task",
+      description: c.task.description,
+      mode: c.task.mode,
+    });
+    vi.mocked(utilityProcess.fork).mockClear();
+    expect(() => c.manager.start(old.id, true)).toThrow("Task details changed");
+    expect(utilityProcess.fork).not.toHaveBeenCalled();
+    const next = c.manager.prepare(c.task.id, null, []);
+    expect(next.taskSnapshot?.title).toBe("Revised task");
+  } finally {
+    c.cleanup();
+  }
+});
+
 it("holds the next worker request, consumes one current continuation, and rejects stale or stopped approval", () => {
   const c = setup();
   try {
@@ -351,7 +566,7 @@ it("persists suggestion review without granting permissions or losing it to stal
     c.cleanup();
   }
 });
-it("routes replies through stored profiles and rejects edited profiles after review", () => {
+it("routes replies through the task team and keeps approved identity after default edits", () => {
   const c = setup();
   try {
     c.manager.configure({
@@ -372,20 +587,24 @@ it("routes replies through stored profiles and rejects edited profiles after rev
     let review = c.manager.reviewReply(run.id, id, "jun");
     expect(review.recipient).toMatchObject({
       id: "jun",
-      role: "Test engineer",
+      role: "Tester",
     });
     expect(JSON.parse(review.context).recipient).toEqual(review.recipient);
     const profile = c.store.load().teammates.find((t) => t.id === "jun")!;
-    c.store.updateTeammate({
-      ...profile,
-      instructions: "Check boundary cases carefully.",
-    });
-    expect(() => c.manager.answerMessage(review.token, true)).toThrow(
-      "changed",
-    );
-    review = c.manager.reviewReply(run.id, id, "jun");
+    expect(() =>
+      c.store.updateTeammate({
+        ...profile,
+        instructions: "Check boundary cases carefully.",
+      }),
+    ).toThrow(/cannot be edited/i);
     const started = c.manager.answerMessage(review.token, true);
-    c.store.updateTeammate({ ...profile, name: "Renamed" });
+    const current = c.store.defaultTeam();
+    c.store.saveTeam({
+      name: current.name,
+      ...current.roster!,
+      memberIds: [...current.roster!.memberIds, "malik"],
+      activeTesterId: "malik",
+    });
     const worker = vi.mocked(utilityProcess.fork).mock.results.at(-1)!.value;
     worker.emit("message", { answer: "Missing boundary evidence." });
     const saved = c.store.getRun(run.id);
@@ -999,7 +1218,7 @@ it("persists reviewed presets, binds worker settings and rejects extra dispatche
     });
     const run = c.manager.prepare(c.task.id, null, []);
     expect(run.usagePolicy).toMatchObject({
-      preset: "custom",
+      preset: "balanced",
       outputTokens: 2048,
       requestCeiling: 4,
     });

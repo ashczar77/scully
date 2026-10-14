@@ -40,6 +40,7 @@ let executions: ExecutionManager;
 let applications: ApplyManager;
 let cloud: CloudManager;
 let win: BrowserWindow | null = null;
+const appIcon = join(__dirname, "branding", "scully.png");
 const testingPath = process.env.SCULLY_TEST_DATA;
 if (testingPath && !app.isPackaged) app.setPath("userData", testingPath);
 const ownsWorkspace = app.requestSingleInstanceLock();
@@ -56,6 +57,7 @@ function window() {
     minHeight: 700,
     title: "Scully",
     backgroundColor: "#11171d",
+    icon: appIcon,
     webPreferences: {
       preload: join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -75,6 +77,7 @@ app
   .whenReady()
   .then(() => {
     if (!ownsWorkspace) return;
+    if (process.platform === "darwin") app.dock?.setIcon(appIcon);
     const root = resolve(__dirname, "renderer");
     protocol.handle("scully", (request) => {
       const url = new URL(request.url);
@@ -98,7 +101,11 @@ app
     );
     session.defaultSession.setPermissionCheckHandler(() => false);
     mkdirSync(app.getPath("userData"), { recursive: true });
-    store = new Store(join(app.getPath("userData"), "workspace.sqlite"));
+    store = new Store(
+      join(app.getPath("userData"), "workspace.sqlite"),
+      undefined,
+      metrics.record,
+    );
     runs = new RunManager(
       store,
       app.getPath("userData"),
@@ -174,9 +181,37 @@ app
       trusted(event);
       return store.createTask(value);
     });
-    ipcMain.handle("teammate:update", (event, value: unknown) => {
+    metricHandle("task:update", (event, id: unknown, value: unknown) => {
+      trusted(event);
+      return store.updateTask(id, value);
+    });
+    metricHandle("task:delete", (event, id: unknown) => {
+      trusted(event);
+      return store.deleteTask(id);
+    });
+    metricHandle("teammate:update", (event, value: unknown) => {
       trusted(event);
       return store.updateTeammate(value);
+    });
+    metricHandle("teammate:style", (event, style: unknown) => {
+      trusted(event);
+      return store.applyTeamStyle(style);
+    });
+    metricHandle("team:save", (event, value: unknown) => {
+      trusted(event);
+      return store.saveTeam(value);
+    });
+    metricHandle("team:default", (event, id: unknown) => {
+      trusted(event);
+      return store.setDefaultTeam(id);
+    });
+    metricHandle("team:delete", (event, id: unknown) => {
+      trusted(event);
+      return store.deleteTeam(id);
+    });
+    metricHandle("team:restore", (event, id: unknown) => {
+      trusted(event);
+      return store.restoreTeam(id);
     });
     metricHandle("source:select", async (event) => {
       trusted(event);

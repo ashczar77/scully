@@ -12,7 +12,7 @@ import {
   type Task,
   type Teammate,
 } from "../shared/contracts";
-import portraits from "../../assets/team-portraits.png";
+import { portraitStyle } from "./Portrait";
 import type { Run, SourceSelection, SessionInfo } from "../shared/runs";
 import { ExecutionPanel } from "./ExecutionPanel";
 import { CloudPanel } from "./CloudPanel";
@@ -130,11 +130,15 @@ export function RunPanel({
   task,
   changes = false,
   team = initialTeam,
+  settingsView = "full",
+  onOpenSettings = () => {},
 }: {
   api: DesktopAPI;
   task: Task;
   changes?: boolean;
   team?: Teammate[];
+  settingsView?: "full" | "summary";
+  onOpenSettings?: (runId: string) => void;
 }) {
   const [history, setHistory] = useState<Run[]>([]);
   const [run, setRun] = useState<Run | null>(null);
@@ -221,6 +225,11 @@ export function RunPanel({
   }
   const active =
     run && ["planning", "building", "auditing"].includes(run.status);
+  const staleTask =
+    !!run?.taskSnapshot &&
+    (run.taskSnapshot.title !== task.title ||
+      run.taskSnapshot.description !== task.description ||
+      run.taskSnapshot.mode !== task.mode);
   return (
     <section className="run-panel" aria-label="Task execution">
       <h2>{changes ? "Changes & review" : "Your task has a home."}</h2>
@@ -254,7 +263,7 @@ export function RunPanel({
           {kind === "existing" && (
             <>
               <button
-                className="secondary"
+                className="secondary source-folder-button"
                 disabled={busy}
                 onClick={() =>
                   act(async () => {
@@ -309,7 +318,7 @@ export function RunPanel({
             </>
           )}
           <button
-            className="primary"
+            className="primary prepare-button"
             disabled={
               busy || (kind === "existing" && (!source || !selected.length))
             }
@@ -339,48 +348,90 @@ export function RunPanel({
               {run.calls}/{requestLimit(run)} requests
             </span>
           </div>
-          <p className="muted" aria-label="Model token usage">
-            {usage
-              ? `${usage.inputTokens.toLocaleString()} input + ${usage.outputTokens.toLocaleString()} output tokens reported across ${usage.measured} measured ${usage.measured === 1 ? "request" : "requests"}. ${usage.pending} pending (up to ${usage.pendingMaxOutputTokens.toLocaleString()} output tokens requested; input unknown). ${usage.unknown} ${usage.unknown === 1 ? "request has" : "requests have"} unknown usage.`
-              : "Model token usage is unavailable."}
-          </p>
-          <UsagePolicyPanel
-            run={run}
-            mode={task.mode}
-            session={connection}
-            api={api}
-            onUpdate={(next) => {
-              setApproved(false);
-              setRun(next);
-              setHistory((items) => [
-                next,
-                ...items.filter((item) => item.id !== next.id),
-              ]);
-            }}
-          />
-          <UsageAlertsPanel
-            run={run}
-            usage={usage}
-            api={api}
-            onSaveTokens={() => {
-              void act(async () => {
-                await api.saveTokensForRemaining(run.id);
-              });
-            }}
-            onStop={() => {
-              void act(async () => {
-                const replying = run.replies?.some(
-                  (reply) => reply.status === "answering",
-                );
-                setRun(
-                  replying && !active
-                    ? await api.stopReply(run.id)
-                    : await api.stopRun(run.id),
-                );
-              });
-            }}
-          />
-          <CostPanel run={run} api={api} />
+          {!active && ["prepared", "planned"].includes(run.status) && (
+            <button
+              className="secondary change-source-button"
+              disabled={busy}
+              onClick={() => {
+                setRun(null);
+                setSource(null);
+                setSelected([]);
+                setApproved(false);
+              }}
+            >
+              Change project source
+            </button>
+          )}
+          {staleTask && (
+            <p role="alert" className="attention">
+              Task details changed after this run was prepared. Prepare another
+              attempt to review the new request.
+            </p>
+          )}
+          {settingsView === "full" && (
+            <p className="muted" aria-label="Model token usage">
+              {usage
+                ? usage.requests === 0
+                  ? "No model requests yet."
+                  : `${usage.inputTokens.toLocaleString()} input + ${usage.outputTokens.toLocaleString()} output tokens reported across ${usage.measured} measured ${usage.measured === 1 ? "request" : "requests"}. ${usage.pending} pending (up to ${usage.pendingMaxOutputTokens.toLocaleString()} output tokens requested; input unknown). ${usage.unknown} ${usage.unknown === 1 ? "request has" : "requests have"} unknown usage.`
+                : "Model token usage is unavailable."}
+            </p>
+          )}
+          {settingsView === "summary" && (
+            <h3 className="run-settings-heading">Run settings</h3>
+          )}
+          <div
+            className={
+              settingsView === "summary" ? "run-settings-summary" : undefined
+            }
+          >
+            <UsagePolicyPanel
+              run={run}
+              mode={task.mode}
+              session={connection}
+              api={api}
+              compact={settingsView === "summary"}
+              onOpenSettings={() => onOpenSettings(run.id)}
+              onUpdate={(next) => {
+                setApproved(false);
+                setRun(next);
+                setHistory((items) => [
+                  next,
+                  ...items.filter((item) => item.id !== next.id),
+                ]);
+              }}
+            />
+            <UsageAlertsPanel
+              run={run}
+              usage={usage}
+              api={api}
+              compact={settingsView === "summary"}
+              onOpenSettings={() => onOpenSettings(run.id)}
+              onSaveTokens={() => {
+                void act(async () => {
+                  await api.saveTokensForRemaining(run.id);
+                });
+              }}
+              onStop={() => {
+                void act(async () => {
+                  const replying = run.replies?.some(
+                    (reply) => reply.status === "answering",
+                  );
+                  setRun(
+                    replying && !active
+                      ? await api.stopReply(run.id)
+                      : await api.stopRun(run.id),
+                  );
+                });
+              }}
+            />
+            <CostPanel
+              run={run}
+              api={api}
+              compact={settingsView === "summary"}
+              onOpenSettings={() => onOpenSettings(run.id)}
+            />
+          </div>
           <InFlightStatus run={run} team={team} />
           <TeamMessages
             key={`messages-${run.id}`}
@@ -388,7 +439,12 @@ export function RunPanel({
             api={api}
             team={team}
           />
-          <SuggestionsPanel key={`suggestions-${run.id}`} run={run} api={api} />
+          <SuggestionsPanel
+            key={`suggestions-${run.id}`}
+            run={run}
+            api={api}
+            team={team}
+          />
           {run.redirection && (
             <section className="settings-card">
               <h3>Revised plan context</h3>
@@ -498,6 +554,16 @@ export function RunPanel({
                 files. Credentials are used for authentication, not included in
                 prompts.
               </p>
+              {run.teamSnapshot && (
+                <p>
+                  Saved team for this run: {run.teamSnapshot.name} v
+                  {run.teamSnapshot.version},{" "}
+                  {run.teamSnapshot.members
+                    .map((member) => member.name)
+                    .join(", ")}
+                  .
+                </p>
+              )}
               <details>
                 <summary>Review exact source snapshot</summary>
                 {run.files.length ? (
@@ -529,13 +595,14 @@ export function RunPanel({
                 <input
                   type="checkbox"
                   checked={approved}
+                  disabled={staleTask}
                   onChange={(e) => setApproved(e.target.checked)}
                 />{" "}
                 I approve this upload and bounded credit use.
               </label>
               <button
                 className="primary"
-                disabled={busy || !approved}
+                disabled={busy || !approved || staleTask}
                 onClick={() =>
                   act(async () => {
                     const r = await api.startRun(run.id, true);
@@ -579,21 +646,20 @@ export function RunPanel({
                 {e.actor !== "system" && (
                   <span
                     className="event-portrait portrait"
-                    style={{
-                      backgroundImage: `url(${portraits})`,
-                      backgroundPosition:
-                        e.actor === "maya"
-                          ? "0% center"
-                          : e.actor === "jun"
-                            ? "100% center"
-                            : "50% center",
-                    }}
+                    style={portraitStyle(
+                      e.actorPortraitId ||
+                        team.find((person) => person.id === e.actor)
+                          ?.portraitId ||
+                        initialTeam.find((person) => person.id === e.actor)
+                          ?.portraitId ||
+                        initialTeam[0].portraitId,
+                    )}
                   />
                 )}
                 <strong>
                   {e.actor === "system"
                     ? "Scully"
-                    : `${team.find((t) => t.id === e.actor)?.name || e.actor} · ${e.actor === "maya" ? "Builder" : e.actor === "jun" ? "Test engineer" : "Auditor"}`}
+                    : `${e.actorName || team.find((t) => t.id === e.actor)?.name || e.actor} · ${e.actorRole || team.find((t) => t.id === e.actor)?.role || e.actor}`}
                 </strong>
                 <time>{new Date(e.at).toLocaleTimeString()}</time>
                 <p>{e.text}</p>
@@ -618,6 +684,7 @@ export function RunPanel({
               run={run}
               api={api}
               relatedRuns={history}
+              team={team}
             />
           )}
           {!!run.checks.length && (

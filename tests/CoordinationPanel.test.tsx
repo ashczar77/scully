@@ -28,7 +28,7 @@ it("saves optional settings, discloses request increase and clears prior consent
   });
   fireEvent.click(screen.getByRole("checkbox"));
   expect(
-    screen.getByText(/Early reviews add up to two requests/),
+    screen.getByText(/Early reviews add up to 2 additional requests/),
   ).toBeInTheDocument();
   fireEvent.click(
     screen.getByRole("button", { name: "Save coordination settings" }),

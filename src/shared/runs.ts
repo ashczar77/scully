@@ -38,13 +38,16 @@ export type RunStatus =
   | "interrupted"
   | "conflicted";
 export type RunEvent = {
-  actor: "system" | "maya" | "ellis" | "jun";
+  actor: string;
+  actorName?: string;
+  actorRole?: string;
+  actorPortraitId?: import("./contracts").Teammate["portraitId"];
   text: string;
   at: string;
 };
 export type InFlightRequest = {
   id: string;
-  actor: "maya" | "ellis" | "jun";
+  actor: string;
   name:
     | "propose_plan"
     | "propose_files"
@@ -84,6 +87,8 @@ export type Run = {
   specialistAudits?: SpecialistAudit[];
   id: string;
   taskId: string;
+  taskSnapshot?: import("./contracts").TaskInput;
+  teamSnapshot?: import("./teams").SavedTeam;
   sourceName: string;
   files: SourceFile[];
   status: RunStatus;

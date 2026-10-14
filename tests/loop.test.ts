@@ -6,6 +6,7 @@ import { expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { executeLoop } from "../src/engine/loop";
 import { initialTeam, type Task } from "../src/shared/contracts";
+import { makeCoordination } from "../src/shared/coordination";
 import type { Run } from "../src/shared/runs";
 export const task: Task = {
   id: "task",
@@ -30,6 +31,83 @@ export const run = (): Run => ({
   model: "model",
   outputTokens: 2048,
 });
+it("runs a renamed two-member team with one writer and a separate auditor", async () => {
+  const root = await mkdtemp(join(tmpdir(), "scully-lean-team-"));
+  try {
+    const team = [
+      {
+        ...initialTeam[0],
+        id: "member-builder",
+        name: "Rin",
+        runRole: "builder" as const,
+      },
+      {
+        ...initialTeam[1],
+        id: "member-auditor",
+        name: "Sol",
+        runRole: "auditor" as const,
+      },
+    ];
+    const prepared = { ...run(), coordination: makeCoordination(team) };
+    const complete = vi.fn().mockImplementation((request) =>
+      Promise.resolve(
+        request.name === "audit_files"
+          ? { summary: "Reviewed", findings: [] }
+          : {
+              summary: "Built",
+              files: [
+                {
+                  path: "tests/feature.test.js",
+                  content: "export const ok = true;",
+                },
+              ],
+              commands: [],
+            },
+      ),
+    );
+    const result = await executeLoop(
+      prepared,
+      task,
+      team,
+      { complete },
+      join(root, "draft"),
+      () => {},
+    );
+    expect(result.status).toBe("complete");
+    expect(result.calls).toBe(2);
+    expect(result.coordination?.assignments.map(({ owner }) => owner)).toEqual([
+      "member-builder",
+    ]);
+    expect(result.coordination?.auditor).toBe("member-auditor");
+    expect(result.events.some(({ actor }) => actor === "member-auditor")).toBe(
+      true,
+    );
+    expect(complete).toHaveBeenCalledTimes(2);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+it("rejects coordination that swaps saved team assignments before writing", async () => {
+  const root = await mkdtemp(join(tmpdir(), "scully-forged-team-"));
+  try {
+    const prepared = { ...run(), coordination: makeCoordination(initialTeam) };
+    prepared.coordination.assignments[0].owner = "outsider";
+    const complete = vi.fn();
+    await expect(
+      executeLoop(
+        prepared,
+        task,
+        initialTeam,
+        { complete },
+        join(root, "draft"),
+        () => {},
+      ),
+    ).rejects.toThrow("does not match its saved team");
+    expect(complete).not.toHaveBeenCalled();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 it("publishes planner progress while the model response is still pending", async () => {
   const snapshots: Run[] = [];
   let finish!: (value: unknown) => void;
@@ -50,6 +128,56 @@ it("publishes planner progress while the model response is still pending", async
   expect(completed.status).toBe("planned");
   expect(completed.inFlightRequests).toEqual([]);
   expect(snapshots.at(-1)?.inFlightRequests).toEqual([]);
+});
+it("records the configured identity with run events and suggestions", async () => {
+  const root = await mkdtemp(join(tmpdir(), "scully-identity-"));
+  try {
+    const team = initialTeam.map((person) =>
+      person.id === "ellis"
+        ? { ...person, name: "Renamed reviewer", role: "Security reviewer" }
+        : person.id === "maya"
+          ? { ...person, name: "Renamed builder", role: "Lead engineer" }
+          : person,
+    );
+    const complete = vi
+      .fn()
+      .mockResolvedValueOnce({
+        summary: "Draft",
+        files: [{ path: "app.js", content: "export const ready=true;" }],
+        commands: [],
+      })
+      .mockResolvedValueOnce({
+        summary: "Review",
+        findings: [],
+        suggestions: ["Later idea"],
+      });
+    const result = await executeLoop(
+      run(),
+      task,
+      team,
+      { complete },
+      join(root, "draft"),
+      () => {},
+    );
+    expect(result.status).toBe("complete");
+    expect(result.events.find((event) => event.actor === "maya")).toMatchObject(
+      {
+        actorName: "Renamed builder",
+        actorRole: "Lead engineer",
+      },
+    );
+    expect(
+      result.events.find((event) => event.actor === "ellis"),
+    ).toMatchObject({
+      actorName: "Renamed reviewer",
+      actorRole: "Security reviewer",
+    });
+    expect(result.suggestions?.[0]).toMatchObject({
+      actorName: "Renamed reviewer",
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 it("returns deferred ideas after the final audit without additional calls or commands", async () => {
   const root = await mkdtemp(join(tmpdir(), "scully-suggestions-"));

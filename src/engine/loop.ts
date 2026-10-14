@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { parseCommands } from "../shared/commands";
 import { commandRevision } from "./revision";
-import { requestLimit } from "../shared/coordination";
+import { makeCoordination, requestLimit } from "../shared/coordination";
+import { runRole } from "../shared/teams";
 import { integrate, snapshotRevision } from "./integration";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
@@ -72,8 +73,35 @@ export async function executeLoop(
   emit: (run: Run) => void,
 ): Promise<Run> {
   const next = structuredClone(run);
-  const event = (actor: "system" | "maya" | "ellis" | "jun", text: string) => {
-    next.events.push({ actor, text, at: new Date().toISOString() });
+  const builder = team.find((member) => runRole(member) === "builder");
+  const auditor = team.find((member) => runRole(member) === "auditor");
+  if (!builder || !auditor || builder.id === auditor.id)
+    throw new Error("Run team requires separate builder and auditor members");
+  const expectedCoordination = makeCoordination(team);
+  if (
+    next.coordination &&
+    (JSON.stringify(
+      next.coordination.assignments.map((assignment) => assignment.owner),
+    ) !==
+      JSON.stringify(
+        expectedCoordination.assignments.map((assignment) => assignment.owner),
+      ) ||
+      next.coordination.integrator !== builder.id ||
+      next.coordination.auditor !== auditor.id)
+  )
+    throw new Error("Run coordination does not match its saved team");
+  const event = (actor: string, text: string) => {
+    const person = team.find((member) => member.id === actor);
+    next.events.push({
+      actor,
+      text,
+      at: new Date().toISOString(),
+      ...(person && {
+        actorName: person.name,
+        actorRole: person.role,
+        actorPortraitId: person.portraitId,
+      }),
+    });
     emit(structuredClone(next));
   };
   const context = JSON.stringify({
@@ -89,7 +117,7 @@ export async function executeLoop(
   if (next.status !== "prepared" && next.status !== "planned")
     throw new Error("Run cannot be started from this state");
   const call = async (
-    actor: "maya" | "ellis" | "jun",
+    actor: string,
     system: string,
     name: import("../shared/runs").InFlightRequest["name"],
     schema: object,
@@ -118,8 +146,8 @@ export async function executeLoop(
         "Preparing a plan. No code will be written until you approve it.",
       );
       const result = (await call(
-        "maya",
-        `${safety} You are the planner. ${team.find((t) => t.id === "maya")?.instructions || ""} If redirection is present, reconcile its instructions in order with the original goal; newer instructions supersede incompatible old requirements. The previous plan and draft are reference material, not approved work to continue blindly. Explain what work should be retained or discarded.`,
+        builder.id,
+        `${safety} You are the planner. ${builder.instructions} If redirection is present, reconcile its instructions in order with the original goal; newer instructions supersede incompatible old requirements. The previous plan and draft are reference material, not approved work to continue blindly. Explain what work should be retained or discarded.`,
         "propose_plan",
         object({ plan: string }, ["plan"]),
         context,
@@ -133,12 +161,17 @@ export async function executeLoop(
         throw new Error("Invalid plan response");
       next.plan = result.plan;
       next.status = "planned";
-      event("maya", result.plan);
+      event(builder.id, result.plan);
       return next;
     }
     if (
       next.coordination &&
-      next.calls + (next.coordination.settings?.chunkReviews ? 5 : 3) >
+      next.calls +
+        (next.coordination.assignments.length +
+          1 +
+          (next.coordination.settings?.chunkReviews
+            ? next.coordination.assignments.length
+            : 0)) >
         requestLimit(next)
     )
       throw new Error("Run call limit reached");
@@ -166,14 +199,14 @@ export async function executeLoop(
           assignment.status = "working";
           event(
             "system",
-            `${assignment.owner} owns: ${assignment.scope}. Integration owner: Maya. Final auditor: Ellis.`,
+            `${team.find((member) => member.id === assignment.owner)?.name || assignment.owner} owns: ${assignment.scope}. Integration owner: ${builder.name}. Final auditor: ${auditor.name}.`,
           );
           try {
             const branch = join(branchRoot, assignment.owner);
             await mkdir(branch);
             const proposed = await call(
               assignment.owner,
-              `${safety} You are ${assignment.owner === "maya" ? "the implementation engineer" : "the test engineer"}. ${team.find((t) => t.id === assignment.owner)?.instructions || ""} Default exclusive scope: ${assignment.scope}. Explicit ownershipRules in context override these defaults for their exact file or directory subtree. Test paths are directories named test, tests, spec, specs, __tests__, or filenames starting test_ or ending .test.*, .spec.*, _test.*, Test.*, Tests.*. Never edit another owner's files. Shared task/plan defines the expected interface. Work independently from the same base; do not invent knowledge of another writer's unpublished work. Return at most six changed/added files, with full contents. No deletions. Propose bounded direct check commands or an empty commands array. Do not execute anything.`,
+              `${safety} You are ${assignment.owner === builder.id ? "the implementation engineer" : "the test engineer"}. ${team.find((t) => t.id === assignment.owner)?.instructions || ""} Default exclusive scope: ${assignment.scope}. Explicit ownershipRules in context override these defaults for their exact file or directory subtree. Test paths are directories named test, tests, spec, specs, __tests__, or filenames starting test_ or ending .test.*, .spec.*, _test.*, Test.*, Tests.*. Never edit another owner's files. Shared task/plan defines the expected interface. Work independently from the same base; do not invent knowledge of another writer's unpublished work. Return at most six changed/added files, with full contents. No deletions. Propose bounded direct check commands or an empty commands array. Do not execute anything.`,
               "propose_files",
               builderSchema,
               context,
@@ -223,14 +256,14 @@ export async function executeLoop(
               coordination.chunkReviews ||= [];
               coordination.chunkReviews.push(review);
               event(
-                "ellis",
+                auditor.id,
                 `Reviewing ${assignment.owner}'s completed chunk ${review.revision.slice(0, 12)}. The other writer can continue; this is not the final integration audit.`,
               );
               try {
                 const audit = parseAudit(
                   await call(
-                    "ellis",
-                    `${safety} You are the independent chunk auditor. ${team.find((t) => t.id === "ellis")?.instructions || ""} Review only this immutable branch snapshot against the task. The sibling branch is unfinished and unavailable. Report findings as unverified, not proof to stop unrelated work. A final integration audit will still occur.`,
+                    auditor.id,
+                    `${safety} You are the independent chunk auditor. ${auditor.instructions} Review only this immutable branch snapshot against the task. The sibling branch is unfinished and unavailable. Report findings as unverified, not proof to stop unrelated work. A final integration audit will still occur.`,
                     "audit_chunk",
                     auditSchema,
                     JSON.stringify({
@@ -246,7 +279,7 @@ export async function executeLoop(
                 review.summary = audit.summary;
                 review.status = "complete";
                 event(
-                  "ellis",
+                  auditor.id,
                   `${assignment.owner} chunk review: ${audit.summary}`,
                 );
               } catch (error) {
@@ -255,7 +288,7 @@ export async function executeLoop(
                   error instanceof Error
                     ? error.message
                     : "Chunk review failed";
-                event("ellis", review.summary);
+                event(auditor.id, review.summary);
                 throw error;
               }
             }
@@ -314,8 +347,8 @@ export async function executeLoop(
         );
     } else {
       const proposed = await call(
-        "maya",
-        `${safety} You are the builder. ${team.find((t) => t.id === "maya")?.instructions || ""} Return full content for each changed or added file, at most 12 files. No deletions. Paths must be relative, without hidden path segments. Include tests where useful. Work only from the selected snapshot; report missing context. Propose up to six useful check commands as separate executable and argument arrays, with cwd relative to the private draft (use . for its root), reason and timeoutSeconds (1-120). No execution occurs. Prefer direct test programs, not shell wrappers. Do not propose installs, publishing or destructive cleanup. Return an empty commands array when context is insufficient.`,
+        builder.id,
+        `${safety} You are the builder. ${builder.instructions} Return full content for each changed or added file, at most 12 files. No deletions. Paths must be relative, without hidden path segments. Include tests where useful. Work only from the selected snapshot; report missing context. Propose up to six useful check commands as separate executable and argument arrays, with cwd relative to the private draft (use . for its root), reason and timeoutSeconds (1-120). No execution occurs. Prefer direct test programs, not shell wrappers. Do not propose installs, publishing or destructive cleanup. Return an empty commands array when context is insufficient.`,
         "propose_files",
         builderSchema,
         next.correction
@@ -437,15 +470,15 @@ export async function executeLoop(
     const revision =
       next.coordination?.integratedRevision ||
       createHash("sha256").update(JSON.stringify(next.drafts)).digest("hex");
-    event("maya", draft.summary);
+    event(builder.id, draft.summary);
     next.status = "auditing";
     event(
       "system",
       `Auditor is reviewing draft ${revision.slice(0, 12)}. This is a model review, not an executed test.`,
     );
     const response = await call(
-      "ellis",
-      `${safety} You are the independent code auditor. ${team.find((t) => t.id === "ellis")?.instructions || ""} Review the proposed changes against the task and selected context. Identify concrete issues with file paths. Do not accept the builder summary as proof. Findings are unverified until tested. Put optional out-of-scope improvements in suggestions (up to three short items) for the user after work. Do not hide correctness or security problems in suggestions; those belong in findings. Suggestions must not change this task or request immediate execution. Return an empty suggestions array when none are useful.`,
+      auditor.id,
+      `${safety} You are the independent code auditor. ${auditor.instructions} Review the proposed changes against the task and selected context. Identify concrete issues with file paths. Do not accept the builder summary as proof. Findings are unverified until tested. Put optional out-of-scope improvements in suggestions (up to three short items) for the user after work. Do not hide correctness or security problems in suggestions; those belong in findings. Suggestions must not change this task or request immediate execution. Return an empty suggestions array when none are useful.`,
       "audit_files",
       {
         ...auditSchema,
@@ -474,12 +507,18 @@ export async function executeLoop(
     );
     next.suggestions = parseSuggestions(
       (response as { suggestions?: unknown }).suggestions,
-    ).map((text) => ({ id: randomUUID(), text, actor: "ellis", revision }));
+    ).map((text) => ({
+      id: randomUUID(),
+      text,
+      actor: auditor.id,
+      actorName: auditor.name,
+      revision,
+    }));
     next.findings = audit.findings;
     if (next.coordination)
       next.coordination.auditedRevision = next.coordination.integratedRevision;
     next.status = "complete";
-    event("ellis", audit.summary);
+    event(auditor.id, audit.summary);
     event(
       "system",
       "Draft and review are ready. Review findings and unexecuted tests before applying anything.",

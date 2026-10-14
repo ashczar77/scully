@@ -98,8 +98,12 @@ port.once(
         return;
       }
       const result = data.specialist
-        ? await executeSpecialist(data.run, data.task, model, (run) =>
-            port.postMessage({ run }),
+        ? await executeSpecialist(
+            data.run,
+            data.task,
+            model,
+            (run) => port.postMessage({ run }),
+            data.team,
           )
         : await executeLoop(
             data.run,

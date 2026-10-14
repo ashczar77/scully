@@ -1,4 +1,4 @@
-import type { Task } from "../shared/contracts";
+import { initialTeam, type Task, type Teammate } from "../shared/contracts";
 import { parseAudit, type Run } from "../shared/runs";
 import type { Model } from "./provider";
 import { whileRequest } from "./progress";
@@ -7,13 +7,21 @@ import { auditSchema, commandSchema, safety } from "./loop";
 import { parseFindingChecks } from "../shared/audits";
 import { commandRevision } from "./revision";
 import { randomUUID } from "node:crypto";
+import { runRole } from "../shared/teams";
 export async function executeSpecialist(
   run: Run,
   task: Task,
   model: Model,
   emit: (run: Run) => void,
+  team: Teammate[] = initialTeam,
 ) {
   const next = structuredClone(run);
+  const builder = team.find((member) => runRole(member) === "builder");
+  const auditor = team.find((member) => runRole(member) === "auditor");
+  if (!builder || !auditor || builder.id === auditor.id)
+    throw new Error(
+      "Specialist audit requires separate builder and auditor members",
+    );
   const audit = next.specialistAudits?.at(-1);
   if (
     !audit ||
@@ -22,12 +30,22 @@ export async function executeSpecialist(
     audit.revision !== snapshotRevision(next.files, next.drafts)
   )
     throw new Error("Stale audit dispatch");
-  const event = (actor: "ellis" | "maya" | "system", text: string) => {
-    next.events.push({ actor, text, at: new Date().toISOString() });
+  const event = (actor: string, text: string) => {
+    const person = team.find((member) => member.id === actor);
+    next.events.push({
+      actor,
+      text,
+      at: new Date().toISOString(),
+      ...(person && {
+        actorName: person.name,
+        actorRole: person.role,
+        actorPortraitId: person.portraitId,
+      }),
+    });
     emit(structuredClone(next));
   };
   const call = async (
-    actor: "ellis" | "maya",
+    actor: string,
     system: string,
     name: import("../shared/runs").InFlightRequest["name"],
     schema: object,
@@ -46,7 +64,7 @@ export async function executeSpecialist(
   try {
     next.status = "auditing";
     event(
-      "ellis",
+      auditor.id,
       `Starting ${audit.kind} audit of ${audit.revision.slice(0, 12)}. Read-only, no tests executed.`,
     );
     const context = {
@@ -65,8 +83,8 @@ export async function executeSpecialist(
     }[audit.kind];
     const result = parseAudit(
       await call(
-        "ellis",
-        `${safety} You are an independent specialist auditor. ${focus} Findings are unverified hypotheses. Only report concrete issues in changed files.`,
+        auditor.id,
+        `${safety} You are an independent specialist auditor. ${auditor.instructions} ${focus} Findings are unverified hypotheses. Only report concrete issues in changed files.`,
         "specialist_audit",
         auditSchema,
         JSON.stringify(context),
@@ -75,11 +93,11 @@ export async function executeSpecialist(
     );
     audit.summary = result.summary;
     audit.findings = result.findings;
-    event("ellis", result.summary);
+    event(auditor.id, result.summary);
     if (result.findings.length) {
       const response = (await call(
-        "maya",
-        `${safety} You are the implementation reviewer responding to an independent audit. Explain which findings you accept or contest and why. Propose up to ${Math.min(3, 6 - (next.commands?.length || 0))} focused checks using existing draft files and available runtimes, or an empty checks array when no meaningful executable check is possible. Each check names a zero-based findingIndex, a direct command, expected observations distinguishing the issue from correct behaviour, and a literal machine-checkable criterion with the expected exit code and optional short output substring. Do not invent an output marker you cannot justify from the code or existing tests. The criterion is an unverified proposal, not proof of correctness. No installs, publishing, destructive cleanup or shell wrappers. Do not invent missing test files. You cannot resolve findings by assertion, alter files or execute tests. This is the only response round; unresolved issues go to the user.`,
+        builder.id,
+        `${safety} You are the implementation reviewer responding to an independent audit. ${builder.instructions} Explain which findings you accept or contest and why. Propose up to ${Math.min(3, 6 - (next.commands?.length || 0))} focused checks using existing draft files and available runtimes, or an empty checks array when no meaningful executable check is possible. Each check names a zero-based findingIndex, a direct command, expected observations distinguishing the issue from correct behaviour, and a literal machine-checkable criterion with the expected exit code and optional short output substring. Do not invent an output marker you cannot justify from the code or existing tests. The criterion is an unverified proposal, not proof of correctness. No installs, publishing, destructive cleanup or shell wrappers. Do not invent missing test files. You cannot resolve findings by assertion, alter files or execute tests. This is the only response round; unresolved issues go to the user.`,
         "respond_to_audit",
         {
           type: "object",
@@ -151,7 +169,7 @@ export async function executeSpecialist(
         }
       }
       audit.status = "needs-review";
-      event("maya", audit.response);
+      event(builder.id, audit.response);
       event(
         "system",
         "Review handoff: one response round complete. Findings remain unverified. No automatic fix, experiment, or resolution occurred.",

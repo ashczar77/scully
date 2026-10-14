@@ -1,7 +1,8 @@
 export type DeferredSuggestion = {
   id: string;
   text: string;
-  actor: "ellis";
+  actor: string;
+  actorName?: string;
   revision: string;
 };
 export function parseSuggestions(value: unknown): string[] {

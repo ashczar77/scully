@@ -9,7 +9,17 @@ const money = (nano: number) =>
     : `$${(nano / 1_000_000_000).toFixed(6)}`;
 const rateMoney = (milli: number) => `$${(milli / 1000).toFixed(3)}`;
 
-export function CostPanel({ run, api }: { run: Run; api: DesktopAPI }) {
+export function CostPanel({
+  run,
+  api,
+  compact = false,
+  onOpenSettings = () => {},
+}: {
+  run: Run;
+  api: DesktopAPI;
+  compact?: boolean;
+  onOpenSettings?: () => void;
+}) {
   const [snapshot, setSnapshot] = useState<CostSnapshot | null>(null);
   const [budget, setBudget] = useState("");
   const [manual, setManual] = useState(false);
@@ -98,6 +108,25 @@ export function CostPanel({ run, api }: { run: Run; api: DesktopAPI }) {
     (totals.unpricedMeasured > 0 ||
       totals.unknownUsage > 0 ||
       totals.unpricedPending > 0);
+  if (compact)
+    return (
+      <button className="run-setting-card" onClick={onOpenSettings}>
+        <span>Model cost estimates</span>
+        <strong>
+          {snapshot?.settings.budgetCents == null
+            ? "USD warning budget off"
+            : `$${(snapshot.settings.budgetCents / 100).toFixed(2)} USD warning budget`}
+        </strong>
+        <small>
+          {snapshot?.rateStatus === "verified"
+            ? "Published model rate"
+            : snapshot?.rateStatus === "user_estimate"
+              ? "User supplied rate"
+              : "Model cost rate unknown"}{" "}
+          · Change in Settings
+        </small>
+      </button>
+    );
   return (
     <section className="settings-card" aria-label="Model cost estimates">
       <h3>Model cost estimates</h3>
