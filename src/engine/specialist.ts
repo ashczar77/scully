@@ -8,6 +8,7 @@ import { parseFindingChecks } from "../shared/audits";
 import { commandRevision } from "./revision";
 import { randomUUID } from "node:crypto";
 import { runRole } from "../shared/teams";
+import { bindRunTeam } from "./character-context";
 export async function executeSpecialist(
   run: Run,
   task: Task,
@@ -16,6 +17,7 @@ export async function executeSpecialist(
   team: Teammate[] = initialTeam,
 ) {
   const next = structuredClone(run);
+  team = bindRunTeam(team, next.teamSnapshot?.roster);
   const builder = team.find((member) => runRole(member) === "builder");
   const auditor = team.find((member) => runRole(member) === "auditor");
   if (!builder || !auditor || builder.id === auditor.id)

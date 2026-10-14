@@ -54,7 +54,8 @@ export type InFlightRequest = {
     | "audit_chunk"
     | "audit_files"
     | "specialist_audit"
-    | "respond_to_audit";
+    | "respond_to_audit"
+    | "consult_specialist";
   startedAt: string;
 };
 export type Finding = {
@@ -63,6 +64,10 @@ export type Finding = {
   detail: string;
 };
 export type Run = {
+  consultations?: import("./consultation").SpecialistConsultation[];
+  approvedAdvice?: import("../engine/advice-handoff").AdviceApproval[];
+  lineupProposal?: import("./lineup-proposal").LineupProposal;
+  approvedLineup?: import("./lineup-proposal").ApprovedSpecialistLineup;
   suggestions?: import("./suggestions").DeferredSuggestion[];
   reviewedSuggestionIds?: string[];
   replies?: import("./messages").TeamReply[];
@@ -203,6 +208,24 @@ export type RunAPI = {
     choice: import("./usage-policy").UsagePolicyChoice,
   ) => Promise<{ token: string; policy: import("./usage-policy").UsagePolicy }>;
   startRun: (id: string, approved: boolean) => Promise<Run>;
+  approveLineup: (
+    id: string,
+    planRevision: string,
+    entries: import("./lineup-proposal").SpecialistLineupEntry[],
+    approved: boolean,
+  ) => Promise<Run>;
+  reviewConsultation: (
+    id: string,
+    specialistId: string,
+  ) => Promise<import("./consultation").ConsultationReview>;
+  startConsultation: (token: string, approved: boolean) => Promise<Run>;
+  stopConsultation: (id: string) => Promise<Run>;
+  reviewAdvice: (
+    id: string,
+    consultationId: string,
+  ) => Promise<import("../engine/advice-handoff").AdviceReview>;
+  approveAdvice: (token: string, approved: boolean) => Promise<Run>;
+  removeAdvice: (id: string, consultationId: string) => Promise<Run>;
   stopRun: (id: string) => Promise<Run>;
   decideCommand: (
     id: string,

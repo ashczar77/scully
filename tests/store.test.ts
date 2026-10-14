@@ -10,6 +10,173 @@ import { initialTeam } from "../src/shared/contracts";
 import { defaultUsageAlertPolicy } from "../src/shared/usage-alerts";
 import { emptyCostSettings } from "../src/shared/model-cost";
 
+it("preserves approved handoffs through worker saves and SQLite restart", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scully-advice-persistence-"));
+  let db: Store | undefined;
+  try {
+    const path = join(dir, "test.sqlite");
+    db = new Store(path);
+    const task = db.createTask({
+      title: "Checkout",
+      description: "",
+      mode: "work",
+    });
+    const run: Run = {
+      id: "handoff-run",
+      taskId: task.id,
+      sourceName: "New project",
+      files: [],
+      status: "planned",
+      events: [],
+      plan: "Build checkout",
+      drafts: [],
+      findings: [],
+      checks: [],
+      error: "",
+      calls: 1,
+      model: "",
+      outputTokens: 0,
+    };
+    db.saveRun(run);
+    db.updateApprovedAdvice(run.id, [
+      {
+        consultationId: "consult",
+        specialistId: "sloane",
+        planRevision: "plan-revision",
+        adviceRevision: "advice-revision",
+        approvedAt: "2026-10-14T12:00:00.000Z",
+      },
+    ]);
+    db.saveRun({ ...run, status: "building", approvedAdvice: [] });
+    expect(db.getRun(run.id).approvedAdvice).toHaveLength(1);
+    db.close();
+    db = new Store(path);
+    expect(db.getRun(run.id).approvedAdvice).toHaveLength(1);
+  } finally {
+    db?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("persists consultation advice and marks an in-flight consultation failed on restart", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scully-consultation-"));
+  let db: Store | undefined;
+  try {
+    const path = join(dir, "test.sqlite");
+    db = new Store(path);
+    const task = db.createTask({
+      title: "Plan",
+      description: "",
+      mode: "plan",
+    });
+    db.saveRun({
+      id: "consult-run",
+      taskId: task.id,
+      sourceName: "New project",
+      files: [],
+      status: "planned",
+      events: [],
+      plan: "Review the plan",
+      drafts: [],
+      findings: [],
+      checks: [],
+      error: "",
+      calls: 1,
+      model: "",
+      outputTokens: 0,
+      consultations: [
+        {
+          id: "one",
+          specialistId: "sloane",
+          phase: "planning",
+          purpose: "Review UX",
+          planRevision: "plan-revision",
+          contextRevision: "context-revision",
+          status: "consulting",
+          advice: "",
+          questions: [],
+          at: "2026-10-14T12:00:00.000Z",
+        },
+      ],
+    });
+    db.close();
+    db = new Store(path);
+    db.recoverRuns();
+    expect(db.getRun("consult-run").consultations?.[0]).toMatchObject({
+      status: "failed",
+      advice: expect.stringMatching(/remote completion unconfirmed/),
+    });
+    db.updateConsultation("consult-run", {
+      ...db.getRun("consult-run").consultations![0],
+      status: "answered",
+      advice: "Check keyboard navigation.",
+      questions: [],
+    });
+    db.saveRun({ ...db.getRun("consult-run"), consultations: [] });
+    expect(db.getRun("consult-run").consultations?.[0].advice).toBe(
+      "Check keyboard navigation.",
+    );
+  } finally {
+    db?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("keeps a plan-bound specialist proposal across a SQLite restart", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scully-lineup-proposal-"));
+  let db: Store | undefined;
+  try {
+    const path = join(dir, "test.sqlite");
+    db = new Store(path);
+    const task = db.createTask({
+      title: "Account recovery",
+      description: "Help users regain access",
+      mode: "plan",
+    });
+    db.saveRun({
+      id: "lineup-run",
+      taskId: task.id,
+      status: "planned",
+      plan: "Review the account recovery flow",
+      lineupProposal: {
+        planRevision: "revision-1",
+        discardedInvalid: false,
+        suggestions: [
+          {
+            id: "kiran",
+            phase: "verification",
+            reason: "Review account recovery boundaries",
+          },
+        ],
+      },
+      approvedLineup: {
+        planRevision: "revision-1",
+        entries: [
+          {
+            id: "kiran",
+            phase: "verification",
+            purpose: "Review account recovery boundaries",
+          },
+        ],
+        approvedAt: "2026-10-14T12:00:00.000Z",
+      },
+    } as Run);
+    db.close();
+    db = new Store(path);
+    expect(db.getRun("lineup-run").lineupProposal).toMatchObject({
+      planRevision: "revision-1",
+      suggestions: [{ id: "kiran", phase: "verification" }],
+    });
+    expect(db.getRun("lineup-run").approvedLineup).toMatchObject({
+      planRevision: "revision-1",
+      entries: [{ id: "kiran", phase: "verification" }],
+    });
+  } finally {
+    db?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 it("persists fixed-cast membership and keeps each earlier task roster after restart", () => {
   const dir = mkdtempSync(join(tmpdir(), "scully-variable-team-"));
   let db: Store | undefined;

@@ -127,9 +127,10 @@ export function catalogTeammate(id: CharacterId): Teammate {
         ? "Coordinator"
         : character.role[0].toUpperCase() + character.role.slice(1)),
     bio: character.brief,
-    instructions: character.modules
-      .map((module) => playbookModules[module])
-      .join("\n"),
+    instructions: [
+      character.brief,
+      ...character.modules.map((module) => playbookModules[module]),
+    ].join("\n"),
     portraitId: parsePortraitId(`portrait-${String(number).padStart(2, "0")}`),
   };
 }

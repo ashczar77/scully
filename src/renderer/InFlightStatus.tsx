@@ -9,6 +9,7 @@ const activity: Record<InFlightRequest["name"], string> = {
   audit_files: "reviewing the combined draft",
   specialist_audit: "reviewing the selected focus",
   respond_to_audit: "responding to findings",
+  consult_specialist: "answering a planning consultation",
 };
 
 export function InFlightStatus({ run, team }: { run: Run; team: Teammate[] }) {

@@ -4,6 +4,7 @@ import { nebiusModel } from "./provider";
 import type { Run, SessionConfig } from "../shared/runs";
 import type { Task, Teammate } from "../shared/contracts";
 import { answerQuestion } from "./answer";
+import { consultSpecialist } from "./consult";
 import { trackedModel } from "./usage-tracking";
 const port = process.parentPort;
 const acknowledgments = new Map<
@@ -71,6 +72,7 @@ port.once(
   }: {
     data: {
       replyContext?: string;
+      consultContext?: string;
       specialist?: boolean;
       run: Run;
       task: Task;
@@ -93,6 +95,16 @@ port.once(
         port.postMessage({
           answer: await answerQuestion(data.replyContext, model, () =>
             port.postMessage({ replyStarted: true }),
+          ),
+        });
+        return;
+      }
+      if (data.consultContext !== undefined) {
+        port.postMessage({
+          consultationResult: await consultSpecialist(
+            data.consultContext,
+            model,
+            () => port.postMessage({ consultationStarted: true }),
           ),
         });
         return;

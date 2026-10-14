@@ -163,6 +163,7 @@ try {
       "configureUsagePolicy",
       "reviewUsagePolicy",
       "startRun",
+      "approveLineup",
       "stopRun",
       "configureCoordination",
       "startAudit",
@@ -173,6 +174,12 @@ try {
       "reviewSuggestion",
       "reviewReply",
       "answerMessage",
+      "reviewConsultation",
+      "startConsultation",
+      "stopConsultation",
+      "reviewAdvice",
+      "approveAdvice",
+      "removeAdvice",
       "metrics",
       "inspectLocalArtifacts",
       "reviewApply",
@@ -294,6 +301,14 @@ try {
       .locator(".new-task-scroll")
       .evaluate((scroll) => getComputedStyle(scroll).scrollbarWidth),
     "none",
+  );
+  const planningLineup = newTaskDialog.getByRole("list", {
+    name: "Current automatic lineup",
+  });
+  assert.equal(await planningLineup.getByRole("listitem").count(), 4);
+  assert.match(
+    await planningLineup.innerText(),
+    /Pearl[\s\S]*Maya[\s\S]*Jun[\s\S]*Ellis/,
   );
   await newTaskDialog.screenshot({ path: "test-results/new-task-dialog.png" });
   await page.getByLabel("Task title").fill("Persistence smoke test");
@@ -1202,8 +1217,275 @@ try {
   await page
     .getByText("Use a command line interface instead", { exact: true })
     .waitFor();
+  // Exercise the planned-run review with a saved local fixture. No model call is made.
+  const lineupFixture = await page.evaluate(async () => {
+    const workspace = await window.scully.load();
+    const task = workspace.tasks.find(
+      (item) => item.title === "Persistence smoke test",
+    );
+    if (!task) throw new Error("Missing lineup fixture task");
+    return { task, run: await window.scully.prepareRun(task.id, null, []) };
+  });
+  lineupFixture.run.status = "planned";
+  lineupFixture.run.plan = "Review account recovery before implementation";
+  lineupFixture.run.calls = 1;
+  const planRevision = createHash("sha256")
+    .update(
+      JSON.stringify({
+        plan: lineupFixture.run.plan,
+        files: lineupFixture.run.files,
+        task: {
+          title: lineupFixture.task.title,
+          description: lineupFixture.task.description,
+        },
+        roster: lineupFixture.run.teamSnapshot.roster,
+      }),
+    )
+    .digest("hex");
+  lineupFixture.run.lineupProposal = {
+    planRevision,
+    discardedInvalid: false,
+    suggestions: [
+      {
+        id: "kiran",
+        phase: "verification",
+        reason: "Review account recovery boundaries",
+      },
+    ],
+  };
+  const lineupDb = new DatabaseSync(join(state, "workspace.sqlite"));
+  lineupDb
+    .prepare("UPDATE runs SET data=? WHERE id=?")
+    .run(JSON.stringify(lineupFixture.run), lineupFixture.run.id);
+  lineupDb.close();
+  await page
+    .getByRole("button", { name: "Existing project smoke test", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Persistence smoke test", exact: true })
+    .click();
+  const lineupPanel = page.getByRole("region", {
+    name: "Suggested specialists",
+  });
+  await lineupPanel.getByText("Review account recovery boundaries").waitFor();
+  assert.equal(
+    await page.getByRole("button", { name: "Build and audit" }).isDisabled(),
+    true,
+  );
+  await assert.rejects(
+    page.evaluate(
+      (id) => window.scully.approveLineup(id, "stale", [], true),
+      lineupFixture.run.id,
+    ),
+  );
+  await lineupPanel
+    .getByRole("button", { name: "Approve specialist selection" })
+    .click();
+  await lineupPanel.getByText("Approved selection").waitFor();
+  assert.deepEqual(
+    (
+      await page.evaluate((id) => window.scully.runs(id), lineupFixture.task.id)
+    )[0].approvedLineup.entries,
+    [
+      {
+        id: "kiran",
+        phase: "verification",
+        purpose: "Review account recovery boundaries",
+      },
+    ],
+  );
+  await lineupPanel.screenshot({ path: "test-results/lineup-review.png" });
+  await page.evaluate(
+    async ({ id, revision }) => {
+      await window.scully.approveLineup(
+        id,
+        revision,
+        [
+          {
+            id: "sloane",
+            phase: "planning",
+            purpose: "Review first-run usability",
+          },
+        ],
+        true,
+      );
+      await window.scully.configureSession({
+        key: "fixture-only-key",
+        model: "fixture-model",
+        outputTokens: 1024,
+      });
+    },
+    { id: lineupFixture.run.id, revision: planRevision },
+  );
+  const consultation = page.getByRole("region", {
+    name: "Planning consultations",
+  });
+  await consultation.getByText("Review first-run usability").waitFor();
+  await consultation
+    .getByRole("button", { name: "Review consultation" })
+    .click();
+  await consultation
+    .getByRole("heading", { name: "Approve one read-only consultation" })
+    .waitFor();
+  assert.equal(
+    await consultation
+      .getByRole("button", { name: "Request consultation" })
+      .isEnabled(),
+    false,
+  );
+  await consultation.screenshot({
+    path: "test-results/consultation-review.png",
+  });
+  await consultation.getByRole("button", { name: "Cancel review" }).click();
+  const handoffFixture = await page.evaluate(
+    async ({ taskId, runId }) =>
+      (await window.scully.runs(taskId)).find((run) => run.id === runId),
+    { taskId: lineupFixture.task.id, runId: lineupFixture.run.id },
+  );
+  handoffFixture.consultations = [
+    {
+      id: "offline-planning-advice",
+      specialistId: "sloane",
+      phase: "planning",
+      purpose: "Review first-run usability",
+      planRevision,
+      contextRevision: "offline-context",
+      status: "answered",
+      advice: "Show a clear recovery path for keyboard users.",
+      questions: ["Which recovery policy should apply?"],
+      at: new Date().toISOString(),
+    },
+  ];
+  const handoffDb = new DatabaseSync(join(state, "workspace.sqlite"));
+  handoffDb
+    .prepare("UPDATE runs SET data=? WHERE id=?")
+    .run(JSON.stringify(handoffFixture), handoffFixture.id);
+  handoffDb.close();
+  await page.reload();
+  await page
+    .getByRole("button", { name: "Persistence smoke test", exact: true })
+    .click();
+  const handoffPanel = page.getByRole("region", {
+    name: "Specialist advice handoff",
+  });
+  await handoffPanel
+    .getByRole("button", { name: "Review builder handoff" })
+    .click();
+  await handoffPanel
+    .getByText("Show a clear recovery path for keyboard users.", {
+      exact: false,
+    })
+    .waitFor();
+  assert.equal(
+    await handoffPanel
+      .getByRole("button", { name: "Attach advice" })
+      .isEnabled(),
+    false,
+  );
+  await handoffPanel.screenshot({
+    path: "test-results/advice-handoff-review.png",
+  });
+  await handoffPanel
+    .getByRole("checkbox", {
+      name: "I approve sharing this advice with the builders.",
+    })
+    .check();
+  await handoffPanel.getByRole("button", { name: "Attach advice" }).click();
+  await handoffPanel
+    .getByText("Included in the next builder requests.")
+    .waitFor();
+  assert.equal(
+    (
+      await page.evaluate(
+        async ({ taskId, runId }) =>
+          (await window.scully.runs(taskId)).find((run) => run.id === runId),
+        { taskId: lineupFixture.task.id, runId: handoffFixture.id },
+      )
+    ).approvedAdvice.length,
+    1,
+  );
+  await handoffPanel.getByRole("button", { name: "Remove from build" }).click();
+  await handoffPanel
+    .getByRole("button", { name: "Review builder handoff" })
+    .waitFor();
+  const verificationFixture = await page.evaluate(
+    async (taskId) => window.scully.prepareRun(taskId, null, []),
+    lineupFixture.task.id,
+  );
+  verificationFixture.status = "complete";
+  verificationFixture.plan = "Build and review account recovery";
+  verificationFixture.drafts = [
+    { path: "app.ts", content: "export const ready = true;", before: null },
+  ];
+  const draftRevision = createHash("sha256")
+    .update(JSON.stringify([["app.ts", "export const ready = true;"]]))
+    .digest("hex");
+  verificationFixture.coordination.integratedRevision = draftRevision;
+  verificationFixture.coordination.auditedRevision = draftRevision;
+  const verificationPlanRevision = createHash("sha256")
+    .update(
+      JSON.stringify({
+        plan: verificationFixture.plan,
+        files: verificationFixture.files,
+        task: {
+          title: lineupFixture.task.title,
+          description: lineupFixture.task.description,
+        },
+        roster: verificationFixture.teamSnapshot.roster,
+      }),
+    )
+    .digest("hex");
+  verificationFixture.lineupProposal = {
+    planRevision: verificationPlanRevision,
+    suggestions: [],
+    discardedInvalid: false,
+  };
+  verificationFixture.approvedLineup = {
+    planRevision: verificationPlanRevision,
+    entries: [
+      {
+        id: "kiran",
+        phase: "verification",
+        purpose: "Review account recovery boundaries",
+      },
+    ],
+    approvedAt: new Date().toISOString(),
+  };
+  const verificationDb = new DatabaseSync(join(state, "workspace.sqlite"));
+  verificationDb
+    .prepare("UPDATE runs SET data=? WHERE id=?")
+    .run(JSON.stringify(verificationFixture), verificationFixture.id);
+  verificationDb.close();
+  await page.reload();
+  await page
+    .getByRole("button", { name: "Persistence smoke test", exact: true })
+    .click();
+  const verificationPanel = page.getByRole("region", {
+    name: "Draft verification consultations",
+  });
+  await verificationPanel
+    .getByText("Review account recovery boundaries")
+    .waitFor();
+  await verificationPanel
+    .getByRole("button", { name: "Review consultation" })
+    .click();
+  await verificationPanel
+    .getByText("export const ready = true;", { exact: false })
+    .waitFor();
+  assert.equal(
+    await verificationPanel
+      .getByRole("button", { name: "Request consultation" })
+      .isEnabled(),
+    false,
+  );
+  await verificationPanel.screenshot({
+    path: "test-results/verification-consultation-review.png",
+  });
+  await verificationPanel
+    .getByRole("button", { name: "Cancel review" })
+    .click();
   console.log(
-    "PASS: desktop launch, renderer isolation, both project intakes, usage preset and cost budget persistence, upload approval, source preservation, offline coordinator, command review/stale rejection/restart expiry, local fixture execution with fresh permission and persisted results, fixed roster, activity and team persistence. No live provider request.",
+    "PASS: desktop launch, renderer isolation, both project intakes, usage preset and cost budget persistence, upload approval, source preservation, offline coordinator, specialist lineup, planning/draft consultation and advice handoff review, command review/stale rejection/restart expiry, local fixture execution with fresh permission and persisted results, fixed roster, activity and team persistence. No live provider request.",
   );
 } finally {
   if (app) await app.close();

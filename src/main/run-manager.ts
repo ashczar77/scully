@@ -14,7 +14,18 @@ import {
   type UsagePolicy,
 } from "../shared/usage-policy";
 import { requestLimit } from "../shared/coordination";
-import { commandRevision } from "../engine/revision";
+import { commandRevision, lineupPlanRevision } from "../engine/revision";
+import { parseSpecialistLineup } from "../shared/lineup-proposal";
+import {
+  adviceForHandoff,
+  approvedAdviceForBuild,
+  type AdviceReview,
+} from "../engine/advice-handoff";
+import {
+  parseConsultationResult,
+  type ConsultationReview,
+  type SpecialistConsultation,
+} from "../shared/consultation";
 import { assessLocalCriterion } from "../shared/check-criteria";
 import {
   parseMessage,
@@ -66,7 +77,16 @@ export class RunManager {
     acknowledged: number;
     outputTokens: number;
   } | null = null;
+  private activeConsult: {
+    id: string;
+    child: UtilityProcess;
+    consultationId: string;
+    acknowledged: number;
+    outputTokens: number;
+  } | null = null;
   private replyTicket: ReplyReview | null = null;
+  private consultTicket: ConsultationReview | null = null;
+  private handoffTicket: AdviceReview | null = null;
   private usageReview: {
     token: string;
     revision: string;
@@ -77,7 +97,7 @@ export class RunManager {
     {
       runId: string;
       child: UtilityProcess;
-      scope: "reply" | "coordinator";
+      scope: "reply" | "consult" | "coordinator";
       value: UsageStart;
     }
   >();
@@ -202,7 +222,10 @@ export class RunManager {
       }
     }
   }
-  private clearHeld(runId: string, scope?: "reply" | "coordinator") {
+  private clearHeld(
+    runId: string,
+    scope?: "reply" | "consult" | "coordinator",
+  ) {
     for (const [key, value] of this.heldUsage) {
       if (value.runId === runId && (!scope || value.scope === scope))
         this.heldUsage.delete(key);
@@ -261,12 +284,432 @@ export class RunManager {
     this.save(run);
     return run;
   }
+  approveLineup(
+    id: unknown,
+    revision: unknown,
+    entries: unknown,
+    approved: unknown,
+  ): Run {
+    this.consultTicket = null;
+    this.handoffTicket = null;
+    if (approved !== true)
+      throw new Error("Explicit lineup approval is required");
+    if (this.active || this.activeReply || this.activeConsult)
+      throw new Error("Wait for active work to finish");
+    const run = this.store.getRun(id);
+    if (run.status !== "planned" || !run.lineupProposal)
+      throw new Error("No planned specialist lineup is awaiting review");
+    const task = this.store.load().tasks.find((item) => item.id === run.taskId);
+    if (
+      !task ||
+      !run.taskSnapshot ||
+      run.taskSnapshot.title !== task.title ||
+      run.taskSnapshot.description !== task.description ||
+      run.taskSnapshot.mode !== task.mode ||
+      revision !== run.lineupProposal.planRevision ||
+      revision !== lineupPlanRevision(run, task)
+    )
+      throw new Error("Plan or task changed. Prepare and review a new lineup");
+    const team = this.teamForRun(run);
+    this.assertCoordinationTeam(run, team);
+    const selected = parseSpecialistLineup(entries);
+    run.approvedLineup = {
+      planRevision: revision as string,
+      entries: selected,
+      approvedAt: new Date().toISOString(),
+    };
+    run.events.push({
+      actor: "system",
+      at: run.approvedLineup.approvedAt,
+      text: `User approved ${selected.length} specialist ${selected.length === 1 ? "assignment" : "assignments"} for later review. No specialist request or budget change occurred.`,
+    });
+    this.store.saveRun(run);
+    const updated = this.store.updateApprovedAdvice(run.id, []);
+    this.publish(updated);
+    return updated;
+  }
+  private consultationContext(id: unknown, specialistId: unknown) {
+    const run = this.store.getRun(id);
+    if (
+      !["planned", "complete"].includes(run.status) ||
+      run.redirectedTo ||
+      !run.lineupProposal ||
+      !run.approvedLineup ||
+      this.active ||
+      this.activeReply ||
+      this.activeConsult
+    )
+      throw new Error("Wait for an approved, stable plan or completed draft");
+    const task = this.store.load().tasks.find((item) => item.id === run.taskId);
+    if (
+      !task ||
+      !run.taskSnapshot ||
+      run.taskSnapshot.title !== task.title ||
+      run.taskSnapshot.description !== task.description ||
+      run.taskSnapshot.mode !== task.mode ||
+      run.lineupProposal.planRevision !== lineupPlanRevision(run, task) ||
+      run.approvedLineup.planRevision !== run.lineupProposal.planRevision
+    )
+      throw new Error("Plan or task changed. Review the lineup again");
+    const team = this.teamForRun(run);
+    this.assertCoordinationTeam(run, team);
+    const entries = parseSpecialistLineup(run.approvedLineup.entries);
+    const entry = entries.find((item) => item.id === specialistId);
+    if (
+      !entry ||
+      (entry.phase !== "planning" && entry.phase !== "verification") ||
+      (entry.phase === "planning" && run.status !== "planned") ||
+      (entry.phase === "verification" && run.status !== "complete")
+    )
+      throw new Error("Choose a specialist approved for this phase");
+    const phase: "planning" | "verification" =
+      entry.phase === "planning" ? "planning" : "verification";
+    if (run.consultations?.some((item) => item.specialistId === entry.id))
+      throw new Error(
+        "This specialist already received a consultation request for this run",
+      );
+    const artifactRevision =
+      entry.phase === "verification"
+        ? snapshotRevision(run.files, run.drafts)
+        : undefined;
+    if (
+      entry.phase === "verification" &&
+      (!run.drafts.length ||
+        !run.coordination ||
+        run.coordination.integratedRevision !== artifactRevision ||
+        run.coordination.auditedRevision !== artifactRevision ||
+        run.executions?.some((execution) => execution.status === "running") ||
+        run.applications?.some(
+          (application) => application.status === "applying",
+        ))
+    )
+      throw new Error("Finish and audit the current draft before consultation");
+    const context = JSON.stringify({
+      specialistId: entry.id,
+      phase: entry.phase,
+      purpose: entry.purpose,
+      task: { title: task.title, description: task.description },
+      plan: run.plan,
+      ...(entry.phase === "verification"
+        ? {
+            artifactRevision,
+            drafts: run.drafts.map(({ path, content }) => ({ path, content })),
+            audit: { checks: run.checks, findings: run.findings },
+          }
+        : {}),
+    });
+    if (Buffer.byteLength(context) > 80000)
+      throw new Error("Specialist context exceeds the input limit");
+    return { run, task, entry, phase, context, artifactRevision };
+  }
+  reviewConsultation(id: unknown, specialistId: unknown): ConsultationReview {
+    this.consultTicket = null;
+    if (!this.config) throw new Error("Configure Nebius in Settings first");
+    const { run, task, entry, phase, context, artifactRevision } =
+      this.consultationContext(id, specialistId);
+    const policy = this.checkedRunPolicy(run, task.mode);
+    const cost = this.costForRun(run.id);
+    const review: ConsultationReview = {
+      token: randomUUID(),
+      runId: run.id,
+      specialistId: entry.id,
+      phase,
+      context,
+      contextRevision: createHash("sha256").update(context).digest("hex"),
+      planRevision: run.lineupProposal!.planRevision,
+      artifactRevision,
+      expiresAt: Date.now() + 120000,
+      model: this.config.model,
+      outputTokens: policy.outputTokens,
+      projectedNanoUsd: cost.nextProjectedNanoUsd,
+      rateStatus: cost.rateStatus,
+    };
+    this.consultTicket = review;
+    return review;
+  }
+  startConsultation(token: unknown, approved: unknown): Run {
+    const ticket = this.consultTicket;
+    this.consultTicket = null;
+    if (!ticket || ticket.token !== token)
+      throw new Error("Review the specialist request again");
+    if (approved !== true)
+      throw new Error("Fresh specialist upload and usage approval is required");
+    if (
+      !this.config ||
+      ticket.model !== this.config.model ||
+      Date.now() >= ticket.expiresAt
+    )
+      throw new Error("Specialist review expired or model changed");
+    const { run, task, entry, phase, context, artifactRevision } =
+      this.consultationContext(ticket.runId, ticket.specialistId);
+    const policy = this.checkedRunPolicy(run, task.mode);
+    const cost = this.costForRun(run.id);
+    if (
+      ticket.outputTokens !== policy.outputTokens ||
+      ticket.phase !== phase ||
+      ticket.planRevision !== run.lineupProposal?.planRevision ||
+      ticket.artifactRevision !== artifactRevision ||
+      ticket.context !== context ||
+      ticket.contextRevision !==
+        createHash("sha256").update(context).digest("hex") ||
+      ticket.projectedNanoUsd !== cost.nextProjectedNanoUsd ||
+      ticket.rateStatus !== cost.rateStatus
+    )
+      throw new Error(
+        "Specialist scope, cost or settings changed. Review again",
+      );
+    const consultation: SpecialistConsultation = {
+      id: randomUUID(),
+      specialistId: entry.id,
+      phase,
+      purpose: entry.purpose,
+      planRevision: ticket.planRevision,
+      artifactRevision,
+      contextRevision: ticket.contextRevision,
+      status: "consulting",
+      advice: "",
+      questions: [],
+      at: new Date().toISOString(),
+    };
+    const started = this.store.updateConsultation(run.id, consultation);
+    this.publish(started);
+    let child: UtilityProcess;
+    try {
+      child = utilityProcess.fork(join(__dirname, "worker.cjs"), [], {
+        serviceName: "Scully specialist consultation",
+        env: {},
+        stdio: "ignore",
+      });
+    } catch {
+      return this.finishConsultation(run.id, consultation.id, null);
+    }
+    this.activeConsult = {
+      id: run.id,
+      child,
+      consultationId: consultation.id,
+      acknowledged: 0,
+      outputTokens: ticket.outputTokens,
+    };
+    child.on(
+      "message",
+      (message: {
+        metric?: unknown;
+        usageStart?: unknown;
+        usageFinish?: unknown;
+        consultationStarted?: unknown;
+        consultationResult?: unknown;
+        failed?: boolean;
+      }) => {
+        if (this.activeConsult?.child !== child) return;
+        if (message.metric) {
+          emitMetric(this.metricSink, message.metric);
+          return;
+        }
+        if (message.usageStart) {
+          if (
+            this.acknowledgeUsage(run.id, child, message.usageStart, "consult")
+          )
+            this.publish(this.store.getRun(run.id));
+          return;
+        }
+        if (message.usageFinish) {
+          const before = this.usageAlertSequence(run.id);
+          this.store.finishUsage(run.id, message.usageFinish, "consult");
+          this.announceUsageAlert(run.id, before);
+          this.publish(this.store.getRun(run.id));
+          return;
+        }
+        if (message.consultationStarted === true) {
+          const current = this.store
+            .getRun(run.id)
+            .consultations?.find((item) => item.id === consultation.id);
+          if (current?.status === "consulting" && !current.requestStartedAt) {
+            current.requestStartedAt = new Date().toISOString();
+            this.publish(this.store.updateConsultation(run.id, current));
+          }
+          return;
+        }
+        try {
+          if (message.failed) throw new Error("Specialist worker failed");
+          if (this.activeConsult?.acknowledged !== 1)
+            throw new Error("Specialist request was not acknowledged");
+          this.finishConsultation(
+            run.id,
+            consultation.id,
+            parseConsultationResult(message.consultationResult),
+          );
+        } catch {
+          this.finishConsultation(run.id, consultation.id, null);
+        }
+      },
+    );
+    child.on("exit", () => {
+      if (this.activeConsult?.child === child)
+        this.finishConsultation(run.id, consultation.id, null);
+    });
+    try {
+      child.postMessage({
+        consultContext: ticket.context,
+        config: { ...this.config, outputTokens: ticket.outputTokens },
+      });
+    } catch {
+      return this.finishConsultation(run.id, consultation.id, null);
+    }
+    return started;
+  }
+  private finishConsultation(
+    id: string,
+    consultationId: string,
+    result: ReturnType<typeof parseConsultationResult> | null,
+  ): Run {
+    const child = this.activeConsult?.child;
+    this.activeConsult = null;
+    child?.kill();
+    this.clearHeld(id, "consult");
+    this.store.interruptUsage(id, "consult");
+    const current = this.store.getRun(id);
+    const consultation = current.consultations?.find(
+      (item) => item.id === consultationId,
+    );
+    if (!consultation) return current;
+    consultation.status = result ? "answered" : "failed";
+    consultation.advice =
+      result?.advice ||
+      "Consultation failed or stopped; remote completion is unconfirmed. No automatic retry.";
+    consultation.questions = result?.questions || [];
+    const updated = this.store.updateConsultation(id, consultation);
+    this.publish(updated);
+    return updated;
+  }
+  stopConsultation(id: unknown): Run {
+    const run = this.store.getRun(id);
+    if (this.activeConsult?.id !== run.id) return run;
+    return this.finishConsultation(
+      run.id,
+      this.activeConsult.consultationId,
+      null,
+    );
+  }
+  private adviceContext(id: unknown, consultationId: unknown) {
+    const run = this.store.getRun(id);
+    if (
+      run.status !== "planned" ||
+      run.redirectedTo ||
+      this.active ||
+      this.activeReply ||
+      this.activeConsult ||
+      typeof consultationId !== "string"
+    )
+      throw new Error("Wait for a stable, approved plan");
+    const task = this.store.load().tasks.find((item) => item.id === run.taskId);
+    if (
+      !task ||
+      !run.taskSnapshot ||
+      run.taskSnapshot.title !== task.title ||
+      run.taskSnapshot.description !== task.description ||
+      run.taskSnapshot.mode !== task.mode
+    )
+      throw new Error("Task changed. Prepare and review a new plan");
+    const team = this.teamForRun(run);
+    this.assertCoordinationTeam(run, team);
+    const { consultation, adviceRevision, handoff } = adviceForHandoff(
+      run,
+      task,
+      consultationId,
+    );
+    if (
+      run.approvedAdvice?.some((item) => item.consultationId === consultationId)
+    )
+      throw new Error("This advice is already attached to the build");
+    approvedAdviceForBuild(run, task);
+    if ((run.approvedAdvice?.length || 0) >= 3)
+      throw new Error("Three specialist handoffs per build maximum");
+    const text = JSON.stringify(handoff);
+    return {
+      run,
+      task,
+      consultation,
+      adviceRevision,
+      handoff: text,
+      writerRequests: run.coordination?.assignments.length || 1,
+    };
+  }
+  reviewAdvice(id: unknown, consultationId: unknown): AdviceReview {
+    this.handoffTicket = null;
+    const context = this.adviceContext(id, consultationId);
+    const review: AdviceReview = {
+      token: randomUUID(),
+      runId: context.run.id,
+      consultationId: context.consultation.id,
+      planRevision: context.consultation.planRevision,
+      adviceRevision: context.adviceRevision,
+      handoff: context.handoff,
+      inputBytes: Buffer.byteLength(context.handoff),
+      writerRequests: context.writerRequests,
+      expiresAt: Date.now() + 120000,
+    };
+    this.handoffTicket = review;
+    return review;
+  }
+  approveAdvice(token: unknown, approved: unknown): Run {
+    const ticket = this.handoffTicket;
+    this.handoffTicket = null;
+    if (!ticket || ticket.token !== token)
+      throw new Error("Review the specialist handoff again");
+    if (approved !== true)
+      throw new Error("Explicit advice handoff approval is required");
+    if (Date.now() >= ticket.expiresAt)
+      throw new Error("Specialist handoff review expired");
+    const context = this.adviceContext(ticket.runId, ticket.consultationId);
+    if (
+      ticket.planRevision !== context.consultation.planRevision ||
+      ticket.adviceRevision !== context.adviceRevision ||
+      ticket.handoff !== context.handoff ||
+      ticket.inputBytes !== Buffer.byteLength(context.handoff) ||
+      ticket.writerRequests !== context.writerRequests
+    )
+      throw new Error("Specialist advice or build scope changed. Review again");
+    const updated = this.store.updateApprovedAdvice(context.run.id, [
+      ...(context.run.approvedAdvice || []),
+      {
+        consultationId: context.consultation.id,
+        specialistId: context.consultation.specialistId,
+        planRevision: ticket.planRevision,
+        adviceRevision: ticket.adviceRevision,
+        approvedAt: new Date().toISOString(),
+      },
+    ]);
+    this.publish(updated);
+    return updated;
+  }
+  removeAdvice(id: unknown, consultationId: unknown): Run {
+    const run = this.store.getRun(id);
+    if (
+      run.status !== "planned" ||
+      this.active ||
+      this.activeReply ||
+      this.activeConsult ||
+      typeof consultationId !== "string"
+    )
+      throw new Error("Wait for a stable plan to remove a handoff");
+    const selected = run.approvedAdvice || [];
+    if (!selected.some((item) => item.consultationId === consultationId))
+      throw new Error("Specialist handoff not found");
+    this.handoffTicket = null;
+    const updated = this.store.updateApprovedAdvice(
+      run.id,
+      selected.filter((item) => item.consultationId !== consultationId),
+    );
+    this.publish(updated);
+    return updated;
+  }
   private proposedUsagePolicy(id: unknown, choice: unknown) {
     if (!this.config) throw new Error("Configure Nebius in Settings first");
     const run = this.store.getRun(id);
     if (
       this.active ||
       this.activeReply ||
+      this.activeConsult ||
       !["prepared", "planned"].includes(run.status)
     )
       throw new Error("Wait for a stable run before changing usage settings");
@@ -330,6 +773,7 @@ export class RunManager {
       throw new Error("Review this usage increase again");
     run.usagePolicy = next;
     if (this.replyTicket?.runId === run.id) this.replyTicket = null;
+    if (this.consultTicket?.runId === run.id) this.consultTicket = null;
     if (run.coordination) {
       run.coordination.settings = {
         ownership: run.coordination.settings?.ownership || "",
@@ -340,12 +784,13 @@ export class RunManager {
     return run;
   }
   configure(value: unknown) {
-    if (this.active || this.activeReply)
+    if (this.active || this.activeReply || this.activeConsult)
       throw new Error(
         "Wait for the active run before changing its provider settings",
       );
     this.config = validateSession(value);
     this.replyTicket = null;
+    this.consultTicket = null;
     this.usageReview = null;
     return this.session();
   }
@@ -416,6 +861,7 @@ export class RunManager {
     const run = this.store.getRun(id);
     if (
       this.activeReply ||
+      this.activeConsult ||
       (this.active && this.active.id !== run.id) ||
       run.redirectedTo ||
       ![
@@ -686,6 +1132,10 @@ export class RunManager {
   sendTeamMessage(id: unknown, value: unknown) {
     const input = parseMessage(value);
     let parent = this.store.getRun(id);
+    if (this.activeConsult?.id === parent.id)
+      throw new Error(
+        "Stop the specialist consultation before messaging the team",
+      );
     if (parent.redirectedTo)
       throw new Error("This run was superseded. Open its revised attempt.");
     if ((parent.messages?.length || 0) >= 20)
@@ -946,7 +1396,8 @@ export class RunManager {
     if (approved !== true)
       throw new Error("Explicit upload and usage approval is required");
     if (!this.config) throw new Error("Configure Nebius in Settings first");
-    if (this.active) throw new Error("Another run is already active");
+    if (this.active || this.activeConsult)
+      throw new Error("Another request is already active");
     const run = this.store.getRun(id);
     if (specialist) {
       if (
@@ -980,6 +1431,19 @@ export class RunManager {
       );
     const team = this.teamForRun(run);
     this.assertCoordinationTeam(run, team);
+    if (!specialist && run.status === "planned" && run.lineupProposal) {
+      if (
+        !run.approvedLineup ||
+        run.lineupProposal.planRevision !== lineupPlanRevision(run, task) ||
+        run.approvedLineup.planRevision !== run.lineupProposal.planRevision ||
+        JSON.stringify(parseSpecialistLineup(run.approvedLineup.entries)) !==
+          JSON.stringify(run.approvedLineup.entries)
+      )
+        throw new Error(
+          "Review and approve the current specialist lineup before building",
+        );
+    }
+    if (!specialist) approvedAdviceForBuild(run, task);
     run.teamSnapshot = team;
     run.usagePolicy = this.checkedRunPolicy(run, task.mode);
     if (
@@ -1101,6 +1565,9 @@ export class RunManager {
           message.run.model = approvedRun.model;
           message.run.outputTokens = approvedRun.outputTokens;
           message.run.teamSnapshot = approvedRun.teamSnapshot;
+          message.run.approvedLineup = approvedRun.approvedLineup;
+          if (approvedRun.approvedLineup)
+            message.run.lineupProposal = approvedRun.lineupProposal;
           if (message.run.coordination && approvedRun.coordination) {
             message.run.coordination.settings =
               approvedRun.coordination.settings;
@@ -1202,9 +1669,12 @@ export class RunManager {
   }
   close() {
     this.replyTicket = null;
+    this.consultTicket = null;
+    this.handoffTicket = null;
     this.usageReview = null;
     if (this.active) this.stop(this.active.id);
     if (this.activeReply) this.stopReply(this.activeReply.id);
+    if (this.activeConsult) this.stopConsultation(this.activeConsult.id);
     this.config = null;
   }
   private checkedRunPolicy(run: Run, mode: "plan" | "work"): UsagePolicy {
@@ -1240,7 +1710,7 @@ export class RunManager {
   }
   private acceptUsageStart(
     value: unknown,
-    scope: "reply" | "coordinator",
+    scope: "reply" | "consult" | "coordinator",
     expectedOutputTokens: number,
   ): value is UsageStart {
     return (
@@ -1249,7 +1719,10 @@ export class RunManager {
       value.maxOutputTokens === expectedOutputTokens &&
       (scope === "reply"
         ? value.stage === "answer_question"
-        : value.stage !== "answer_question")
+        : scope === "consult"
+          ? value.stage === "consult_specialist"
+          : value.stage !== "answer_question" &&
+            value.stage !== "consult_specialist")
     );
   }
   private rejectUsage(child: UtilityProcess, value: unknown) {
@@ -1266,15 +1739,20 @@ export class RunManager {
     runId: string,
     child: UtilityProcess,
     value: unknown,
-    scope: "reply" | "coordinator",
+    scope: "reply" | "consult" | "coordinator",
     pauseId?: string,
   ) {
     try {
-      const active = scope === "reply" ? this.activeReply : this.active;
+      const active =
+        scope === "reply"
+          ? this.activeReply
+          : scope === "consult"
+            ? this.activeConsult
+            : this.active;
       if (
         !active ||
         active.child !== child ||
-        (scope === "reply"
+        (scope === "reply" || scope === "consult"
           ? active.acknowledged >= 1
           : this.active!.kind === "core"
             ? this.store.coreUsageRequests(runId) >= this.active!.limit

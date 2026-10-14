@@ -24,6 +24,519 @@ import { commandRevision } from "../src/engine/revision";
 import { snapshotRevision } from "../src/engine/integration";
 import { findingKey } from "../src/shared/audits";
 import { defaultUsageAlertPolicy } from "../src/shared/usage-alerts";
+import { lineupPlanRevision } from "../src/engine/revision";
+
+it("requires a separate plan-bound approval before passing specialist advice to builders", () => {
+  const c = setup();
+  try {
+    c.manager.configure({
+      key: "fixture-key",
+      model: "model",
+      outputTokens: 1024,
+    });
+    const planned = {
+      ...c.manager.prepare(c.task.id, null, []),
+      status: "planned" as const,
+      plan: "Build checkout",
+      calls: 1,
+    };
+    const revision = lineupPlanRevision(planned, c.task);
+    planned.lineupProposal = {
+      planRevision: revision,
+      suggestions: [],
+      discardedInvalid: false,
+    };
+    c.store.saveRun(planned);
+    c.manager.approveLineup(
+      planned.id,
+      revision,
+      [{ id: "sloane", phase: "planning", purpose: "Review checkout UX" }],
+      true,
+    );
+    const advice = {
+      id: "consultation",
+      specialistId: "sloane" as const,
+      phase: "planning" as const,
+      purpose: "Review checkout UX",
+      planRevision: revision,
+      contextRevision: "context",
+      status: "answered" as const,
+      advice: "Show clear recovery instructions.",
+      questions: ["What recovery policy should apply?"],
+      at: "2026-10-14T12:00:00.000Z",
+    };
+    c.store.updateConsultation(planned.id, advice);
+    vi.mocked(utilityProcess.fork).mockClear();
+    const review = c.manager.reviewAdvice(planned.id, advice.id);
+    expect(review.handoff).toContain(advice.advice);
+    expect(review.writerRequests).toBe(2);
+    expect(utilityProcess.fork).not.toHaveBeenCalled();
+    expect(() => c.manager.approveAdvice(review.token, false)).toThrow(
+      /approval/i,
+    );
+    expect(() => c.manager.approveAdvice(review.token, true)).toThrow(
+      /review/i,
+    );
+    const accepted = c.manager.reviewAdvice(planned.id, advice.id);
+    const attached = c.manager.approveAdvice(accepted.token, true);
+    expect(attached.approvedAdvice).toHaveLength(1);
+    expect(() => c.manager.reviewAdvice(planned.id, advice.id)).toThrow(
+      /already/i,
+    );
+    expect(
+      c.manager.removeAdvice(planned.id, advice.id).approvedAdvice,
+    ).toEqual([]);
+    const renewed = c.manager.reviewAdvice(planned.id, advice.id);
+    c.manager.approveAdvice(renewed.token, true);
+    expect(
+      c.manager.approveLineup(
+        planned.id,
+        revision,
+        [{ id: "sloane", phase: "planning", purpose: "Review checkout UX" }],
+        true,
+      ).approvedAdvice,
+    ).toEqual([]);
+    const afterLineup = c.manager.reviewAdvice(planned.id, advice.id);
+    c.manager.approveAdvice(afterLineup.token, true);
+    c.store.updateConsultation(planned.id, {
+      ...advice,
+      advice: "Changed advice",
+    });
+    expect(() => c.manager.start(planned.id, true)).toThrow(/changed/i);
+    expect(utilityProcess.fork).not.toHaveBeenCalled();
+    c.store.updateConsultation(planned.id, advice);
+    c.manager.start(planned.id, true);
+    expect(utilityProcess.fork).toHaveBeenCalledOnce();
+    const worker = vi.mocked(utilityProcess.fork).mock.results.at(-1)!.value;
+    expect(worker.postMessage.mock.calls[0][0].run.approvedAdvice).toHaveLength(
+      1,
+    );
+  } finally {
+    c.cleanup();
+  }
+});
+
+it("reviews an approved verification specialist against the exact audited draft", () => {
+  const c = setup();
+  try {
+    c.manager.configure({
+      key: "fixture-key",
+      model: "model",
+      outputTokens: 1024,
+    });
+    const prepared = c.manager.prepare(c.task.id, null, []);
+    const planned = {
+      ...prepared,
+      status: "planned" as const,
+      plan: "Build checkout",
+      calls: 1,
+      files: [{ path: "private.txt", content: "ORIGINAL SOURCE" }],
+    };
+    const planRevision = lineupPlanRevision(planned, c.task);
+    planned.lineupProposal = {
+      planRevision,
+      suggestions: [],
+      discardedInvalid: false,
+    };
+    c.store.saveRun(planned);
+    c.manager.approveLineup(
+      planned.id,
+      planRevision,
+      [
+        {
+          id: "kiran",
+          phase: "verification",
+          purpose: "Review authentication boundaries",
+        },
+      ],
+      true,
+    );
+    expect(() => c.manager.reviewConsultation(planned.id, "kiran")).toThrow(
+      /phase/i,
+    );
+    const completed = c.store.getRun(planned.id);
+    completed.status = "complete";
+    completed.drafts = [
+      { path: "app.ts", content: "export const ready = true", before: null },
+    ];
+    completed.findings = [
+      { path: "app.ts", severity: "warning", detail: "Check session handling" },
+    ];
+    completed.checks = ["Static checks passed"];
+    completed.coordination!.auditedRevision = snapshotRevision(
+      completed.files,
+      completed.drafts,
+    );
+    completed.coordination!.integratedRevision =
+      completed.coordination!.auditedRevision;
+    c.store.saveRun(completed);
+    vi.mocked(utilityProcess.fork).mockClear();
+    const review = c.manager.reviewConsultation(planned.id, "kiran");
+    expect(review).toMatchObject({
+      phase: "verification",
+      artifactRevision: completed.coordination!.auditedRevision,
+    });
+    expect(review.context).toContain("export const ready = true");
+    expect(review.context).toContain("Check session handling");
+    expect(review.context).not.toContain("ORIGINAL SOURCE");
+    expect(utilityProcess.fork).not.toHaveBeenCalled();
+    expect(() => c.manager.startConsultation(review.token, false)).toThrow(
+      /approval/i,
+    );
+    const renewed = c.manager.reviewConsultation(planned.id, "kiran");
+    const changed = c.store.getRun(planned.id);
+    changed.drafts[0].content = "export const ready = false";
+    c.store.saveRun(changed);
+    expect(() => c.manager.startConsultation(renewed.token, true)).toThrow(
+      /draft|changed|audit/i,
+    );
+    expect(utilityProcess.fork).not.toHaveBeenCalled();
+    c.store.saveRun(completed);
+    const fresh = c.manager.reviewConsultation(planned.id, "kiran");
+    const started = c.manager.startConsultation(fresh.token, true);
+    expect(started.consultations?.[0]).toMatchObject({
+      phase: "verification",
+      artifactRevision: completed.coordination!.auditedRevision,
+      status: "consulting",
+    });
+    expect(() => c.manager.reviewConsultation(planned.id, "kiran")).toThrow(
+      /stable|already/i,
+    );
+    expect(
+      c.manager.stopConsultation(planned.id).consultations?.[0].status,
+    ).toBe("failed");
+    expect(() => c.manager.reviewConsultation(planned.id, "kiran")).toThrow(
+      /already/i,
+    );
+    expect(utilityProcess.fork).toHaveBeenCalledOnce();
+  } finally {
+    c.cleanup();
+  }
+});
+
+it("requires a fresh, plan-bound approval for one read-only planning consultation", () => {
+  const c = setup();
+  try {
+    c.manager.configure({
+      key: "fixture-key",
+      model: "model",
+      outputTokens: 1024,
+    });
+    const prepared = c.manager.prepare(c.task.id, null, []);
+    const planned = {
+      ...prepared,
+      status: "planned" as const,
+      plan: "Draft a recovery flow",
+      calls: 1,
+      files: [{ path: "secret.txt", content: "PRIVATE SOURCE", before: null }],
+    };
+    const revision = lineupPlanRevision(planned, c.task);
+    planned.lineupProposal = {
+      planRevision: revision,
+      suggestions: [
+        { id: "sloane", phase: "planning" as const, reason: "Check usability" },
+      ],
+      discardedInvalid: false,
+    };
+    c.store.saveRun(planned);
+    expect(() => c.manager.reviewConsultation(planned.id, "sloane")).toThrow(
+      /approved/i,
+    );
+    c.manager.approveLineup(
+      planned.id,
+      revision,
+      [{ id: "sloane", phase: "planning", purpose: "Check usability" }],
+      true,
+    );
+    vi.mocked(utilityProcess.fork).mockClear();
+    const review = c.manager.reviewConsultation(planned.id, "sloane");
+    expect(review.context).toContain("Draft a recovery flow");
+    expect(review.context).not.toContain("PRIVATE SOURCE");
+    expect(review.context).not.toContain("secret.txt");
+    expect(utilityProcess.fork).not.toHaveBeenCalled();
+    expect(() => c.manager.startConsultation(review.token, false)).toThrow(
+      /approval/i,
+    );
+    expect(() => c.manager.startConsultation(review.token, true)).toThrow(
+      /review/i,
+    );
+    const accepted = c.manager.reviewConsultation(planned.id, "sloane");
+    const started = c.manager.startConsultation(accepted.token, true);
+    expect(started.consultations?.[0].status).toBe("consulting");
+    expect(utilityProcess.fork).toHaveBeenCalledOnce();
+    expect(() => c.manager.start(planned.id, true)).toThrow(/active/i);
+    const worker = vi.mocked(utilityProcess.fork).mock.results.at(-1)!.value;
+    expect(worker.postMessage.mock.calls[0][0].consultContext).toBe(
+      accepted.context,
+    );
+    const requestId = "5d62c393-9048-4ef4-8426-07c3770f081e";
+    worker.emit("message", {
+      usageStart: {
+        id: requestId,
+        stage: "propose_files",
+        model: "model",
+        maxOutputTokens: 1024,
+      },
+    });
+    expect(c.store.usageForRun(planned.id).requests).toBe(0);
+    worker.emit("message", {
+      usageStart: {
+        id: requestId,
+        stage: "consult_specialist",
+        model: "model",
+        maxOutputTokens: 1024,
+      },
+    });
+    expect(c.store.usageForRun(planned.id).requests).toBe(1);
+    expect(c.store.coreUsageRequests(planned.id)).toBe(0);
+    worker.emit("message", {
+      usageFinish: {
+        id: requestId,
+        usage: { inputTokens: 90, outputTokens: 30 },
+      },
+    });
+    worker.emit("message", {
+      consultationResult: {
+        advice: "Check the recovery copy.",
+        questions: ["Which users need access?"],
+      },
+    });
+    const saved = c.store.getRun(planned.id);
+    expect(saved.consultations?.[0]).toMatchObject({
+      status: "answered",
+      advice: "Check the recovery copy.",
+    });
+    expect(saved.status).toBe("planned");
+    expect(() => c.manager.reviewConsultation(planned.id, "sloane")).toThrow(
+      /already/i,
+    );
+  } finally {
+    c.cleanup();
+  }
+});
+
+it("invalidates consultation review after the plan changes and rejects unapproved phases", () => {
+  const c = setup();
+  try {
+    c.manager.configure({
+      key: "fixture-key",
+      model: "model",
+      outputTokens: 1024,
+    });
+    const planned = {
+      ...c.manager.prepare(c.task.id, null, []),
+      status: "planned" as const,
+      plan: "Plan A",
+      calls: 1,
+    };
+    const revision = lineupPlanRevision(planned, c.task);
+    planned.lineupProposal = {
+      planRevision: revision,
+      suggestions: [],
+      discardedInvalid: false,
+    };
+    c.store.saveRun(planned);
+    c.manager.approveLineup(
+      planned.id,
+      revision,
+      [
+        { id: "kiran", phase: "release", purpose: "Review security" },
+        { id: "sloane", phase: "planning", purpose: "Review UX" },
+      ],
+      true,
+    );
+    expect(() => c.manager.reviewConsultation(planned.id, "kiran")).toThrow(
+      /phase/i,
+    );
+    const review = c.manager.reviewConsultation(planned.id, "sloane");
+    c.store.saveRun({ ...c.store.getRun(planned.id), plan: "Plan B" });
+    expect(() => c.manager.startConsultation(review.token, true)).toThrow(
+      /changed/i,
+    );
+    expect(vi.mocked(utilityProcess.fork)).not.toHaveBeenCalled();
+  } finally {
+    c.cleanup();
+  }
+});
+
+it("does not accept specialist advice before a recorded request and never retries after stop", () => {
+  const c = setup();
+  try {
+    c.manager.configure({
+      key: "fixture-key",
+      model: "model",
+      outputTokens: 1024,
+    });
+    const planned = {
+      ...c.manager.prepare(c.task.id, null, []),
+      status: "planned" as const,
+      plan: "Plan A",
+      calls: 1,
+    };
+    const revision = lineupPlanRevision(planned, c.task);
+    planned.lineupProposal = {
+      planRevision: revision,
+      suggestions: [],
+      discardedInvalid: false,
+    };
+    c.store.saveRun(planned);
+    c.manager.approveLineup(
+      planned.id,
+      revision,
+      [{ id: "sloane", phase: "planning", purpose: "Review UX" }],
+      true,
+    );
+    vi.mocked(utilityProcess.fork).mockClear();
+    const ticket = c.manager.reviewConsultation(planned.id, "sloane");
+    c.manager.startConsultation(ticket.token, true);
+    const worker = vi.mocked(utilityProcess.fork).mock.results.at(-1)!.value;
+    worker.emit("message", {
+      consultationResult: { advice: "Forged answer", questions: [] },
+    });
+    expect(c.store.getRun(planned.id).consultations?.[0].status).toBe("failed");
+    expect(c.store.getRun(planned.id).consultations?.[0].advice).not.toContain(
+      "Forged answer",
+    );
+    expect(c.store.usageForRun(planned.id).requests).toBe(0);
+    expect(() => c.manager.reviewConsultation(planned.id, "sloane")).toThrow(
+      /already/i,
+    );
+    expect(vi.mocked(utilityProcess.fork)).toHaveBeenCalledOnce();
+  } finally {
+    c.cleanup();
+  }
+});
+
+it("requires a plan-bound specialist lineup decision before building and preserves it across worker updates", () => {
+  const c = setup();
+  try {
+    c.manager.configure({
+      key: "fixture-key",
+      model: "model",
+      outputTokens: 1024,
+    });
+    const prepared = c.manager.prepare(c.task.id, null, []);
+    const planned = {
+      ...prepared,
+      status: "planned" as const,
+      plan: "Build account recovery",
+      calls: 1,
+    };
+    const revision = lineupPlanRevision(planned, c.task);
+    planned.lineupProposal = {
+      planRevision: revision,
+      suggestions: [
+        { id: "kiran", phase: "verification", reason: "Review authentication" },
+      ],
+      discardedInvalid: false,
+    };
+    c.store.saveRun(planned);
+    vi.mocked(utilityProcess.fork).mockClear();
+    expect(() => c.manager.start(planned.id, true)).toThrow(/lineup/i);
+    expect(utilityProcess.fork).not.toHaveBeenCalled();
+    expect(() =>
+      c.manager.approveLineup(planned.id, "stale", [], true),
+    ).toThrow(/changed/i);
+    expect(() =>
+      c.manager.approveLineup(
+        planned.id,
+        revision,
+        [{ id: "maya", phase: "verification", purpose: "Audit" }],
+        true,
+      ),
+    ).toThrow(/specialist/i);
+    expect(() =>
+      c.manager.approveLineup(
+        planned.id,
+        revision,
+        [{ id: "kiran", phase: "verification", purpose: "\nunsafe" }],
+        true,
+      ),
+    ).toThrow(/purpose/i);
+    expect(() =>
+      c.manager.approveLineup(
+        planned.id,
+        revision,
+        [
+          { id: "kiran", phase: "verification", purpose: "One" },
+          { id: "kiran", phase: "release", purpose: "Two" },
+        ],
+        true,
+      ),
+    ).toThrow(/unique/i);
+    expect(c.store.getRun(planned.id).approvedLineup).toBeUndefined();
+    const approved = c.manager.approveLineup(
+      planned.id,
+      revision,
+      [
+        {
+          id: "kiran",
+          phase: "verification",
+          purpose: "Review authentication",
+        },
+      ],
+      true,
+    );
+    expect(approved.approvedLineup?.entries).toEqual([
+      { id: "kiran", phase: "verification", purpose: "Review authentication" },
+    ]);
+    c.store.saveRun({ ...approved, plan: "Changed after approval" });
+    expect(() => c.manager.start(planned.id, true)).toThrow(/lineup/i);
+    c.store.saveRun(approved);
+    const queued = c.manager.start(planned.id, true);
+    expect(queued.status).toBe("building");
+    const worker = vi.mocked(utilityProcess.fork).mock.results.at(-1)!.value;
+    worker.emit("message", {
+      run: {
+        ...queued,
+        lineupProposal: undefined,
+        approvedLineup: {
+          planRevision: "forged",
+          entries: [],
+          approvedAt: "now",
+        },
+      },
+      done: true,
+    });
+    expect(c.store.getRun(planned.id).approvedLineup).toEqual(
+      approved.approvedLineup,
+    );
+    expect(c.store.getRun(planned.id).lineupProposal).toEqual(
+      approved.lineupProposal,
+    );
+  } finally {
+    c.cleanup();
+  }
+});
+
+it("lets the user reject all suggested specialists without changing team or request ceiling", () => {
+  const c = setup();
+  try {
+    const prepared = c.manager.prepare(c.task.id, null, []);
+    const planned = {
+      ...prepared,
+      status: "planned" as const,
+      plan: "Keep it small",
+      calls: 1,
+    };
+    const revision = lineupPlanRevision(planned, c.task);
+    planned.lineupProposal = {
+      planRevision: revision,
+      suggestions: [{ id: "kiran", phase: "verification", reason: "Review" }],
+      discardedInvalid: false,
+    };
+    c.store.saveRun(planned);
+    const result = c.manager.approveLineup(planned.id, revision, [], true);
+    expect(result.approvedLineup?.entries).toEqual([]);
+    expect(result.teamSnapshot).toEqual(prepared.teamSnapshot);
+    expect(result.usagePolicy).toEqual(prepared.usagePolicy);
+    expect(c.store.getRun(planned.id).approvedLineup).toEqual(
+      result.approvedLineup,
+    );
+  } finally {
+    c.cleanup();
+  }
+});
 
 it("dispatches only assigned members from each task's saved team", () => {
   const c = setup();

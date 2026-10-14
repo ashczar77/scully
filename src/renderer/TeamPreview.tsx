@@ -17,22 +17,35 @@ export function TeamPreview({
   return (
     <section className="team-preview" aria-label="Team and cost preview">
       <h3>Team and cost preview</h3>
-      <p>
-        {preview.builder} builds
-        {preview.tester
-          ? `, ${preview.tester} writes tests`
-          : " and writes tests"}
-        ; {preview.auditor} reviews the combined result.
-      </p>
+      <p className="team-preview-label">Current automatic lineup</p>
+      <ol className="team-preview-phases" aria-label="Current automatic lineup">
+        {preview.phases.map((phase) => (
+          <li key={phase.id}>
+            <span className="team-preview-phase-name">{phase.id}</span>
+            <span className="team-preview-phase-person">
+              <strong>{phase.member}</strong>
+              <small>{phase.purpose}</small>
+            </span>
+            <span className="team-preview-request">
+              {phase.requiredRequests} request
+            </span>
+          </li>
+        ))}
+      </ol>
+      {preview.idleCoordinator && (
+        <p className="team-preview-notice">
+          {preview.idleCoordinator} remains on the team but receives no
+          automatic request when you start working directly.
+        </p>
+      )}
       {preview.reserves.length > 0 && (
         <p className="team-preview-notice">
           {preview.reserves.join(", ")}{" "}
           {preview.reserves.length === 1
             ? "is on the team but receives"
             : "are on the team but receive"}{" "}
-          no automatic work or model requests.
-          {context === "task" &&
-            " Consider removing unused members before saving this task."}
+          no automatic work or model requests. Reserve members remain available
+          for a later approved lineup or consultation.
         </p>
       )}
       <p>

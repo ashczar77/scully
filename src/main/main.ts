@@ -177,6 +177,30 @@ app
       trusted(event);
       return runs.stopReply(id);
     });
+    metricHandle("consult:review", (event, id, specialistId) => {
+      trusted(event);
+      return runs.reviewConsultation(id, specialistId);
+    });
+    metricHandle("consult:start", (event, token, approved) => {
+      trusted(event);
+      return runs.startConsultation(token, approved);
+    });
+    metricHandle("consult:stop", (event, id) => {
+      trusted(event);
+      return runs.stopConsultation(id);
+    });
+    metricHandle("advice:review", (event, id, consultationId) => {
+      trusted(event);
+      return runs.reviewAdvice(id, consultationId);
+    });
+    metricHandle("advice:approve", (event, token, approved) => {
+      trusted(event);
+      return runs.approveAdvice(token, approved);
+    });
+    metricHandle("advice:remove", (event, id, consultationId) => {
+      trusted(event);
+      return runs.removeAdvice(id, consultationId);
+    });
     metricHandle("task:create", (event, value: unknown) => {
       trusted(event);
       return store.createTask(value);
@@ -336,6 +360,10 @@ app
     metricHandle("run:start", (event, id, approved) => {
       trusted(event);
       return runs.start(id, approved);
+    });
+    metricHandle("lineup:approve", (event, id, revision, entries, approved) => {
+      trusted(event);
+      return runs.approveLineup(id, revision, entries, approved);
     });
     metricHandle("run:stop", (event, id) => {
       trusted(event);

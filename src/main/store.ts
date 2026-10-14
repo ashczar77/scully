@@ -94,7 +94,7 @@ export class Store {
             "ALTER TABLE usage_totals ADD COLUMN coreRequests INTEGER NOT NULL DEFAULT 0",
           );
         this.db.exec(
-          "UPDATE usage_totals SET coreRequests=(SELECT COUNT(*) FROM usage_requests WHERE usage_requests.runId=usage_totals.runId AND stage NOT IN ('answer_question','specialist_audit'))",
+          "UPDATE usage_totals SET coreRequests=(SELECT COUNT(*) FROM usage_requests WHERE usage_requests.runId=usage_totals.runId AND stage NOT IN ('answer_question','specialist_audit','consult_specialist'))",
         );
         this.db.exec("PRAGMA user_version=4; COMMIT");
       } catch (error) {
@@ -377,6 +377,7 @@ export class Store {
     return (
       ["planning", "building", "auditing"].includes(run.status) ||
       !!run.replies?.some((reply) => reply.status === "answering") ||
+      !!run.consultations?.some((consult) => consult.status === "consulting") ||
       !!run.executions?.some((execution) => execution.status === "running") ||
       !!run.cloudExecutions?.some((execution) =>
         ["uploading", "submission_unknown", "submitted"].includes(
@@ -891,7 +892,8 @@ export class Store {
           runId,
           value.maxOutputTokens,
           value.stage === "answer_question" ||
-            value.stage === "specialist_audit"
+            value.stage === "specialist_audit" ||
+            value.stage === "consult_specialist"
             ? 0
             : 1,
           reservationTokens,
@@ -1075,7 +1077,11 @@ export class Store {
       throw error;
     }
   }
-  finishUsage(runId: string, value: unknown, scope?: "reply" | "coordinator") {
+  finishUsage(
+    runId: string,
+    value: unknown,
+    scope?: "reply" | "consult" | "coordinator",
+  ) {
     if (!validUsageFinish(value)) return false;
     this.db.exec("BEGIN");
     try {
@@ -1096,7 +1102,9 @@ export class Store {
       if (
         row &&
         ((scope === "reply" && row.stage !== "answer_question") ||
-          (scope === "coordinator" && row.stage === "answer_question"))
+          (scope === "consult" && row.stage !== "consult_specialist") ||
+          (scope === "coordinator" &&
+            ["answer_question", "consult_specialist"].includes(row.stage)))
       ) {
         this.db.exec("COMMIT");
         return false;
@@ -1204,16 +1212,18 @@ export class Store {
       .get(run.id) as { coreRequests: number } | undefined;
     return row?.coreRequests || 0;
   }
-  interruptUsage(runId?: string, scope?: "reply" | "coordinator") {
+  interruptUsage(runId?: string, scope?: "reply" | "consult" | "coordinator") {
     const rows = this.db
       .prepare(
         "SELECT id,runId FROM usage_requests WHERE status='pending'" +
           (runId ? " AND runId=?" : "") +
           (scope === "reply"
             ? " AND stage='answer_question'"
-            : scope === "coordinator"
-              ? " AND stage!='answer_question'"
-              : ""),
+            : scope === "consult"
+              ? " AND stage='consult_specialist'"
+              : scope === "coordinator"
+                ? " AND stage NOT IN ('answer_question','consult_specialist')"
+                : ""),
       )
       .all(...(runId ? [runId] : [])) as { id: string; runId: string }[];
     for (const row of rows)
@@ -1227,6 +1237,8 @@ export class Store {
       const existing = JSON.parse(saved.data) as Run;
       run.messages = existing.messages;
       run.replies = existing.replies;
+      run.consultations = existing.consultations;
+      run.approvedAdvice = existing.approvedAdvice;
       run.reviewedSuggestionIds = existing.reviewedSuggestionIds;
       run.cloudExecutions = existing.cloudExecutions;
       if (existing.redirectedTo) {
@@ -1263,6 +1275,33 @@ export class Store {
       ...(run.replies || []).filter((r) => r.id !== reply.id),
       reply,
     ];
+    this.db
+      .prepare("UPDATE runs SET data=? WHERE id=?")
+      .run(JSON.stringify(run), id);
+    return run;
+  }
+  updateConsultation(
+    id: string,
+    consultation: import("../shared/consultation").SpecialistConsultation,
+  ) {
+    const run = this.getRun(id);
+    run.consultations = [
+      ...(run.consultations || []).filter(
+        (item) => item.id !== consultation.id,
+      ),
+      consultation,
+    ];
+    this.db
+      .prepare("UPDATE runs SET data=? WHERE id=?")
+      .run(JSON.stringify(run), id);
+    return run;
+  }
+  updateApprovedAdvice(
+    id: string,
+    approvals: import("../engine/advice-handoff").AdviceApproval[],
+  ) {
+    const run = this.getRun(id);
+    run.approvedAdvice = approvals;
     this.db
       .prepare("UPDATE runs SET data=? WHERE id=?")
       .run(JSON.stringify(run), id);
@@ -1336,6 +1375,13 @@ export class Store {
           reply.status = "failed";
           reply.answer =
             "Application exited during reply; remote completion unconfirmed.";
+          changed = true;
+        }
+      for (const consult of run.consultations || [])
+        if (consult.status === "consulting") {
+          consult.status = "failed";
+          consult.advice =
+            "Application exited during consultation; remote completion unconfirmed.";
           changed = true;
         }
       for (const application of run.applications || []) {

@@ -34,6 +34,17 @@ const api: DesktopAPI = {
     ipcRenderer.invoke("reply:review", id, messageId, recipientId),
   answerMessage: (token, approved) =>
     ipcRenderer.invoke("reply:start", token, approved),
+  reviewConsultation: (id, specialistId) =>
+    ipcRenderer.invoke("consult:review", id, specialistId),
+  startConsultation: (token, approved) =>
+    ipcRenderer.invoke("consult:start", token, approved),
+  stopConsultation: (id) => ipcRenderer.invoke("consult:stop", id),
+  reviewAdvice: (id, consultationId) =>
+    ipcRenderer.invoke("advice:review", id, consultationId),
+  approveAdvice: (token, approved) =>
+    ipcRenderer.invoke("advice:approve", token, approved),
+  removeAdvice: (id, consultationId) =>
+    ipcRenderer.invoke("advice:remove", id, consultationId),
   metrics: () => ipcRenderer.invoke("metrics:read"),
   prepareCorrection: (id, auditIndex, findingIndex, revision, key) =>
     ipcRenderer.invoke(
@@ -81,6 +92,8 @@ const api: DesktopAPI = {
   configureUsagePolicy: (id, choice, reviewToken) =>
     ipcRenderer.invoke("usage:configure", id, choice, reviewToken),
   startRun: (id, approved) => ipcRenderer.invoke("run:start", id, approved),
+  approveLineup: (id, revision, entries, approved) =>
+    ipcRenderer.invoke("lineup:approve", id, revision, entries, approved),
   stopRun: (id) => ipcRenderer.invoke("run:stop", id),
   reviewApply: (id) => ipcRenderer.invoke("apply:review", id),
   applyDraft: (token, approved) =>

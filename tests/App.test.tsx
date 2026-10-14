@@ -74,6 +74,13 @@ const api = (): DesktopAPI => ({
     .mockResolvedValue({ configured: false, model: "", outputTokens: 2048 }),
   configureSession: vi.fn(),
   startRun: vi.fn(),
+  approveLineup: vi.fn(),
+  reviewConsultation: vi.fn(),
+  startConsultation: vi.fn(),
+  stopConsultation: vi.fn(),
+  reviewAdvice: vi.fn(),
+  approveAdvice: vi.fn(),
+  removeAdvice: vi.fn(),
   stopRun: vi.fn(),
   configureCoordination: vi.fn(),
   startAudit: vi.fn(),
@@ -207,7 +214,7 @@ it("updates task request exposure when the start mode changes without starting a
       this.setAttribute("open", "");
     },
   });
-  const bridge = api();
+  const bridge = await fixedBridge();
   bridge.session = vi.fn().mockResolvedValue({
     configured: true,
     model: "zai-org/GLM-5.3",
@@ -219,11 +226,26 @@ it("updates task request exposure when the start mode changes without starting a
   );
   const preview = screen.getByRole("region", { name: "Team and cost preview" });
   expect(preview).toHaveTextContent("4 required model requests");
+  const planLineup = within(preview).getByRole("list", {
+    name: "Current automatic lineup",
+  });
+  expect(within(planLineup).getAllByRole("listitem")[0]).toHaveTextContent(
+    "Pearl",
+  );
+  expect(preview).toHaveTextContent(
+    "Prepares a plan for your review before building",
+  );
   await waitFor(() =>
     expect(preview).toHaveTextContent("using a current bundled model rate"),
   );
   fireEvent.click(screen.getByRole("radio", { name: "Start working" }));
   expect(preview).toHaveTextContent("3 required model requests");
+  expect(
+    within(preview)
+      .getByRole("list", { name: "Current automatic lineup" })
+      .querySelectorAll("li"),
+  ).toHaveLength(3);
+  expect(preview).not.toHaveTextContent("Prepares a plan for your review");
   expect(bridge.prepareRun).not.toHaveBeenCalled();
   expect(bridge.startRun).not.toHaveBeenCalled();
 });
@@ -799,7 +821,7 @@ it("shows every fixed character and saves an explicit active builder", async () 
     target: { value: "tessa" },
   });
   expect(dialog).toHaveTextContent(
-    "Only assigned members receive automatic requests",
+    "Pearl receives one planning request for Plan first tasks",
   );
   fireEvent.click(
     within(dialog).getByRole("button", { name: "Save team roster" }),

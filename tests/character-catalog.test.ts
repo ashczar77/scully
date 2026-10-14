@@ -78,9 +78,21 @@ it("records the agreed specialist boundaries without treating portraits as permi
     /authentication.*authorization/i,
   );
   expect(playbookModules["documentation-communications"]).toMatch(
-    /user review of exact recipients and body/i,
+    /user review of exact recipients, subject, body and attachments.*one-use send/i,
   );
   expect(playbookModules.coordination).toMatch(/backend/i);
+  expect(playbookModules["full-stack-build"]).toMatch(
+    /migrations.*performance/i,
+  );
+  expect(playbookModules["product-testing"]).toMatch(/skipped.*untested/i);
+  expect(playbookModules["independent-audit"]).toMatch(/code smells/i);
+  expect(playbookModules["preventive-security"]).toMatch(
+    /authorization.*injection.*secrets/i,
+  );
+  expect(playbookModules["penetration-testing"]).toMatch(/approved target/i);
+  for (const module of Object.values(playbookModules)) {
+    expect(module.length).toBeLessThan(1200);
+  }
   expect(characterById("adrian")?.background).toBe(
     "Adrian spent his early career building booking software for independent music venues. He remembers the hour before doors opened, when a slow page or missing reservation could leave a line of people waiting outside. He learned to trace problems across the whole stack and to care about speed, recovery, and customer experience.",
   );

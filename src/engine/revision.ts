@@ -1,6 +1,23 @@
 import { createHash } from "node:crypto";
 import type { Run } from "../shared/runs";
 import { parseCommands } from "../shared/commands";
+import type { Task } from "../shared/contracts";
+
+export function lineupPlanRevision(
+  run: Run,
+  task: Pick<Task, "title" | "description">,
+): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        plan: run.plan,
+        files: run.files,
+        task: { title: task.title, description: task.description },
+        roster: run.teamSnapshot?.roster,
+      }),
+    )
+    .digest("hex");
+}
 
 export function commandRevision(run: Run): string {
   return createHash("sha256")

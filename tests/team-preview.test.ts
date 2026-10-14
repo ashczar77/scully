@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import { initialTeam } from "../src/shared/contracts";
 import { previewTeamRun } from "../src/shared/team-preview";
+import { rosterMembers, starterRoster } from "../src/shared/fixed-teams";
 
 const now = new Date("2026-10-13T10:00:00Z");
 const session = {
@@ -28,6 +29,34 @@ it("shows the actual requests for builder, tester and independent auditor", () =
   });
 });
 
+it("shows Pearl as the fixed-cast planner without adding a request", () => {
+  const team = rosterMembers(starterRoster);
+  expect(previewTeamRun(team, "plan", session, now)).toMatchObject({
+    planner: "Pearl",
+    idleCoordinator: null,
+    builder: "Maya",
+    reserves: [],
+    requiredRequests: 4,
+    requestCeiling: 4,
+    phases: [
+      { id: "planning", member: "Pearl", requiredRequests: 1 },
+      { id: "building", member: "Maya", requiredRequests: 1 },
+      { id: "testing", member: "Jun", requiredRequests: 1 },
+      { id: "auditing", member: "Ellis", requiredRequests: 1 },
+    ],
+  });
+  expect(previewTeamRun(team, "work", session, now)).toMatchObject({
+    planner: null,
+    idleCoordinator: "Pearl",
+    reserves: [],
+    phases: [
+      { id: "building", member: "Maya", requiredRequests: 1 },
+      { id: "testing", member: "Jun", requiredRequests: 1 },
+      { id: "auditing", member: "Ellis", requiredRequests: 1 },
+    ],
+  });
+});
+
 it("does not count a reserve as active work or additional cost", () => {
   const withoutTester = initialTeam.filter((member) => member.id !== "jun");
   const base = previewTeamRun(withoutTester, "work", session, now);
@@ -41,6 +70,10 @@ it("does not count a reserve as active work or additional cost", () => {
     tester: null,
     requiredRequests: 2,
     requestCeiling: 2,
+    phases: [
+      { id: "building", member: "Maya", requiredRequests: 1 },
+      { id: "auditing", member: "Ellis", requiredRequests: 1 },
+    ],
   });
   expect(reserve).toMatchObject({
     reserves: ["Jun"],

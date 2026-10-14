@@ -27,6 +27,9 @@ import { InFlightStatus } from "./InFlightStatus";
 import { UsagePolicyPanel } from "./UsagePolicyPanel";
 import { UsageAlertsPanel } from "./UsageAlertsPanel";
 import { CostPanel } from "./CostPanel";
+import { LineupProposalPanel } from "./LineupProposalPanel";
+import { ConsultationPanel } from "./ConsultationPanel";
+import { AdviceHandoffPanel } from "./AdviceHandoffPanel";
 export function ConnectionSettings({ api }: { api: DesktopAPI }) {
   const [info, setInfo] = useState<SessionInfo>({
     configured: false,
@@ -151,8 +154,12 @@ export function RunPanel({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [approved, setApproved] = useState(false);
+  const [lineupDirty, setLineupDirty] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [connection, setConnection] = useState<SessionInfo | null>(null);
+  useEffect(() => {
+    setLineupDirty(false);
+  }, [run?.id, run?.lineupProposal?.planRevision]);
   useEffect(() => {
     setUsage(null);
     if (!run) return;
@@ -186,6 +193,7 @@ export function RunPanel({
     const off = api.onRun((next) => {
       if (active && next.taskId === task.id) {
         setApproved(false);
+        setLineupDirty(false);
         setRun(next);
         setHistory((h) => [next, ...h.filter((r) => r.id !== next.id)]);
       }
@@ -548,6 +556,37 @@ export function RunPanel({
                   : "Review before starting"}
               </h3>
               {run.plan && <pre>{run.plan}</pre>}
+              {run.status === "planned" &&
+                run.lineupProposal &&
+                run.teamSnapshot && (
+                  <LineupProposalPanel
+                    key={`${run.id}:${run.lineupProposal.planRevision}`}
+                    proposal={run.lineupProposal}
+                    team={run.teamSnapshot.members}
+                    approvedLineup={run.approvedLineup}
+                    busy={busy}
+                    onDraftChange={setLineupDirty}
+                    onApprove={(entries) =>
+                      act(async () => {
+                        const updated = await api.approveLineup(
+                          run.id,
+                          run.lineupProposal!.planRevision,
+                          entries,
+                          true,
+                        );
+                        setRun(updated);
+                        setApproved(false);
+                        setLineupDirty(false);
+                      })
+                    }
+                  />
+                )}
+              {run.status === "planned" && !lineupDirty && (
+                <ConsultationPanel api={api} run={run} onUpdated={setRun} />
+              )}
+              {run.status === "planned" && !lineupDirty && (
+                <AdviceHandoffPanel api={api} run={run} onUpdated={setRun} />
+              )}
               <p>
                 Shares this task, teammate instructions and {run.files.length}{" "}
                 selected files with Nebius. No automatic upload of other project
@@ -602,7 +641,19 @@ export function RunPanel({
               </label>
               <button
                 className="primary"
-                disabled={busy || !approved || staleTask}
+                disabled={
+                  busy ||
+                  !approved ||
+                  lineupDirty ||
+                  staleTask ||
+                  !!run.consultations?.some(
+                    (item) => item.status === "consulting",
+                  ) ||
+                  (run.status === "planned" &&
+                    !!run.lineupProposal &&
+                    run.approvedLineup?.planRevision !==
+                      run.lineupProposal.planRevision)
+                }
                 onClick={() =>
                   act(async () => {
                     const r = await api.startRun(run.id, true);
@@ -678,6 +729,9 @@ export function RunPanel({
             api={api}
             invalidateConsent={() => setApproved(false)}
           />
+          {run.status === "complete" && (
+            <ConsultationPanel api={api} run={run} onUpdated={setRun} />
+          )}
           {!!run.drafts.length && (
             <SpecialistPanel
               key={`specialist-${run.id}`}

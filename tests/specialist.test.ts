@@ -6,6 +6,7 @@ import type { Run } from "../src/shared/runs";
 import { initialTeam, type Task } from "../src/shared/contracts";
 import { commandRevision } from "../src/engine/revision";
 import { parseFindingChecks } from "../src/shared/audits";
+import { rosterMembers, starterRoster } from "../src/shared/fixed-teams";
 it("honours remaining command capacity and binds expected observations into approvals", () => {
   const findings = [
     { path: "app.js", severity: "error" as const, detail: "Issue" },
@@ -227,6 +228,31 @@ it("stops after one request when no findings are reported without asserting corr
   expect(complete).toHaveBeenCalledTimes(1);
   expect(result.specialistAudits![0].status).toBe("clear");
   expect(result.events.at(-1)!.text).toContain("not proof");
+});
+it("uses the catalog auditor brief for a fixed-cast follow-up audit", async () => {
+  const team = rosterMembers(starterRoster).map((member) =>
+    member.id === "ellis"
+      ? { ...member, instructions: "FORGED AUDIT INSTRUCTION" }
+      : member,
+  );
+  const run = fixture();
+  run.teamSnapshot = {
+    id: "fixed-team",
+    name: "Scully team",
+    version: 1,
+    createdAt: "2026-10-13",
+    members: team,
+    roster: starterRoster,
+  };
+  const complete = vi
+    .fn()
+    .mockResolvedValue({ summary: "No findings", findings: [] });
+  await executeSpecialist(run, task, { complete }, vi.fn(), team);
+  expect(complete).toHaveBeenCalledTimes(1);
+  expect(complete.mock.calls[0][0].system).toContain("code smells");
+  expect(complete.mock.calls[0][0].system).not.toContain(
+    "FORGED AUDIT INSTRUCTION",
+  );
 });
 it.each(["bad-path", "provider", "bad-response"])(
   "retains the draft and fails honestly for %s without retries",

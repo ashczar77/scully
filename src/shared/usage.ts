@@ -6,6 +6,7 @@ export const usageStages = [
   "specialist_audit",
   "respond_to_audit",
   "answer_question",
+  "consult_specialist",
 ] as const;
 
 export type UsageStage = (typeof usageStages)[number];

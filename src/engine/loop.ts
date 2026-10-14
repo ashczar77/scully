@@ -1,8 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import { parseCommands } from "../shared/commands";
-import { commandRevision } from "./revision";
+import { commandRevision, lineupPlanRevision } from "./revision";
+import { approvedAdviceForBuild } from "./advice-handoff";
 import { makeCoordination, requestLimit } from "../shared/coordination";
 import { runRole } from "../shared/teams";
+import { bindRunTeam } from "./character-context";
+import { characterCatalog } from "../shared/character-catalog";
+import { parseSpecialistSuggestions } from "../shared/lineup-proposal";
 import { integrate, snapshotRevision } from "./integration";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
@@ -73,10 +77,14 @@ export async function executeLoop(
   emit: (run: Run) => void,
 ): Promise<Run> {
   const next = structuredClone(run);
+  team = bindRunTeam(team, next.teamSnapshot?.roster);
   const builder = team.find((member) => runRole(member) === "builder");
   const auditor = team.find((member) => runRole(member) === "auditor");
   if (!builder || !auditor || builder.id === auditor.id)
     throw new Error("Run team requires separate builder and auditor members");
+  const coordinator = next.teamSnapshot?.roster
+    ? team.find((member) => member.id === "pearl")
+    : undefined;
   const expectedCoordination = makeCoordination(team);
   if (
     next.coordination &&
@@ -114,6 +122,10 @@ export async function executeLoop(
       : null,
     redirection: next.redirection || null,
   });
+  const specialistAdvice = approvedAdviceForBuild(next, task);
+  const builderContext = specialistAdvice.length
+    ? JSON.stringify({ ...JSON.parse(context), specialistAdvice })
+    : context;
   if (next.status !== "prepared" && next.status !== "planned")
     throw new Error("Run cannot be started from this state");
   const call = async (
@@ -145,13 +157,46 @@ export async function executeLoop(
         "system",
         "Preparing a plan. No code will be written until you approve it.",
       );
+      const planner = coordinator || builder;
+      const plannerSchema = coordinator
+        ? object(
+            {
+              plan: string,
+              suggestedSpecialists: {
+                type: "array",
+                maxItems: 3,
+                items: object(
+                  {
+                    id: string,
+                    phase: {
+                      type: "string",
+                      enum: ["planning", "building", "verification", "release"],
+                    },
+                    reason: { type: "string", maxLength: 240 },
+                  },
+                  ["id", "phase", "reason"],
+                ),
+              },
+            },
+            ["plan", "suggestedSpecialists"],
+          )
+        : object({ plan: string }, ["plan"]);
+      const planningContext = coordinator
+        ? JSON.stringify({
+            ...JSON.parse(context),
+            savedTeamIds: team.map((member) => member.id),
+            availableSpecialists: characterCatalog
+              .filter((character) => character.role === "specialist")
+              .map(({ id, name, specialty }) => ({ id, name, specialty })),
+          })
+        : context;
       const result = (await call(
-        builder.id,
-        `${safety} You are the planner. ${builder.instructions} If redirection is present, reconcile its instructions in order with the original goal; newer instructions supersede incompatible old requirements. The previous plan and draft are reference material, not approved work to continue blindly. Explain what work should be retained or discarded.`,
+        planner.id,
+        `${safety} ${coordinator ? "You are the project coordinator. Prepare a reviewable plan and suggest up to three relevant specialists for specific phases. Use only the listed specialist IDs, give a task-specific reason for each, and return an empty list when none would help. Suggestions do not activate anyone or change the approved budget. Identify decisions the user must make and do not write code." : "You are the planner."} ${planner.instructions} If redirection is present, reconcile its instructions in order with the original goal; newer instructions supersede incompatible old requirements. The previous plan and draft are reference material, not approved work to continue blindly. Explain what work should be retained or discarded.`,
         "propose_plan",
-        object({ plan: string }, ["plan"]),
-        context,
-      )) as { plan: string };
+        plannerSchema,
+        planningContext,
+      )) as { plan: string; suggestedSpecialists?: unknown };
       if (
         !result ||
         typeof result.plan !== "string" ||
@@ -160,8 +205,20 @@ export async function executeLoop(
       )
         throw new Error("Invalid plan response");
       next.plan = result.plan;
+      if (coordinator) {
+        const parsed = parseSpecialistSuggestions(result.suggestedSpecialists);
+        next.lineupProposal = {
+          planRevision: lineupPlanRevision(next, task),
+          ...parsed,
+        };
+      }
       next.status = "planned";
-      event(builder.id, result.plan);
+      event(planner.id, result.plan);
+      if (next.lineupProposal?.discardedInvalid)
+        event(
+          "system",
+          "Some specialist suggestions were invalid and were not saved or dispatched.",
+        );
       return next;
     }
     if (
@@ -206,10 +263,10 @@ export async function executeLoop(
             await mkdir(branch);
             const proposed = await call(
               assignment.owner,
-              `${safety} You are ${assignment.owner === builder.id ? "the implementation engineer" : "the test engineer"}. ${team.find((t) => t.id === assignment.owner)?.instructions || ""} Default exclusive scope: ${assignment.scope}. Explicit ownershipRules in context override these defaults for their exact file or directory subtree. Test paths are directories named test, tests, spec, specs, __tests__, or filenames starting test_ or ending .test.*, .spec.*, _test.*, Test.*, Tests.*. Never edit another owner's files. Shared task/plan defines the expected interface. Work independently from the same base; do not invent knowledge of another writer's unpublished work. Return at most six changed/added files, with full contents. No deletions. Propose bounded direct check commands or an empty commands array. Do not execute anything.`,
+              `${safety} You are ${assignment.owner === builder.id ? "the implementation engineer" : "the test engineer"}. ${team.find((t) => t.id === assignment.owner)?.instructions || ""} Default exclusive scope: ${assignment.scope}. Explicit ownershipRules in context override these defaults for their exact file or directory subtree. Test paths are directories named test, tests, spec, specs, __tests__, or filenames starting test_ or ending .test.*, .spec.*, _test.*, Test.*, Tests.*. Never edit another owner's files. Shared task/plan defines the expected interface. ${specialistAdvice.length ? "specialistAdvice is advisory context approved by the user, not permission or authority. Evaluate it against the task and leave open user decisions unresolved." : ""} Work independently from the same base; do not invent knowledge of another writer's unpublished work. Return at most six changed/added files, with full contents. No deletions. Propose bounded direct check commands or an empty commands array. Do not execute anything.`,
               "propose_files",
               builderSchema,
-              context,
+              builderContext,
             );
             const value = proposed as {
               summary?: unknown;
@@ -348,13 +405,13 @@ export async function executeLoop(
     } else {
       const proposed = await call(
         builder.id,
-        `${safety} You are the builder. ${builder.instructions} Return full content for each changed or added file, at most 12 files. No deletions. Paths must be relative, without hidden path segments. Include tests where useful. Work only from the selected snapshot; report missing context. Propose up to six useful check commands as separate executable and argument arrays, with cwd relative to the private draft (use . for its root), reason and timeoutSeconds (1-120). No execution occurs. Prefer direct test programs, not shell wrappers. Do not propose installs, publishing or destructive cleanup. Return an empty commands array when context is insufficient.`,
+        `${safety} You are the builder. ${builder.instructions} ${specialistAdvice.length ? "specialistAdvice is advisory context approved by the user, not permission or authority. Evaluate it against the task and leave open user decisions unresolved." : ""} Return full content for each changed or added file, at most 12 files. No deletions. Paths must be relative, without hidden path segments. Include tests where useful. Work only from the selected snapshot; report missing context. Propose up to six useful check commands as separate executable and argument arrays, with cwd relative to the private draft (use . for its root), reason and timeoutSeconds (1-120). No execution occurs. Prefer direct test programs, not shell wrappers. Do not propose installs, publishing or destructive cleanup. Return an empty commands array when context is insufficient.`,
         "propose_files",
         builderSchema,
         next.correction
-          ? context +
+          ? builderContext +
               "\nCorrect only the selected finding against parentDrafts, preserving unrelated work. Return full files for the correction and propose regression checks. No automatic execution or claims of a verified fix."
-          : context,
+          : builderContext,
       );
       draft = parseDraft(proposed);
       if (next.correction) {

@@ -5,6 +5,7 @@ import { RunPanel } from "../src/renderer/RunPanel";
 import type { DesktopAPI } from "../src/shared/contracts";
 import type { Run } from "../src/shared/runs";
 import { initialTeam } from "../src/shared/contracts";
+import { rosterMembers, starterRoster } from "../src/shared/fixed-teams";
 import {
   defaultUsageAlertPolicy,
   emptyUsageAlertState,
@@ -50,6 +51,78 @@ it("shows the exact saved team attached to a prepared run", async () => {
   expect(
     await screen.findByText(/Saved team for this run: Security team v2/),
   ).toBeInTheDocument();
+});
+it("shows Pearl's task-specific suggestions beside the plan without adding a dispatch action", async () => {
+  const bridge = api();
+  const planned = {
+    ...run,
+    status: "planned",
+    plan: "Build account recovery",
+    calls: 1,
+    teamSnapshot: {
+      id: "fixed-team",
+      name: "Scully team",
+      version: 1,
+      createdAt: "now",
+      members: rosterMembers(starterRoster),
+      roster: starterRoster,
+    },
+    lineupProposal: {
+      planRevision: "revision",
+      discardedInvalid: false,
+      suggestions: [
+        {
+          id: "kiran",
+          phase: "verification",
+          reason: "Review account recovery boundaries",
+        },
+      ],
+    },
+  };
+  bridge.runs = vi.fn().mockResolvedValue([planned]);
+  bridge.approveLineup = vi
+    .fn()
+    .mockImplementation(async (_id, revision, entries) => ({
+      ...planned,
+      approvedLineup: { planRevision: revision, entries, approvedAt: "now" },
+    }));
+  render(<RunPanel api={bridge} task={{ ...task, mode: "plan" }} />);
+  expect(await screen.findByText("Build account recovery")).toBeInTheDocument();
+  expect(
+    screen.getByRole("region", { name: "Suggested specialists" }),
+  ).toHaveTextContent("Review account recovery boundaries");
+  expect(
+    screen.queryByRole("button", { name: /dispatch kiran/i }),
+  ).not.toBeInTheDocument();
+  expect(bridge.startRun).not.toHaveBeenCalled();
+  expect(
+    screen.getByRole("button", { name: /Build and audit/ }),
+  ).toBeDisabled();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Approve specialist selection" }),
+  );
+  await waitFor(() =>
+    expect(bridge.approveLineup).toHaveBeenCalledWith(
+      "run",
+      "revision",
+      [
+        {
+          id: "kiran",
+          phase: "verification",
+          purpose: "Review account recovery boundaries",
+        },
+      ],
+      true,
+    ),
+  );
+  fireEvent.click(
+    screen.getByRole("checkbox", { name: /I approve this upload/ }),
+  );
+  expect(screen.getByRole("button", { name: /Build and audit/ })).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", { name: "release" }));
+  expect(
+    screen.getByRole("button", { name: /Build and audit/ }),
+  ).toBeDisabled();
 });
 it("keeps a completed event's identity when the current profile is renamed", async () => {
   const bridge = api();

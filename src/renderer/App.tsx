@@ -1193,16 +1193,20 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
                             <small>
                               {" "}
                               ·{" "}
-                              {runRole(member) === "reserve"
-                                ? "Reserve, no automatic request"
-                                : `${runRole(member)} in runs`}
+                              {member.id === "pearl"
+                                ? "Plans when Plan first is selected"
+                                : runRole(member) === "reserve"
+                                  ? "Reserve, no automatic request"
+                                  : `${runRole(member)} in runs`}
                             </small>
                           </span>
                           <div className="team-library-actions">
                             <span className="tiny-badge">
-                              {runRole(member) === "reserve"
-                                ? "Available"
-                                : "Active"}
+                              {member.id === "pearl"
+                                ? "Planning"
+                                : runRole(member) === "reserve"
+                                  ? "Available"
+                                  : "Active"}
                             </span>
                           </div>
                         </li>
@@ -1210,10 +1214,10 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
                     </ul>
                     <p className="muted">
                       Current runs call one selected builder, one independent
-                      auditor and, when assigned, one tester. Pearl and other
-                      selected characters remain available without an automatic
-                      model request. More active agents require a later approved
-                      dispatch step.
+                      auditor and, when assigned, one tester. Pearl prepares
+                      Plan first tasks; other selected characters remain
+                      available without an automatic model request. More active
+                      agents require a later approved dispatch step.
                     </p>
                     <p className="muted">Preview for a new Plan first task:</p>
                     <TeamPreview
@@ -1865,9 +1869,10 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
                 </label>
               </div>
               <p className="muted">
-                Only assigned members receive automatic requests. Selected
-                specialists and other available members receive none until a
-                later dispatch step.
+                The assigned builder, auditor and tester receive work requests.
+                Pearl receives one planning request for Plan first tasks.
+                Selected specialists and other available members receive none
+                until a later dispatch step.
               </p>
               <TeamPreview
                 team={rosterMembers(rosterDraft)}
