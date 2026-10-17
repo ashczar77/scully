@@ -47,7 +47,7 @@ it("shows owners and conflict evidence, without inventing a successful merge", (
   render(
     <CoordinationPanel run={{ coordination: c } as Run} team={initialTeam} />,
   );
-  expect(screen.getByText(/Maya owns integration/)).toBeInTheDocument();
+  expect(screen.getByText(/Maya combines the work/)).toBeInTheDocument();
   expect(screen.getByText(/Jun · waiting/)).toBeInTheDocument();
   expect(screen.getByRole("alert")).toHaveTextContent("Overlapping writers");
   expect(screen.getByRole("alert")).toHaveTextContent(

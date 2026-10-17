@@ -51,14 +51,19 @@ export function chooseUsagePolicy(
       outputTokens = 2048;
       requestCeiling = correction
         ? 2
-        : earlyReviewCalls === 1
-          ? minimum
-          : Math.max(4, minimum);
+        : mode === "plan" || run.redirection
+          ? minimum + 4
+          : earlyReviewCalls === 1
+            ? minimum
+            : Math.max(4, minimum);
       earlyReviews = false;
       break;
     case "thorough":
       outputTokens = 4096;
-      requestCeiling = minimum + (correction ? 0 : earlyReviewCalls);
+      requestCeiling =
+        minimum +
+        (correction ? 0 : earlyReviewCalls) +
+        (!correction && mode === "plan" ? 4 : 0);
       earlyReviews = !correction;
       break;
     case "custom":
@@ -75,7 +80,7 @@ export function chooseUsagePolicy(
     outputTokens > 4096 ||
     !Number.isSafeInteger(requestCeiling) ||
     requestCeiling < minimum + (earlyReviews ? earlyReviewCalls : 0) ||
-    requestCeiling > (correction ? 2 : 6) ||
+    requestCeiling > (correction ? 2 : 16) ||
     typeof earlyReviews !== "boolean" ||
     (correction && earlyReviews)
   )
@@ -106,10 +111,9 @@ export function defaultUsagePolicy(
     requestCeiling: run.correction
       ? 2
       : earlyReviews
-        ? minimum + writers
-        : writers === 1
-          ? minimum
-          : Math.max(4, minimum),
+        ? minimum + writers + (mode === "plan" ? 4 : 0)
+        : (writers === 1 ? minimum : Math.max(4, minimum)) +
+          (mode === "plan" ? 4 : 0),
     earlyReviews,
   };
 }

@@ -90,6 +90,7 @@ export async function readSource(directory: string): Promise<SourceSelection> {
   return {
     id: randomUUID(),
     name: root.split(sep).pop() || "Selected project",
+    root,
     files,
     excluded,
   };

@@ -5,6 +5,7 @@ import {
   fireEvent,
   waitFor,
   within,
+  act,
 } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { App } from "../src/renderer/App";
@@ -15,7 +16,46 @@ import {
   emptyUsageAlertState,
 } from "../src/shared/usage-alerts";
 const api = (): DesktopAPI => ({
+  roleModelSettings: vi.fn().mockResolvedValue({
+    pearl: "nvidia/nemotron-3-super-120b-a12b",
+    builder: "nvidia/Nemotron-3_5-Lightning",
+    tester: "nvidia/Nemotron-3_5-Lightning",
+    auditor: "nvidia/Nemotron-3_5-Lightning",
+    specialists: {},
+  }),
+  setRoleModelSettings: vi.fn(),
+  copyText: vi.fn().mockResolvedValue(undefined),
+  rawCaptureStatus: vi.fn().mockResolvedValue({ armed: false, saved: false }),
+  armRawCapture: vi.fn(),
+  readRawCapture: vi.fn(),
+  clearRawCapture: vi.fn(),
+  conversationAllowance: vi.fn().mockResolvedValue({
+    remaining: 0,
+    model: "",
+    outputTokens: 2048,
+    valid: false,
+  }),
+  reviewConversation: vi.fn(),
+  approveConversation: vi.fn(),
+  autoAnswerMessage: vi.fn(),
+  listModels: vi.fn().mockResolvedValue([]),
+  selectRunModel: vi.fn(),
+  sendPlanningMessage: vi.fn(),
+  retryPlanning: vi.fn(),
+  sendConversationMessage: vi.fn(),
+  answerConversationMessage: vi.fn(),
+  answerBuildQuestion: vi.fn(),
+  selectDefaultModel: vi.fn(),
   inspectLocalArtifacts: vi.fn(),
+  reviewRoutedReply: vi.fn(),
+  messageRoutingSettings: vi.fn().mockResolvedValue({ unclear: "pearl" }),
+  setMessageRoutingSettings: vi.fn(),
+  planningSettings: vi.fn().mockResolvedValue({ temperature: 0.2 }),
+  setPlanningSettings: vi.fn(),
+  chooseProjectWorkspace: vi.fn(),
+  openProjectWorkspace: vi.fn(),
+  gitHistory: vi.fn().mockResolvedValue({ state: "no-project" }),
+  initializeGit: vi.fn(),
   cloudImages: vi.fn(),
   resolveCloudExecutable: vi.fn(),
   cloudSession: vi.fn().mockResolvedValue({ configured: false, projectId: "" }),
@@ -36,9 +76,22 @@ const api = (): DesktopAPI => ({
       partial: false,
     },
   }),
+  taskActivity: vi
+    .fn()
+    .mockResolvedValue({ byTeammate: {}, scannedRuns: 0, partial: false }),
   createTask: vi.fn(),
   updateTask: vi.fn(),
   deleteTask: vi.fn(),
+  taskDisposition: vi.fn().mockResolvedValue({
+    canDelete: true,
+    canArchive: true,
+    reason: null,
+    runCount: 0,
+    requestCount: 0,
+  }),
+  archiveTask: vi.fn(),
+  restoreTask: vi.fn(),
+  permanentlyDeleteArchivedTask: vi.fn(),
   updateTeammate: vi.fn(),
   applyTeamStyle: vi.fn(),
   saveTeam: vi.fn(),
@@ -82,6 +135,8 @@ const api = (): DesktopAPI => ({
   approveAdvice: vi.fn(),
   removeAdvice: vi.fn(),
   stopRun: vi.fn(),
+  requestRunPause: vi.fn(),
+  resumeRunPause: vi.fn(),
   configureCoordination: vi.fn(),
   startAudit: vi.fn(),
   decideFinding: vi.fn(),
@@ -124,17 +179,79 @@ async function fixedBridge(): Promise<DesktopAPI> {
   });
   return bridge;
 }
-it("opens a fresh workspace without fabricated task activity", async () => {
-  Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
-    configurable: true,
-    value: function (this: HTMLDialogElement) {
-      this.setAttribute("open", "");
+it("shows a teammate question badge and clears it only when that question is answered", async () => {
+  const bridge = await fixedBridge();
+  const base = await bridge.load();
+  const task = {
+    id: "question-task",
+    title: "Reading list",
+    description: "Build a reading list",
+    mode: "work" as const,
+    createdAt: "2026-10-17T13:00:00.000Z",
+  };
+  bridge.load = vi.fn().mockResolvedValue({ ...base, tasks: [task] });
+  const pending = {
+    id: "question-1",
+    actor: "maya",
+    text: "Which table should store the books?",
+    askedAt: "2026-10-17T13:39:00.000Z",
+  };
+  const run = {
+    id: "question-run",
+    taskId: task.id,
+    status: "awaiting_input",
+    pendingQuestions: [pending],
+    files: [],
+    drafts: [],
+    events: [],
+    messages: [],
+    replies: [],
+    plan: "",
+    teamSnapshot: {
+      id: "team",
+      name: "Scully team",
+      version: 1,
+      createdAt: "now",
+      members: rosterMembers(starterRoster),
     },
+  } as any;
+  bridge.runs = vi.fn().mockResolvedValue([run]);
+  const listeners: ((run: any) => void)[] = [];
+  bridge.onRun = vi.fn().mockImplementation((listener) => {
+    listeners.push(listener);
+    return () => {};
   });
+  render(<App api={bridge} />);
+  fireEvent.click(await screen.findByRole("button", { name: /Reading list/ }));
+  const card = await screen.findByRole("button", {
+    name: "Maya, 1 unanswered question",
+  });
+  expect(within(card).getByText("1")).toBeTruthy();
+  await act(async () => {
+    listeners.forEach((listener) =>
+      listener({
+        ...run,
+        pendingQuestions: [
+          {
+            ...pending,
+            answer: "books",
+            answeredAt: "2026-10-17T13:40:00.000Z",
+          },
+        ],
+      }),
+    );
+  });
+  expect(
+    screen.queryByRole("button", { name: "Maya, 1 unanswered question" }),
+  ).toBeNull();
+});
+it("opens a fresh workspace without fabricated task activity", async () => {
   const bridge = api();
   render(<App api={bridge} />);
   expect(
-    await screen.findByRole("heading", { name: "Start your first task." }),
+    await screen.findByRole("heading", {
+      name: "What would you like to build?",
+    }),
   ).toBeInTheDocument();
   expect(screen.getByText("Scully home")).toBeInTheDocument();
   expect(screen.queryByText("Your workspace")).not.toBeInTheDocument();
@@ -144,32 +261,47 @@ it("opens a fresh workspace without fabricated task activity", async () => {
   expect(screen.queryByText("Ready")).not.toBeInTheDocument();
   expect(screen.queryByText("CURRENT ACTIVITY")).not.toBeInTheDocument();
   expect(
-    screen.queryByRole("button", { name: "Send message" }),
+    screen.getByRole("textbox", { name: "Start a task" }),
+  ).toBeInTheDocument();
+  expect(bridge.createTask).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: /New task/ }));
+  expect(
+    screen.queryByRole("dialog", { name: "What shall we build?" }),
   ).not.toBeInTheDocument();
   expect(bridge.createTask).not.toHaveBeenCalled();
-  fireEvent.click(
-    screen.getByRole("button", { name: "Create your first task" }),
-  );
-  const taskDialog = screen.getByRole("dialog", {
-    name: "What shall we build?",
-  });
-  expect(taskDialog).toHaveClass("new-task-dialog");
-  expect(taskDialog.querySelector(".new-task-scroll")).toBeInTheDocument();
-  expect(taskDialog.querySelector(".new-task-footer")).toContainElement(
-    within(taskDialog).getByRole("button", { name: "Save task" }),
-  );
-  expect(bridge.createTask).not.toHaveBeenCalled();
+});
+it("collapses and restores each side panel without hiding the room", async () => {
+  render(<App api={api()} />);
+  await screen.findByRole("heading", { name: "What would you like to build?" });
+  const room = screen.getByRole("main");
+  fireEvent.click(screen.getByRole("button", { name: "Collapse task list" }));
+  fireEvent.click(screen.getByRole("button", { name: "Collapse team panel" }));
+  expect(
+    screen.getByRole("button", { name: "Expand task list" }),
+  ).toBeVisible();
+  expect(
+    screen.getByRole("button", { name: "Expand team panel" }),
+  ).toBeVisible();
+  expect(room).toHaveClass("room-panel");
+  fireEvent.click(screen.getByRole("button", { name: "Expand task list" }));
+  fireEvent.click(screen.getByRole("button", { name: "Expand team panel" }));
+  expect(
+    screen.getByRole("button", { name: "Collapse task list" }),
+  ).toBeVisible();
+  expect(
+    screen.getByRole("button", { name: "Collapse team panel" }),
+  ).toBeVisible();
 });
 it("moves the main navigation selection with the active page", async () => {
   render(<App api={api()} />);
-  await screen.findByText("Team room");
+  await screen.findByRole("heading", { name: "What would you like to build?" });
   const navigation = screen.getByRole("navigation", {
     name: "Main navigation",
   });
   expect(navigation.querySelector(".main-nav-indicator")).toBeInTheDocument();
   expect(navigation).toHaveStyle("--nav-index: 0");
   fireEvent.click(within(navigation).getByRole("button", { name: "Settings" }));
-  expect(navigation).toHaveStyle("--nav-index: 3");
+  expect(navigation).toHaveStyle("--nav-index: 4");
   expect(
     within(navigation).getByRole("button", { name: "Settings" }),
   ).toHaveAttribute("aria-current", "page");
@@ -179,75 +311,106 @@ it("moves the main navigation selection with the active page", async () => {
     ),
   ).toHaveClass("saved-team-deletion-note");
 });
-it("keeps a task draft while editing the default team before creation", async () => {
-  Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
-    configurable: true,
-    value: function (this: HTMLDialogElement) {
-      this.setAttribute("open", "");
-    },
-  });
+it("keeps a first message draft while visiting team settings", async () => {
   render(<App api={api()} />);
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Create your first task" }),
-  );
-  fireEvent.change(screen.getByRole("textbox", { name: "Task title" }), {
-    target: { value: "Keep this draft" },
+  const composer = await screen.findByRole("textbox", { name: "Start a task" });
+  fireEvent.change(composer, {
+    target: { value: "Keep this private idea" },
   });
-  expect(
-    screen.getByText(/Team for this task: Scully team/),
-  ).toBeInTheDocument();
-  fireEvent.click(
-    screen.getByRole("button", { name: "Edit team before creating task" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Manage team" }));
   expect(
     screen.getByRole("region", { name: "Team settings" }),
   ).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Continue task setup" }));
-  expect(screen.getByRole("textbox", { name: "Task title" })).toHaveValue(
-    "Keep this draft",
+  fireEvent.click(
+    within(
+      screen.getByRole("navigation", { name: "Main navigation" }),
+    ).getByRole("button", { name: "Room" }),
+  );
+  expect(screen.getByRole("textbox", { name: "Start a task" })).toHaveValue(
+    "Keep this private idea",
   );
 });
-it("updates task request exposure when the start mode changes without starting a run", async () => {
-  Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
-    configurable: true,
-    value: function (this: HTMLDialogElement) {
-      this.setAttribute("open", "");
-    },
-  });
+it("creates a private task and starts Pearl's planning turn from the first message", async () => {
   const bridge = await fixedBridge();
-  bridge.session = vi.fn().mockResolvedValue({
+  vi.mocked(bridge.session).mockResolvedValue({
     configured: true,
-    model: "zai-org/GLM-5.3",
+    model: "test/model",
     outputTokens: 2048,
   });
+  vi.mocked(bridge.listModels).mockResolvedValue([
+    { id: "test/model", name: "Test model" },
+  ]);
+  const created = {
+    id: "new-task",
+    title: "Build a reading list",
+    description: "Build a reading list",
+    mode: "plan" as const,
+    createdAt: "2026-10-15T00:00:00.000Z",
+  };
+  vi.mocked(bridge.createTask).mockResolvedValue(created);
+  vi.mocked(bridge.prepareRun).mockResolvedValue({
+    id: "new-run",
+    taskId: created.id,
+    status: "prepared",
+    files: [],
+    drafts: [],
+    events: [],
+    messages: [],
+    replies: [],
+    plan: "",
+    diagnostics: [],
+    error: "",
+    usagePolicy: { outputTokens: 2048 },
+  } as any);
+  vi.mocked(bridge.sendPlanningMessage).mockImplementation(
+    async (_id, text) =>
+      ({
+        id: "new-run",
+        taskId: created.id,
+        status: "planning",
+        files: [],
+        drafts: [],
+        events: [],
+        messages: [
+          {
+            text,
+            intent: "continue",
+            id: "message",
+            at: "2026-10-15T00:00:00.000Z",
+          },
+        ],
+        replies: [],
+        plan: "",
+        diagnostics: [],
+        error: "",
+        usagePolicy: { outputTokens: 2048 },
+      }) as any,
+  );
   render(<App api={bridge} />);
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Create your first task" }),
+  fireEvent.change(
+    await screen.findByRole("textbox", { name: "Start a task" }),
+    { target: { value: "Build a reading list" } },
   );
-  const preview = screen.getByRole("region", { name: "Team and cost preview" });
-  expect(preview).toHaveTextContent("4 required model requests");
-  const planLineup = within(preview).getByRole("list", {
-    name: "Current automatic lineup",
-  });
-  expect(within(planLineup).getAllByRole("listitem")[0]).toHaveTextContent(
-    "Pearl",
-  );
-  expect(preview).toHaveTextContent(
-    "Prepares a plan for your review before building",
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
   await waitFor(() =>
-    expect(preview).toHaveTextContent("using a current bundled model rate"),
+    expect(bridge.createTask).toHaveBeenCalledWith({
+      title: "Build a reading list",
+      description: "Build a reading list",
+      mode: "plan",
+    }),
   );
-  fireEvent.click(screen.getByRole("radio", { name: "Start working" }));
-  expect(preview).toHaveTextContent("3 required model requests");
-  expect(
-    within(preview)
-      .getByRole("list", { name: "Current automatic lineup" })
-      .querySelectorAll("li"),
-  ).toHaveLength(3);
-  expect(preview).not.toHaveTextContent("Prepares a plan for your review");
-  expect(bridge.prepareRun).not.toHaveBeenCalled();
+  expect(bridge.prepareRun).toHaveBeenCalledWith(
+    created.id,
+    null,
+    [],
+    "direct",
+  );
+  expect(bridge.sendPlanningMessage).toHaveBeenCalledWith(
+    "new-run",
+    "Build a reading list",
+  );
   expect(bridge.startRun).not.toHaveBeenCalled();
+  expect(bridge.autoAnswerMessage).not.toHaveBeenCalled();
 });
 it("opens team settings directly from the sidebar and keeps run controls separate", async () => {
   render(<App api={api()} />);
@@ -732,6 +895,11 @@ it("edits a saved task and deletes it only after confirmation", async () => {
   bridge.deleteTask = vi.fn().mockResolvedValue({ deletedRuns: 0 });
   render(<App api={bridge} />);
   fireEvent.click(await screen.findByRole("button", { name: /Fix login/ }));
+  fireEvent.click(
+    within(
+      screen.getByRole("navigation", { name: "Main navigation" }),
+    ).getByRole("button", { name: "Task" }),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Edit task" }));
   const editor = await screen.findByRole("dialog", { name: "Edit task" });
   await waitFor(() => expect(bridge.runs).toHaveBeenCalledWith(saved.id));
@@ -753,21 +921,237 @@ it("edits a saved task and deletes it only after confirmation", async () => {
       mode: "plan",
     }),
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Delete task" }));
-  let confirmation = screen.getByRole("dialog", { name: "Delete task?" });
+  fireEvent.click(await screen.findByRole("button", { name: "Remove task" }));
+  let confirmation = await screen.findByRole("dialog", {
+    name: "Delete task?",
+  });
+  await within(confirmation).findByRole("button", { name: "Delete task" });
   expect(bridge.deleteTask).not.toHaveBeenCalled();
   fireEvent.click(within(confirmation).getByRole("button", { name: "Cancel" }));
   expect(bridge.deleteTask).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Delete task" }));
-  confirmation = screen.getByRole("dialog", { name: "Delete task?" });
+  fireEvent.click(screen.getByRole("button", { name: "Remove task" }));
+  confirmation = await screen.findByRole("dialog", { name: "Delete task?" });
+  await within(confirmation).findByRole("button", { name: "Delete task" });
   fireEvent.click(
     within(confirmation).getByRole("button", { name: "Delete task" }),
   );
   await waitFor(() => expect(bridge.deleteTask).toHaveBeenCalledWith(saved.id));
   expect(
-    await screen.findByRole("heading", { name: "Start your first task." }),
+    await screen.findByRole("heading", {
+      name: "What would you like to build?",
+    }),
   ).toBeInTheDocument();
 });
+it("offers archive and recovery when a task has a recorded model request", async () => {
+  const bridge = api();
+  const saved = {
+    id: "task-with-request",
+    title: "Build a local reading list",
+    description: "Build a reading list",
+    mode: "plan" as const,
+    createdAt: "2026-10-15T00:00:00.000Z",
+  };
+  const active = {
+    tasks: [saved],
+    archivedTasks: [],
+    teammates: initialTeam,
+    activity: { byTeammate: {}, scannedRuns: 0, partial: false },
+  };
+  const archived = {
+    ...active,
+    tasks: [],
+    archivedTasks: [{ ...saved, archivedAt: "2026-10-15T01:00:00.000Z" }],
+  };
+  vi.mocked(bridge.load)
+    .mockResolvedValueOnce(active)
+    .mockResolvedValueOnce(archived)
+    .mockResolvedValueOnce(active);
+  vi.mocked(bridge.taskDisposition).mockResolvedValue({
+    canDelete: false,
+    canArchive: true,
+    reason: "saved_work",
+    runCount: 2,
+    requestCount: 1,
+  });
+  vi.mocked(bridge.archiveTask).mockResolvedValue({
+    ...saved,
+    archivedAt: "2026-10-15T01:00:00.000Z",
+  });
+  vi.mocked(bridge.restoreTask).mockResolvedValue(saved);
+  render(<App api={bridge} />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Build a local reading list/ }),
+  );
+  fireEvent.click(
+    within(
+      screen.getByRole("navigation", { name: "Main navigation" }),
+    ).getByRole("button", { name: "Task" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Remove task" }));
+  const dialog = await screen.findByRole("dialog", { name: "Archive task?" });
+  expect(within(dialog).getByText(/1 model request/)).toBeInTheDocument();
+  expect(
+    within(dialog).queryByRole("button", { name: "Delete task" }),
+  ).not.toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Archive task" }));
+  await waitFor(() =>
+    expect(bridge.archiveTask).toHaveBeenCalledWith(saved.id),
+  );
+  expect(bridge.deleteTask).not.toHaveBeenCalled();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Archived tasks (1)" }),
+  );
+  const recovery = screen.getByRole("dialog", { name: "Archived tasks" });
+  expect(within(recovery).getByText(saved.title)).toBeInTheDocument();
+  fireEvent.click(within(recovery).getByRole("button", { name: "Restore" }));
+  await waitFor(() =>
+    expect(bridge.restoreTask).toHaveBeenCalledWith(saved.id),
+  );
+  expect(
+    await screen.findByRole("button", { name: /Build a local reading list/ }),
+  ).toBeInTheDocument();
+});
+it("requires the exact archived task title before deleting it forever", async () => {
+  const bridge = api();
+  const archived = {
+    id: "archived-1",
+    title: "Old reading list",
+    description: "",
+    mode: "plan" as const,
+    createdAt: "2026-10-15T00:00:00.000Z",
+    archivedAt: "2026-10-15T01:00:00.000Z",
+  };
+  vi.mocked(bridge.load)
+    .mockResolvedValueOnce({
+      tasks: [],
+      archivedTasks: [archived],
+      teammates: initialTeam,
+      activity: { byTeammate: {}, scannedRuns: 0, partial: false },
+    })
+    .mockResolvedValueOnce({
+      tasks: [],
+      archivedTasks: [],
+      teammates: initialTeam,
+      activity: { byTeammate: {}, scannedRuns: 0, partial: false },
+    });
+  vi.mocked(bridge.permanentlyDeleteArchivedTask).mockResolvedValue({
+    deletedRuns: 1,
+    privateArtifacts: { removed: 0, failed: 0 },
+  });
+  render(<App api={bridge} />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Archived tasks (1)" }),
+  );
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "Archived tasks" })).getByRole(
+      "button",
+      { name: "Delete forever" },
+    ),
+  );
+  const confirm = screen.getByRole("dialog", {
+    name: "Delete archived task forever?",
+  });
+  const action = within(confirm).getByRole("button", {
+    name: "Delete forever",
+  });
+  expect(action).toBeDisabled();
+  fireEvent.change(
+    within(confirm).getByLabelText("Type the task title to confirm"),
+    { target: { value: "Wrong" } },
+  );
+  expect(action).toBeDisabled();
+  fireEvent.change(
+    within(confirm).getByLabelText("Type the task title to confirm"),
+    { target: { value: archived.title } },
+  );
+  fireEvent.click(action);
+  await waitFor(() =>
+    expect(bridge.permanentlyDeleteArchivedTask).toHaveBeenCalledWith(
+      archived.id,
+      archived.title,
+    ),
+  );
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: "Archived tasks" }),
+    ).not.toBeInTheDocument(),
+  );
+  expect(screen.queryByText(archived.title)).not.toBeInTheDocument();
+});
+
+it("keeps conversations and activity separate when switching tasks", async () => {
+  const bridge = api();
+  const first = {
+    id: "first",
+    title: "First task",
+    description: "",
+    mode: "plan" as const,
+    createdAt: "2026-10-15T00:00:00.000Z",
+  };
+  const second = {
+    id: "second",
+    title: "Second task",
+    description: "",
+    mode: "plan" as const,
+    createdAt: "2026-10-15T00:00:01.000Z",
+  };
+  vi.mocked(bridge.load).mockResolvedValueOnce({
+    tasks: [first, second],
+    archivedTasks: [],
+    teammates: initialTeam,
+    activity: { byTeammate: {}, scannedRuns: 2, partial: false },
+  });
+  vi.mocked(bridge.runs).mockImplementation(async (id) => [
+    {
+      id: `run-${id}`,
+      taskId: id,
+      status: "prepared",
+      sourceName: "New project",
+      files: [],
+      drafts: [],
+      events: [],
+      messages: [
+        {
+          id: `message-${id}`,
+          text: `${id} private message`,
+          at: "2026-10-15T00:00:00.000Z",
+          intent: "continue",
+        },
+      ],
+      replies: [],
+      plan: "",
+      calls: 0,
+      model: "",
+      outputTokens: 2048,
+    } as any,
+  ]);
+  vi.mocked(bridge.taskActivity).mockImplementation(async (id) => ({
+    byTeammate: {
+      ellis: { recordedEvents: id === first.id ? 1 : 2, runsWithEvents: 1 },
+    },
+    scannedRuns: 1,
+    partial: false,
+  }));
+  const { container } = render(<App api={bridge} />);
+  fireEvent.click(await screen.findByRole("button", { name: first.title }));
+  await waitFor(() =>
+    expect(container.querySelector(".chat-user")?.textContent).toContain(
+      "first private message",
+    ),
+  );
+  fireEvent.click(screen.getByRole("button", { name: second.title }));
+  expect(
+    container.querySelector(".chat-user")?.textContent ?? "",
+  ).not.toContain("first private message");
+  await waitFor(() =>
+    expect(container.querySelector(".chat-user")?.textContent).toContain(
+      "second private message",
+    ),
+  );
+  expect(bridge.runs).toHaveBeenCalledWith(second.id);
+  expect(bridge.taskActivity).toHaveBeenCalledWith(second.id);
+});
+
 it("does not offer edits to fixed character identity from the profile", async () => {
   render(<App api={api()} />);
   const profile = await screen.findByRole("region", { name: "Ellis profile" });
@@ -782,16 +1166,18 @@ it("shows the Scully alien head throughout the opening workspace", async () => {
   expect(
     screen.getByRole("img", { name: "Scully alien head" }),
   ).toBeInTheDocument();
-  await screen.findByText("Team room");
+  await screen.findByRole("heading", { name: "What would you like to build?" });
   expect(
     screen.getAllByRole("img", { name: "Scully alien head" }),
   ).toHaveLength(2);
 });
 it("navigates to honest empty and settings states", async () => {
   render(<App api={api()} />);
-  await screen.findByText("Team room");
+  await screen.findByRole("heading", { name: "What would you like to build?" });
   fireEvent.click(screen.getByRole("button", { name: "Changes" }));
-  expect(screen.getByText(/No changes yet/)).toBeInTheDocument();
+  expect(
+    screen.getByText(/Choose a task and its project folder/),
+  ).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
   fireEvent.click(screen.getByRole("button", { name: "App & connection" }));
   expect(
@@ -808,7 +1194,7 @@ it("shows every fixed character and saves an explicit active builder", async () 
   const bridge = await fixedBridge();
   bridge.saveTeam = vi.fn().mockResolvedValue(undefined);
   render(<App api={bridge} />);
-  await screen.findByText("Team room");
+  await screen.findByRole("heading", { name: "What would you like to build?" });
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
   fireEvent.click(screen.getByRole("button", { name: "Choose team members" }));
   const dialog = screen.getByRole("dialog", { name: "Choose team members" });
@@ -856,7 +1242,7 @@ it("keeps the current roster visible when saving a new selection fails", async (
   const bridge = await fixedBridge();
   bridge.saveTeam = vi.fn().mockRejectedValue(new Error("Disk unavailable"));
   render(<App api={bridge} />);
-  await screen.findByText("Team room");
+  await screen.findByRole("heading", { name: "What would you like to build?" });
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
   fireEvent.click(screen.getByRole("button", { name: "Choose team members" }));
   const dialog = screen.getByRole("dialog", { name: "Choose team members" });
@@ -883,7 +1269,7 @@ it("shows grouped member stories and clear selection states", async () => {
     },
   });
   render(<App api={await fixedBridge()} />);
-  await screen.findByText("Team room");
+  await screen.findByRole("heading", { name: "What would you like to build?" });
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
   fireEvent.click(screen.getByRole("button", { name: "Choose team members" }));
   const dialog = screen.getByRole("dialog", { name: "Choose team members" });
@@ -918,7 +1304,7 @@ it("shows grouped member stories and clear selection states", async () => {
 });
 it("opens the selected full profile", async () => {
   render(<App api={api()} />);
-  await screen.findByText("Team room");
+  await screen.findByRole("heading", { name: "What would you like to build?" });
   fireEvent.click(screen.getByRole("button", { name: "Open full profile" }));
   expect(screen.getByText("Working instructions")).toBeInTheDocument();
   expect(screen.getAllByText("Recorded events")).toHaveLength(2);
@@ -926,7 +1312,7 @@ it("opens the selected full profile", async () => {
 });
 it("shows a catalog background and member-specific strengths on the full profile", async () => {
   render(<App api={await fixedBridge()} />);
-  await screen.findByText("Team room");
+  await screen.findByRole("heading", { name: "What would you like to build?" });
   const sideProfile = screen.getByRole("region", { name: "Ellis profile" });
   expect(sideProfile).toHaveTextContent("Reproducible evidence");
   expect(sideProfile).not.toHaveTextContent("Code review");
@@ -945,7 +1331,7 @@ it("shows a catalog background and member-specific strengths on the full profile
 it("refreshes saved activity and keeps previous counts after a failed refresh", async () => {
   const bridge = api();
   render(<App api={bridge} />);
-  await screen.findByText("Team room");
+  await screen.findByRole("heading", { name: "What would you like to build?" });
   vi.mocked(bridge.load).mockResolvedValueOnce({
     tasks: [],
     teammates: initialTeam,

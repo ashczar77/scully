@@ -119,10 +119,10 @@ export function CostPanel({
         </strong>
         <small>
           {snapshot?.rateStatus === "verified"
-            ? "Published model rate"
+            ? "Published Pearl model rate"
             : snapshot?.rateStatus === "user_estimate"
-              ? "User supplied rate"
-              : "Model cost rate unknown"}{" "}
+              ? "User supplied Pearl rate"
+              : "Pearl model rate unknown"}{" "}
           · Change in Settings
         </small>
       </button>
@@ -133,7 +133,7 @@ export function CostPanel({
       {snapshot && (
         <>
           <p>
-            Model: {snapshot.model || "not configured"}. Rate:{" "}
+            Pearl model: {snapshot.model || "not configured"}. Rate:{" "}
             {snapshot.rateStatus === "verified"
               ? "Nebius published listing"
               : snapshot.rateStatus === "user_estimate"
@@ -168,7 +168,7 @@ export function CostPanel({
               ` Partial total: ${totals!.unpricedMeasured} measured requests lack a usable price, ${totals!.unknownUsage} requests have unknown usage, and ${totals!.unpricedPending} pending requests lack a usable price. Their cost is unknown.`}
           </p>
           <p>
-            Next request projection:{" "}
+            Next Pearl request projection:{" "}
             {snapshot.nextProjectedNanoUsd === null
               ? "unknown"
               : money(snapshot.nextProjectedNanoUsd)}
@@ -179,9 +179,12 @@ export function CostPanel({
           </p>
           <p className="muted">
             Projections reserve the token allowance at the higher input or
-            output rate. Actual input can exceed that allowance. These are local
-            estimates, not provider charges or an account spending cap. Scully
-            does not check account balances or make automatic top ups.
+            output rate. Other teammates may use different models. Their rates
+            are assessed when they make requests, and their costs are included
+            in the totals above. Actual input can exceed that allowance. These
+            are local estimates, not provider charges or an account spending
+            cap. Scully does not check account balances or make automatic top
+            ups.
           </p>
           <h4>Other service costs</h4>
           <p>

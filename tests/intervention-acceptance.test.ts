@@ -22,6 +22,7 @@ import { Store } from "../src/main/store";
 import { RunManager } from "../src/main/run-manager";
 import { executeLoop } from "../src/engine/loop";
 import { answerQuestion } from "../src/engine/answer";
+import { lineupPlanRevision } from "../src/engine/revision";
 import type { Model } from "../src/engine/provider";
 const worker = () => vi.mocked(utilityProcess.fork).mock.results.at(-1)!.value;
 async function finish(child: ReturnType<typeof worker>, model: Model) {
@@ -80,12 +81,34 @@ it("preserves intent, permissions and history through questions, redirection, la
     manager.start(revised.id, true);
     const planner = worker();
     const plan = await finish(planner, {
-      complete: vi
-        .fn()
-        .mockResolvedValue({ plan: "Build only a command line tool" }),
+      complete: vi.fn().mockResolvedValue({
+        plan: "Build only a command line tool",
+        suggestedSpecialists: [],
+        suggestedTeam: {
+          builderId: "maya",
+          auditorId: "ellis",
+          testerId: "jun",
+          reason: "The saved team can build, test and review this task.",
+        },
+      }),
     });
     expect(plan.status).toBe("planned");
     expect(plan.drafts).toEqual([]);
+    expect(store.getRun(revised.id).lineupProposal?.planRevision).toBe(
+      lineupPlanRevision(store.getRun(revised.id), task),
+    );
+    expect(store.getRun(revised.id).taskSnapshot).toMatchObject({
+      title: task.title,
+      description: task.description,
+      mode: task.mode,
+    });
+    manager.approveLineup(
+      revised.id,
+      plan.lineupProposal!.planRevision,
+      [],
+      true,
+      { builderId: "maya", auditorId: "ellis", testerId: "jun" },
+    );
     const question = manager.sendTeamMessage(revised.id, {
       text: "Which tests are needed?",
       intent: "continue",

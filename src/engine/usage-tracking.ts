@@ -14,13 +14,15 @@ export function trackedModel(
     async complete(request: Completion) {
       const id = randomUUID();
       const maxOutputTokens = config.outputTokens;
+      const selectedModel = request.model || config.model;
       let usage: ReportedUsage | null = null;
       const acknowledged = waitForAck(id);
       emit({
         usageStart: {
           id,
           stage: request.name,
-          model: config.model,
+          model: selectedModel,
+          ...(request.actor && { actor: request.actor }),
           maxOutputTokens,
         },
       });
@@ -35,6 +37,7 @@ export function trackedModel(
               onUsage: (value) => {
                 usage = value;
               },
+              onDiagnostic: (value) => emit({ requestDiagnostic: value }),
             }),
           metricSink,
         );

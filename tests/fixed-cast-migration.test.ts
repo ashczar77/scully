@@ -133,6 +133,7 @@ it("migrates only the team library and keeps historical task and run rows across
       "jun",
     ]);
     expect(store.teamForTask(taskId).members).toEqual(initialTeam);
+    expect(store.teamForTask(taskId).roster).toBeUndefined();
     store.close();
     store = new Store(path);
     expect(store.defaultTeam().roster?.memberIds).toEqual([
@@ -154,7 +155,7 @@ it("migrates only the team library and keeps historical task and run rows across
     expect(
       (db.prepare("PRAGMA user_version").get() as { user_version: number })
         .user_version,
-    ).toBe(11);
+    ).toBe(16);
     expect(
       db.prepare("SELECT COUNT(*) AS count FROM team_library").get(),
     ).toMatchObject({ count: 1 });

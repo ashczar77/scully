@@ -30,85 +30,98 @@ export function CoordinationPanel({
       `${id} ${index === 0 ? "src/feature.ts" : "tests/feature.test.ts"}`,
   );
   return (
-    <section className="settings-card" aria-label="Team ownership">
-      <h3>Team ownership</h3>
+    <section className="settings-card" aria-label="Work assignments">
+      <h3>Who will do what</h3>
       <p>
-        {name(c.integrator)} owns integration. {name(c.auditor)} reviews the
-        combined revision read-only. Writers share the task, plan and selected
-        snapshot, not each other's unfinished files.
+        {run.approvedLineup?.core
+          ? "You approved these assignments for this plan. "
+          : "These assignments come from this task's saved team. "}
+        {name(c.integrator)} combines the work and {name(c.auditor)}{" "}
+        independently reviews it.
       </p>
-      {api && run.status === "prepared" && (
-        <details>
-          <summary>Configure ownership and early reviews</summary>
-          <p>
-            Optional overrides. Defaults stay automatic. Use one rule per line
-            with an assigned writer ID and a file or folder path. Assigned
-            writers: {writers.map((id) => `${name(id)} (${id})`).join(", ")}.
-            Folder rules cover the subtree; overlapping rules are rejected.
-          </p>
-          <label>
-            Ownership overrides
-            <textarea
-              className="ownership-input"
-              rows={4}
-              value={ownership}
-              maxLength={4000}
-              onChange={(e) => {
-                setOwnership(e.target.value);
-                invalidateConsent?.();
-              }}
-              placeholder={examples.join("\n")}
-            />
-          </label>
-          <label className="consent">
-            <input
-              type="checkbox"
-              checked={chunkReviews}
-              onChange={(e) => {
-                setChunkReviews(e.target.checked);
-                invalidateConsent?.();
-              }}
-            />
-            Review each completed writer chunk while other work continues
-          </label>
-          <p>
-            Early reviews add up to {writers.length} additional{" "}
-            {writers.length === 1 ? "request" : "requests"}. They do not replace
-            the final combined audit. No changes take effect until saved; saving
-            never starts a run.
-          </p>
-          <button
-            className="secondary"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true);
-              setError("");
-              invalidateConsent?.();
-              try {
-                await api.configureCoordination(run.id, {
-                  ownership,
-                  chunkReviews,
-                });
-              } catch (e) {
-                setError(
-                  e instanceof Error
-                    ? e.message
-                    : "Could not save coordination settings",
-                );
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            Save coordination settings
-          </button>
-          {error && (
-            <p role="alert" className="error">
-              {error}
+      {api &&
+        (run.status === "prepared" ||
+          (run.status === "planned" &&
+            !run.approvedLineup?.core &&
+            !run.consultations?.length &&
+            !run.approvedAdvice?.length)) && (
+          <details>
+            <summary>Advanced work assignments and early reviews</summary>
+            <p>
+              Optional overrides. Defaults stay automatic. Use one rule per line
+              with an assigned writer ID and a file or folder path. Assigned
+              writers: {writers.map((id) => `${name(id)} (${id})`).join(", ")}.
+              Folder rules cover the subtree; overlapping rules are rejected.
             </p>
-          )}
-        </details>
-      )}
+            {run.status === "planned" && (
+              <p>
+                Changing these settings clears the saved specialist selection.
+                Review that selection again before building.
+              </p>
+            )}
+            <label>
+              Ownership overrides
+              <textarea
+                className="ownership-input"
+                rows={4}
+                value={ownership}
+                maxLength={4000}
+                onChange={(e) => {
+                  setOwnership(e.target.value);
+                  invalidateConsent?.();
+                }}
+                placeholder={examples.join("\n")}
+              />
+            </label>
+            <label className="consent">
+              <input
+                type="checkbox"
+                checked={chunkReviews}
+                onChange={(e) => {
+                  setChunkReviews(e.target.checked);
+                  invalidateConsent?.();
+                }}
+              />
+              Review each completed writer chunk while other work continues
+            </label>
+            <p>
+              Early reviews add up to {writers.length} additional{" "}
+              {writers.length === 1 ? "request" : "requests"}. They do not
+              replace the final combined audit. No changes take effect until
+              saved; saving never starts a run.
+            </p>
+            <button
+              className="secondary"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                setError("");
+                invalidateConsent?.();
+                try {
+                  await api.configureCoordination(run.id, {
+                    ownership,
+                    chunkReviews,
+                  });
+                } catch (e) {
+                  setError(
+                    e instanceof Error
+                      ? e.message
+                      : "Could not save coordination settings",
+                  );
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              Save coordination settings
+            </button>
+            {error && (
+              <p role="alert" className="error">
+                {error}
+              </p>
+            )}
+          </details>
+        )}
       <p>
         Saved early reviews: {c.settings?.chunkReviews ? "enabled" : "disabled"}{" "}
         · Request ceiling including planning: {requestLimit(run)}

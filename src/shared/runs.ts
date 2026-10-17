@@ -22,14 +22,23 @@ export type SourceFile = { path: string; content: string };
 export type SourceSelection = {
   id: string;
   name: string;
+  root?: string;
   files: SourceFile[];
   excluded: number;
+};
+export type ProjectWorkspace = {
+  path: string;
+  kind: "new" | "existing";
+  dev: number;
+  ino: number;
+  writtenFiles?: string[];
 };
 export type DraftFile = SourceFile & { before: string | null };
 export type RunStatus =
   | "prepared"
   | "planning"
   | "planned"
+  | "awaiting_input"
   | "building"
   | "auditing"
   | "complete"
@@ -44,6 +53,15 @@ export type RunEvent = {
   actorPortraitId?: import("./contracts").Teammate["portraitId"];
   text: string;
   at: string;
+  questionId?: string;
+};
+export type BuildQuestion = {
+  id: string;
+  actor: string;
+  text: string;
+  askedAt: string;
+  answer?: string;
+  answeredAt?: string;
 };
 export type InFlightRequest = {
   id: string;
@@ -64,6 +82,23 @@ export type Finding = {
   detail: string;
 };
 export type Run = {
+  planningConsultationPolicy?: "automatic" | "ask";
+  diagnostics?: import("./request-diagnostics").RequestDiagnostic[];
+  requestPause?: {
+    id: string;
+    status:
+      | "requested"
+      | "paused"
+      | "resuming"
+      | "resumed"
+      | "not_reached"
+      | "stopped"
+      | "interrupted";
+    attempts: number;
+    requestedAt: string;
+    reachedAt?: string;
+    resolvedAt?: string;
+  };
   consultations?: import("./consultation").SpecialistConsultation[];
   approvedAdvice?: import("../engine/advice-handoff").AdviceApproval[];
   lineupProposal?: import("./lineup-proposal").LineupProposal;
@@ -72,11 +107,13 @@ export type Run = {
   reviewedSuggestionIds?: string[];
   replies?: import("./messages").TeamReply[];
   messages?: import("./messages").TeamMessage[];
+  pendingQuestions?: BuildQuestion[];
   redirection?: {
     parentId: string;
     instructions: string[];
     previousPlan: string;
     previousDrafts: DraftFile[];
+    conversation?: { from: string; text: string }[];
   };
   redirectedTo?: string;
   correction?: {
@@ -95,17 +132,22 @@ export type Run = {
   taskSnapshot?: import("./contracts").TaskInput;
   teamSnapshot?: import("./teams").SavedTeam;
   sourceName: string;
+  workspaceMode?: "direct";
+  projectWorkspace?: ProjectWorkspace;
   files: SourceFile[];
   status: RunStatus;
   events: RunEvent[];
   inFlightRequests?: InFlightRequest[];
   plan: string;
+  planReply?: string;
+  planningRetries?: number;
   drafts: DraftFile[];
   findings: Finding[];
   checks: string[];
   error: string;
   calls: number;
   model: string;
+  roleModels?: import("./role-models").RoleModelSettings;
   outputTokens: number;
   usagePolicy?: import("./usage-policy").UsagePolicy;
   commands?: CommandProposal[];
@@ -124,7 +166,54 @@ export type SessionInfo = {
   model: string;
   outputTokens: number;
 };
+export type ModelOption = { id: string; name: string };
 export type RunAPI = {
+  roleModelSettings: () => Promise<import("./role-models").RoleModelSettings>;
+  setRoleModelSettings: (
+    value: import("./role-models").RoleModelSettings,
+  ) => Promise<import("./role-models").RoleModelSettings>;
+  planningSettings: () => Promise<
+    import("./planning-settings").PlanningSettings
+  >;
+  setPlanningSettings: (
+    value: import("./planning-settings").PlanningSettings,
+  ) => Promise<import("./planning-settings").PlanningSettings>;
+  rawCaptureStatus: () => Promise<{ armed: boolean; saved: boolean }>;
+  armRawCapture: () => Promise<{ armed: boolean; saved: boolean }>;
+  readRawCapture: () => Promise<{
+    request: string;
+    response: string | null;
+    httpStatus: number | null;
+  } | null>;
+  clearRawCapture: () => Promise<{ armed: boolean; saved: boolean }>;
+  conversationAllowance: (id: string) => Promise<{
+    remaining: number;
+    model: string;
+    outputTokens: number;
+    valid: boolean;
+  }>;
+  reviewConversation: (id: string) => Promise<{
+    token: string;
+    expiresAt: number;
+    remaining: number;
+    model: string;
+    outputTokens: number;
+  }>;
+  approveConversation: (
+    id: string,
+    token: string,
+    approved: boolean,
+  ) => Promise<{
+    remaining: number;
+    model: string;
+    outputTokens: number;
+    valid: boolean;
+  }>;
+  autoAnswerMessage: (
+    id: string,
+    messageId: string,
+    recipientId?: string,
+  ) => Promise<Run>;
   inspectLocalArtifacts: () => Promise<ArtifactInventory>;
   resolveCloudExecutable: (
     id: string,
@@ -151,6 +240,20 @@ export type RunAPI = {
     messageId: string,
     recipientId?: string,
   ) => Promise<import("./messages").ReplyReview>;
+  reviewRoutedReply: (
+    id: string,
+    messageId: string,
+  ) => Promise<{
+    routing: ReturnType<typeof import("./message-routing").routeTeamMessage>;
+    needsConnection: boolean;
+    review: import("./messages").ReplyReview | null;
+  }>;
+  messageRoutingSettings: () => Promise<
+    import("./message-routing").MessageRoutingSettings
+  >;
+  setMessageRoutingSettings: (
+    value: import("./message-routing").MessageRoutingSettings,
+  ) => Promise<import("./message-routing").MessageRoutingSettings>;
   answerMessage: (token: string, approved: boolean) => Promise<Run>;
   sendTeamMessage: (
     id: string,
@@ -176,7 +279,12 @@ export type RunAPI = {
     taskId: string,
     sourceId: string | null,
     paths: string[],
+    workspaceMode?: "direct",
   ) => Promise<Run>;
+  chooseProjectWorkspace: (id: string) => Promise<Run | null>;
+  openProjectWorkspace: (id: string) => Promise<void>;
+  gitHistory: (id: string) => Promise<import("./git-history").GitHistory>;
+  initializeGit: (id: string) => Promise<import("./git-history").GitHistory>;
   runs: (taskId: string) => Promise<Run[]>;
   usageForRun: (id: string) => Promise<import("./usage").UsageSnapshot>;
   usageAlertsForRun: (
@@ -198,6 +306,26 @@ export type RunAPI = {
   saveTokensForRemaining: (id: string) => Promise<Run>;
   session: () => Promise<SessionInfo>;
   configureSession: (config: SessionConfig) => Promise<SessionInfo>;
+  listModels: () => Promise<ModelOption[]>;
+  selectRunModel: (id: string, model: string) => Promise<Run>;
+  selectDefaultModel: (model: string) => Promise<SessionInfo>;
+  sendPlanningMessage: (id: string, text: string) => Promise<Run>;
+  retryPlanning: (id: string) => Promise<Run>;
+  sendConversationMessage: (
+    id: string,
+    text: string,
+    recipientId?: string,
+  ) => Promise<{ run: Run; needsChoice: boolean }>;
+  answerConversationMessage: (
+    id: string,
+    messageId: string,
+    recipientId: string,
+  ) => Promise<Run>;
+  answerBuildQuestion: (
+    id: string,
+    questionId: string,
+    answer: string,
+  ) => Promise<Run>;
   configureUsagePolicy: (
     id: string,
     choice: import("./usage-policy").UsagePolicyChoice,
@@ -213,6 +341,7 @@ export type RunAPI = {
     planRevision: string,
     entries: import("./lineup-proposal").SpecialistLineupEntry[],
     approved: boolean,
+    core?: import("./core-lineup").CoreLineup,
   ) => Promise<Run>;
   reviewConsultation: (
     id: string,
@@ -223,10 +352,13 @@ export type RunAPI = {
   reviewAdvice: (
     id: string,
     consultationId: string,
+    answers?: string[],
   ) => Promise<import("../engine/advice-handoff").AdviceReview>;
   approveAdvice: (token: string, approved: boolean) => Promise<Run>;
   removeAdvice: (id: string, consultationId: string) => Promise<Run>;
   stopRun: (id: string) => Promise<Run>;
+  requestRunPause: (id: string) => Promise<Run>;
+  resumeRunPause: (id: string, pauseId: string) => Promise<Run>;
   decideCommand: (
     id: string,
     commandId: string,
@@ -293,6 +425,23 @@ export function safePath(path: unknown): asserts path is string {
   )
     throw new Error("Unsupported cross-platform file path");
 }
+export function normalizeDraftPath(path: unknown): string {
+  if (typeof path !== "string")
+    throw new Error("Writer proposed an invalid file path");
+  const normalized = path.startsWith("./") ? path.slice(2) : path;
+  if (normalized.startsWith("/"))
+    throw new Error("Writer proposed an absolute file path");
+  if (normalized.split("/").includes(".."))
+    throw new Error("Writer proposed a parent directory file path");
+  if (normalized.split("/").some((part) => part.startsWith(".")))
+    throw new Error("Writer proposed a hidden or private file path");
+  try {
+    safePath(normalized);
+  } catch {
+    throw new Error("Writer proposed an unsafe or unsupported file path");
+  }
+  return normalized;
+}
 export function containsSecret(content: string) {
   return /-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk-|tvly-|ghp_)[A-Za-z0-9_-]{16,}|(?:api[_-]?key|password|secret|token)\s*[:=]\s*["'][A-Za-z0-9_+\/-]{16,}["']/i.test(
     content,
@@ -314,10 +463,11 @@ export function parseDraft(value: unknown): {
     throw new Error("Invalid builder response");
   const names = new Set<string>();
   let size = 0;
+  const files: SourceFile[] = [];
   for (const f of v.files) {
     if (!f) throw new Error("Invalid file");
-    safePath(f.path);
-    const name = f.path.toLowerCase();
+    const path = normalizeDraftPath(f.path);
+    const name = path.toLowerCase();
     if (
       names.has(name) ||
       [...names].some(
@@ -329,11 +479,12 @@ export function parseDraft(value: unknown): {
     if (typeof f.content !== "string" || containsSecret(f.content))
       throw new Error("Unsafe file content");
     size += new TextEncoder().encode(f.content).length;
+    files.push({ path, content: f.content });
   }
   if (size > 48_000) throw new Error("Draft exceeds the 48 KB output limit");
   return {
     summary: v.summary,
-    files: v.files.map((f) => ({ path: f.path, content: f.content })),
+    files,
   };
 }
 export function parseAudit(

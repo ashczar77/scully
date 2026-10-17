@@ -41,6 +41,24 @@ it("waits for a durable usage acknowledgment before dispatching a model request"
     usageFinish: { id, usage: { inputTokens: 12, outputTokens: 5 } },
   });
 });
+it("reserves usage for the selected actor and model before dispatch", async () => {
+  const complete = vi.fn(async () => ({ ok: true }));
+  const emit = vi.fn();
+  const model = trackedModel(
+    { complete },
+    { model: "fallback", outputTokens: 512 },
+    emit,
+    async () => {},
+    vi.fn(),
+  );
+  await model.complete({ ...request, actor: "maya", model: "model-builder" });
+  expect(emit.mock.calls[0][0].usageStart).toEqual(
+    expect.objectContaining({ actor: "maya", model: "model-builder" }),
+  );
+  expect(complete).toHaveBeenCalledWith(
+    expect.objectContaining({ actor: "maya", model: "model-builder" }),
+  );
+});
 
 it("does not dispatch without an acknowledgment and marks provider failure unknown", async () => {
   const complete = vi

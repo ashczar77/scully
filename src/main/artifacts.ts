@@ -1,6 +1,13 @@
 import { createHash } from "node:crypto";
-import { lstatSync, opendirSync, realpathSync } from "node:fs";
+import {
+  lstatSync,
+  opendirSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+} from "node:fs";
 import { join, sep } from "node:path";
+import type { Run } from "../shared/runs";
 import type {
   ArtifactCategory,
   ArtifactInventory,
@@ -11,6 +18,102 @@ const kinds: ArtifactKind[] = ["drafts", "executions", "applications"];
 const defaultLimit = 2_000;
 const maxDepth = 12;
 const maxSavedRuns = 2_000;
+function lstatIfPresent(path: string) {
+  try {
+    return lstatSync(path);
+  } catch (error) {
+    if (missing(error)) return null;
+    throw error;
+  }
+}
+
+// Restrict removal to private directories with a verifiable run or application owner.
+// Older execution copies without a run hash cannot be attributed safely.
+export function planTaskArtifactRemoval(dataRoot: string, runs: Run[]) {
+  const base = realpathSync(dataRoot);
+  const paths = new Set<string>();
+  let scanned = 0;
+  const rootFor = (kind: ArtifactKind | "request-capture") => {
+    const root = join(base, kind);
+    const stat = lstatIfPresent(root);
+    if (!stat) return null;
+    if (
+      !stat.isDirectory() ||
+      stat.isSymbolicLink() ||
+      realpathSync(root) !== root
+    )
+      throw new Error("Private artifact root changed");
+    return root;
+  };
+  const draftsRoot = rootFor("drafts");
+  const executionRoot = rootFor("executions");
+  const applicationRoot = rootFor("applications");
+  const captureRoot = rootFor("request-capture");
+  const executionNames = executionRoot ? readdirSync(executionRoot) : [];
+  const captureNames = captureRoot ? readdirSync(captureRoot) : [];
+  if (executionNames.length > 20_000)
+    throw new Error("Private execution inventory exceeds inspection limit");
+  if (captureNames.length > 20_000)
+    throw new Error("Private capture inventory exceeds inspection limit");
+  for (const run of runs) {
+    if (!/^[A-Za-z0-9_-]{1,100}$/.test(run.id))
+      throw new Error("Invalid saved run ID for private artifact removal");
+    if (draftsRoot) paths.add(join(draftsRoot, run.id));
+    const hash = createHash("sha256").update(run.id).digest("hex");
+    if (executionRoot) {
+      const prefix = `check-r-${hash}-`;
+      for (const name of executionNames)
+        if (name.startsWith(prefix)) paths.add(join(executionRoot, name));
+    }
+    if (captureRoot) {
+      const pattern = new RegExp(`^capture-r-${hash}-[0-9a-f-]{36}\\.json$`);
+      for (const name of captureNames)
+        if (pattern.test(name)) paths.add(join(captureRoot, name));
+    }
+    for (const application of run.applications || []) {
+      if (!/^[0-9a-f-]{36}$/.test(application.id))
+        throw new Error("Invalid application ID for private artifact removal");
+      if (applicationRoot) paths.add(join(applicationRoot, application.id));
+    }
+  }
+  const existing = [...paths].filter((path) => lstatIfPresent(path) !== null);
+  const verify = (path: string, depth: number) => {
+    if (++scanned > 20_000 || depth > 32)
+      throw new Error("Private artifact removal exceeds inspection limit");
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink() || (!stat.isDirectory() && !stat.isFile()))
+      throw new Error("Private artifact contains an unsupported file");
+    if (stat.isDirectory()) {
+      if (realpathSync(path) !== path)
+        throw new Error("Private artifact path changed");
+      for (const name of readdirSync(path)) verify(join(path, name), depth + 1);
+    }
+  };
+  for (const path of existing) verify(path, 0);
+  return () => {
+    let removed = 0;
+    let failed = 0;
+    for (const path of existing) {
+      try {
+        // Recheck the target before removal. External project directories are never selected.
+        const stat = lstatSync(path);
+        if (
+          (!stat.isDirectory() && !stat.isFile()) ||
+          stat.isSymbolicLink() ||
+          realpathSync(path) !== path
+        )
+          throw new Error("Private artifact path changed");
+        scanned = 0;
+        verify(path, 0);
+        rmSync(path, { recursive: stat.isDirectory() });
+        removed++;
+      } catch {
+        failed++;
+      }
+    }
+    return { removed, failed };
+  };
+}
 
 function missing(error: unknown) {
   return (error as NodeJS.ErrnoException).code === "ENOENT";

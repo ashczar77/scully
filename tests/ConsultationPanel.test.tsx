@@ -33,6 +33,51 @@ const planned: Run = {
   },
 };
 
+it("shows a separate pre-build specialist request before writers start", async () => {
+  const reviewConsultation = vi.fn().mockResolvedValue({
+    token: "building-ticket",
+    runId: "run",
+    specialistId: "rafi",
+    phase: "building",
+    context: '{"plan":"Sketch checkout"}',
+    contextRevision: "context",
+    planRevision: "revision",
+    expiresAt: Date.now() + 1000,
+    model: "fixture-model",
+    outputTokens: 1024,
+    projectedNanoUsd: null,
+    rateStatus: "unknown",
+  });
+  const api = { reviewConsultation } as unknown as DesktopAPI;
+  render(
+    <ConsultationPanel
+      api={api}
+      run={{
+        ...planned,
+        approvedLineup: {
+          ...planned.approvedLineup!,
+          entries: [
+            { id: "rafi", phase: "building", purpose: "Check architecture" },
+          ],
+        },
+      }}
+      phase="building"
+      onUpdated={vi.fn()}
+    />,
+  );
+  expect(
+    screen.getByRole("region", { name: "Pre-build consultations" }),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText(/does not include source files or interrupt active work/),
+  ).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Review consultation" }));
+  expect(
+    await screen.findByText('{"plan":"Sketch checkout"}'),
+  ).toBeInTheDocument();
+  expect(reviewConsultation).toHaveBeenCalledWith("run", "rafi");
+});
+
 it("shows the exact upload and requires a fresh checkbox before one request", async () => {
   const reviewConsultation = vi.fn().mockResolvedValue({
     token: "ticket",

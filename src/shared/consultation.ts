@@ -3,7 +3,7 @@ import type { CharacterId } from "./character-catalog";
 export type SpecialistConsultation = {
   id: string;
   specialistId: CharacterId;
-  phase: "planning" | "verification";
+  phase: "planning" | "building" | "verification";
   purpose: string;
   planRevision: string;
   artifactRevision?: string;
@@ -19,7 +19,7 @@ export type ConsultationReview = {
   token: string;
   runId: string;
   specialistId: CharacterId;
-  phase: "planning" | "verification";
+  phase: "planning" | "building" | "verification";
   context: string;
   contextRevision: string;
   planRevision: string;

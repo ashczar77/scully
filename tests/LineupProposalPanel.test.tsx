@@ -7,6 +7,47 @@ import {
   starterRoster,
 } from "../src/shared/fixed-teams";
 
+it("lets the user approve Pearl's work roles or choose saved alternatives without cost clutter", () => {
+  const onApprove = vi.fn();
+  render(
+    <LineupProposalPanel
+      proposal={{
+        planRevision: "revision",
+        discardedInvalid: false,
+        suggestions: [],
+        core: {
+          builderId: "maya",
+          auditorId: "ellis",
+          testerId: "jun",
+          reason:
+            "Maya and Jun can work in parallel on implementation and tests.",
+          fallback: false,
+        },
+      }}
+      team={rosterMembers({
+        ...starterRoster,
+        memberIds: [...starterRoster.memberIds, "adrian", "meryl"],
+      })}
+      onApprove={onApprove}
+    />,
+  );
+  const panel = screen.getByRole("region", { name: "Team lineup" });
+  expect(panel).toHaveTextContent("Does this lineup look right?");
+  expect(panel).not.toHaveTextContent("Core run:");
+  fireEvent.click(within(panel).getByRole("button", { name: "Adrian" }));
+  fireEvent.click(within(panel).getByRole("button", { name: "Meryl" }));
+  fireEvent.click(within(panel).getByRole("button", { name: "No tester" }));
+  expect(panel).not.toHaveTextContent("Core run:");
+  fireEvent.click(
+    within(panel).getByRole("button", { name: "Approve team for this plan" }),
+  );
+  expect(onApprove).toHaveBeenCalledWith([], {
+    builderId: "adrian",
+    auditorId: "meryl",
+    testerId: null,
+  });
+});
+
 it("shows task reasons and whether a suggested specialist belongs to the saved team", () => {
   render(
     <LineupProposalPanel
@@ -31,11 +72,10 @@ it("shows task reasons and whether a suggested specialist belongs to the saved t
   expect(sloane).toHaveTextContent("Map the first-run flow");
   expect(kiran).toHaveTextContent("Outside saved team");
   expect(kiran).toHaveTextContent("verification");
-  expect(panel).toHaveTextContent("No specialist is dispatched");
-  expect(panel).toHaveTextContent("separate scope, cost and permission review");
+  expect(panel).not.toHaveTextContent("permission review");
 });
 
-it("shows an empty recommendation and an invalid-output warning without dispatch controls", () => {
+it("shows an empty recommendation without internal validation noise", () => {
   render(
     <LineupProposalPanel
       proposal={{
@@ -49,7 +89,7 @@ it("shows an empty recommendation and an invalid-output warning without dispatch
   expect(
     screen.getByText(/No additional specialist recommended/),
   ).toBeInTheDocument();
-  expect(screen.getByRole("alert")).toHaveTextContent("discarded");
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(screen.queryByRole("button")).not.toBeInTheDocument();
 });
 

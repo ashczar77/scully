@@ -6,7 +6,13 @@ import type { Task, Teammate } from "../shared/contracts";
 import { answerQuestion } from "./answer";
 import { consultSpecialist } from "./consult";
 import { trackedModel } from "./usage-tracking";
+import { modelForActor } from "../shared/role-models";
+import { RequestPauseGate } from "./request-pause";
+import { writeFileSync } from "node:fs";
 const port = process.parentPort;
+const pauseGate = new RequestPauseGate((id) =>
+  port.postMessage({ pauseReached: id }),
+);
 const acknowledgments = new Map<
   string,
   { resolve: () => void; reject: () => void }
@@ -21,8 +27,25 @@ port.on(
       usageAcknowledged?: unknown;
       usageRejected?: unknown;
       usageOutputTokens?: unknown;
+      pauseRequested?: unknown;
+      resumePause?: unknown;
     };
   }) => {
+    if (typeof data?.pauseRequested === "string") {
+      try {
+        pauseGate.request(data.pauseRequested);
+      } catch {
+        /* The privileged manager rejects duplicate pause requests. */
+      }
+    }
+    if (typeof data?.resumePause === "string") {
+      try {
+        pauseGate.resume(data.resumePause);
+        port.postMessage({ pauseReleased: data.resumePause });
+      } catch {
+        /* A stale resume cannot release the current pause. */
+      }
+    }
     if (
       Number.isSafeInteger(data?.usageOutputTokens) &&
       (data.usageOutputTokens as number) >= 512 &&
@@ -77,20 +100,52 @@ port.once(
       run: Run;
       task: Task;
       team: Teammate[];
-      config: SessionConfig;
+      config: SessionConfig & { planningTemperature?: number };
       outputRoot: string;
+      rawCapturePath?: string;
     };
   }) => {
     try {
       activeConfig = data.config;
-      const provider = nebiusModel(data.config);
-      const model = trackedModel(
+      let captured = false;
+      const provider = nebiusModel(
+        data.config,
+        fetch,
+        data.rawCapturePath
+          ? (value) => {
+              if (captured) return;
+              captured = true;
+              try {
+                writeFileSync(data.rawCapturePath!, JSON.stringify(value), {
+                  flag: "wx",
+                  mode: 0o600,
+                });
+                port.postMessage({ rawCaptureSaved: true });
+              } catch {
+                port.postMessage({ rawCaptureFailed: true });
+              }
+            }
+          : undefined,
+      );
+      const tracked = trackedModel(
         provider,
         data.config,
         (message) => port.postMessage(message),
         waitForAck,
         (metric) => port.postMessage({ metric }),
       );
+      const model = {
+        complete: (request: import("./provider").Completion) =>
+          tracked.complete({
+            ...request,
+            model: modelForActor(
+              data.run?.roleModels,
+              request.actor,
+              data.team || [],
+              data.config.model,
+            ),
+          }),
+      };
       if (data.replyContext !== undefined) {
         port.postMessage({
           answer: await answerQuestion(data.replyContext, model, () =>
@@ -124,6 +179,7 @@ port.once(
             model,
             data.outputRoot,
             (run) => port.postMessage({ run }),
+            pauseGate,
           );
       port.postMessage({ run: result, done: true });
     } catch {

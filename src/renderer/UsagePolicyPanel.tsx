@@ -47,10 +47,10 @@ export function UsagePolicyPanel({
     setEarlyReviews(current.earlyReviews);
     setApprovedIncrease(false);
   }, [run.usagePolicy, run.id]);
-  const stable = ["prepared", "planned"].includes(run.status);
+  const stable = ["prepared", "planned", "awaiting_input"].includes(run.status);
   const enabled = stable && !!session?.configured && !busy;
   const minimum = requiredCalls(run, mode);
-  const model = session?.model || current.model;
+  const model = current.model || session?.model || "";
   const preview = (choice: UsagePolicyChoice) =>
     chooseUsagePolicy(run, mode, model, choice);
   async function apply(choice: UsagePolicyChoice, approved: boolean) {
@@ -112,10 +112,11 @@ export function UsagePolicyPanel({
         writer reviews {current.earlyReviews ? "on" : "off"}.
       </p>
       <p className="muted">
-        Model: {current.model || model || "configure a session first"}. Presets
-        keep the configured model; its catalog and price have not been verified
-        here. Specialist audits and read-only replies require their own approval
-        and have separate request limits.
+        Pearl: {current.model || model || "configure a session first"}. Other
+        teammates use their saved model choices from Settings. Presets keep
+        these choices; catalog access and price have not been verified here.
+        Specialist consultations and read-only replies require their own
+        approval and have separate request limits.
       </p>
       {stable && (
         <>
@@ -182,7 +183,7 @@ export function UsagePolicyPanel({
               <input
                 type="number"
                 min={minimum + (earlyReviews ? 2 : 0)}
-                max={run.correction ? 2 : 6}
+                max={run.correction ? 2 : 16}
                 step={1}
                 value={requestCeiling}
                 onChange={(e) => setRequestCeiling(Number(e.target.value))}

@@ -7,6 +7,8 @@ import {
   session,
   dialog,
   Notification,
+  clipboard,
+  shell,
 } from "electron";
 import { join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -16,8 +18,11 @@ import { RunManager } from "./run-manager";
 import { readSource } from "./source";
 import { ExecutionManager } from "./execution-manager";
 import { ApplyManager } from "./apply-manager";
-import { inspectLocalArtifacts } from "./artifacts";
+import { inspectLocalArtifacts, planTaskArtifactRemoval } from "./artifacts";
 import { CloudManager } from "./cloud-manager";
+import { boundedClipboardText } from "./clipboard-text";
+import { verifyProjectRoot } from "./project-workspace";
+import { initializeGit, readGitHistory } from "./git-history";
 import { LocalMetrics, measured, type Operation } from "../shared/telemetry";
 const metrics = new LocalMetrics();
 function metricHandle(
@@ -34,6 +39,9 @@ protocol.registerSchemesAsPrivileged([
     privileges: { standard: true, secure: true, supportFetchAPI: true },
   },
 ]);
+// Scully loads its packaged UI from a local protocol. Avoid Chromium's disk
+// HTTP cache for this process; workspace data is stored separately in SQLite.
+app.commandLine.appendSwitch("disable-http-cache");
 let store: Store;
 let runs: RunManager;
 let executions: ExecutionManager;
@@ -75,8 +83,9 @@ function window() {
 }
 app
   .whenReady()
-  .then(() => {
+  .then(async () => {
     if (!ownsWorkspace) return;
+    await session.defaultSession.clearCache().catch(() => {});
     if (process.platform === "darwin") app.dock?.setIcon(appIcon);
     const root = resolve(__dirname, "renderer");
     protocol.handle("scully", (request) => {
@@ -139,9 +148,17 @@ app
       )
         throw new Error("Untrusted request");
     };
+    metricHandle("clipboard:write", (event, value: unknown) => {
+      trusted(event);
+      clipboard.writeText(boundedClipboardText(value));
+    });
     ipcMain.handle("workspace:load", (event) => {
       trusted(event);
       return store.load();
+    });
+    ipcMain.handle("task:activity", (event, id: unknown) => {
+      trusted(event);
+      return store.activityForTask(id);
     });
     ipcMain.handle("metrics:read", (event) => {
       trusted(event);
@@ -169,6 +186,26 @@ app
       trusted(event);
       return runs.reviewReply(id, messageId, recipientId);
     });
+    metricHandle("reply:route-review", (event, id, messageId) => {
+      trusted(event);
+      return runs.reviewRoutedReply(id, messageId);
+    });
+    ipcMain.handle("reply:settings", (event) => {
+      trusted(event);
+      return store.messageRoutingSettings();
+    });
+    ipcMain.handle("planning:settings", (event) => {
+      trusted(event);
+      return store.planningSettings();
+    });
+    metricHandle("planning:settings:set", (event, value) => {
+      trusted(event);
+      return store.setPlanningSettings(value);
+    });
+    metricHandle("reply:settings:set", (event, value) => {
+      trusted(event);
+      return store.setMessageRoutingSettings(value);
+    });
     metricHandle("reply:start", (event, token, approved) => {
       trusted(event);
       return runs.answerMessage(token, approved);
@@ -189,9 +226,9 @@ app
       trusted(event);
       return runs.stopConsultation(id);
     });
-    metricHandle("advice:review", (event, id, consultationId) => {
+    metricHandle("advice:review", (event, id, consultationId, answers) => {
       trusted(event);
-      return runs.reviewAdvice(id, consultationId);
+      return runs.reviewAdvice(id, consultationId, answers);
     });
     metricHandle("advice:approve", (event, token, approved) => {
       trusted(event);
@@ -205,6 +242,41 @@ app
       trusted(event);
       return store.createTask(value);
     });
+    ipcMain.handle("conversation:allowance", (event, id) => {
+      trusted(event);
+      return runs.conversationAllowance(id);
+    });
+    ipcMain.handle("conversation:review", (event, id) => {
+      trusted(event);
+      return runs.reviewConversation(id);
+    });
+    ipcMain.handle("capture:status", (event) => {
+      trusted(event);
+      return runs.rawCaptureStatus();
+    });
+    metricHandle("capture:arm", (event) => {
+      trusted(event);
+      return runs.armRawCapture();
+    });
+    ipcMain.handle("capture:read", (event) => {
+      trusted(event);
+      return runs.readRawCapture();
+    });
+    metricHandle("capture:clear", (event) => {
+      trusted(event);
+      return runs.clearRawCapture();
+    });
+    metricHandle("conversation:approve", (event, id, token, approved) => {
+      trusted(event);
+      return runs.approveConversation(id, token, approved);
+    });
+    metricHandle(
+      "conversation:auto-answer",
+      (event, id, messageId, recipientId) => {
+        trusted(event);
+        return runs.autoAnswerMessage(id, messageId, recipientId);
+      },
+    );
     metricHandle("task:update", (event, id: unknown, value: unknown) => {
       trusted(event);
       return store.updateTask(id, value);
@@ -213,6 +285,39 @@ app
       trusted(event);
       return store.deleteTask(id);
     });
+    ipcMain.handle("task:disposition", (event, id: unknown) => {
+      trusted(event);
+      return store.taskDisposition(id);
+    });
+    metricHandle("task:archive", (event, id: unknown) => {
+      trusted(event);
+      return store.archiveTask(id);
+    });
+    metricHandle("task:restore", (event, id: unknown) => {
+      trusted(event);
+      return store.restoreTask(id);
+    });
+    metricHandle(
+      "task:permanent-delete",
+      (event, id: unknown, title: unknown) => {
+        trusted(event);
+        // Validate the task and confirmation before inspecting private files.
+        const disposition = store.taskDisposition(id);
+        const archived = store.archivedTasks().find((task) => task.id === id);
+        if (
+          disposition.reason !== "archived" ||
+          !archived ||
+          title !== archived.title
+        )
+          throw new Error("Archived task title confirmation does not match");
+        const cleanup = planTaskArtifactRemoval(
+          app.getPath("userData"),
+          store.runs(id),
+        );
+        const result = store.permanentlyDeleteArchivedTask(id, title);
+        return { ...result, privateArtifacts: cleanup() };
+      },
+    );
     metricHandle("teammate:update", (event, value: unknown) => {
       trusted(event);
       return store.updateTeammate(value);
@@ -246,9 +351,40 @@ app
       if (result.canceled) return null;
       return runs.select(await readSource(result.filePaths[0]));
     });
-    metricHandle("run:prepare", (event, taskId, sourceId, paths) => {
+    metricHandle("run:prepare", (event, taskId, sourceId, paths, mode) => {
       trusted(event);
-      return runs.prepare(taskId, sourceId, paths);
+      return runs.prepare(taskId, sourceId, paths, mode);
+    });
+    metricHandle("project:choose", async (event, id) => {
+      trusted(event);
+      const result = await dialog.showOpenDialog(win!, {
+        title: "Choose or create the project folder",
+        properties: ["openDirectory", "createDirectory"],
+      });
+      if (result.canceled) return null;
+      return runs.chooseProjectWorkspace(id, result.filePaths[0]);
+    });
+    metricHandle("project:open", async (event, id) => {
+      trusted(event);
+      const binding = store.getRun(id).projectWorkspace;
+      if (!binding) throw new Error("Choose a project folder first");
+      verifyProjectRoot(binding);
+      const failure = await shell.openPath(binding.path);
+      if (failure) throw new Error("Could not open the project folder");
+    });
+    metricHandle("git:history", (event, id) => {
+      trusted(event);
+      const binding = store.getRun(id).projectWorkspace;
+      if (!binding) return { state: "no-project" };
+      verifyProjectRoot(binding);
+      return readGitHistory(binding.path);
+    });
+    metricHandle("git:init", (event, id) => {
+      trusted(event);
+      const binding = store.getRun(id).projectWorkspace;
+      if (!binding) throw new Error("Choose a project folder first");
+      verifyProjectRoot(binding);
+      return initializeGit(binding.path);
     });
     ipcMain.handle("run:list", (event, taskId) => {
       trusted(event);
@@ -293,6 +429,14 @@ app
     ipcMain.handle("session:info", (event) => {
       trusted(event);
       return runs.session();
+    });
+    metricHandle("models:roles", (event) => {
+      trusted(event);
+      return runs.roleModelSettings();
+    });
+    metricHandle("models:roles:set", (event, value) => {
+      trusted(event);
+      return runs.setRoleModelSettings(value);
     });
     ipcMain.handle("cloud:session", (event) => {
       trusted(event);
@@ -357,17 +501,66 @@ app
       trusted(event);
       return runs.configure(value);
     });
+    metricHandle("session:models", (event) => {
+      trusted(event);
+      return runs.listModels();
+    });
+    metricHandle("run:model", (event, id, model) => {
+      trusted(event);
+      return runs.selectRunModel(id, model);
+    });
+    metricHandle("session:model", (event, model) => {
+      trusted(event);
+      return runs.selectDefaultModel(model);
+    });
+    metricHandle("room:planning-message", (event, id, text) => {
+      trusted(event);
+      return runs.sendPlanningMessage(id, text);
+    });
+    metricHandle("room:planning-retry", (event, id) => {
+      trusted(event);
+      return runs.retryPlanning(id);
+    });
+    metricHandle(
+      "room:conversation-message",
+      (event, id, text, recipientId) => {
+        trusted(event);
+        return runs.sendConversationMessage(id, text, recipientId);
+      },
+    );
+    metricHandle(
+      "room:conversation-answer",
+      (event, id, messageId, recipientId) => {
+        trusted(event);
+        return runs.answerConversationMessage(id, messageId, recipientId);
+      },
+    );
     metricHandle("run:start", (event, id, approved) => {
       trusted(event);
       return runs.start(id, approved);
     });
-    metricHandle("lineup:approve", (event, id, revision, entries, approved) => {
+    metricHandle("room:build-answer", (event, id, questionId, answer) => {
       trusted(event);
-      return runs.approveLineup(id, revision, entries, approved);
+      return runs.answerBuildQuestion(id, questionId, answer);
     });
+    metricHandle(
+      "lineup:approve",
+      (event, id, revision, entries, approved, core) => {
+        trusted(event);
+        return runs.approveLineup(id, revision, entries, approved, core);
+      },
+    );
     metricHandle("run:stop", (event, id) => {
       trusted(event);
       return runs.stop(id);
+    });
+    metricHandle("run:pause", (event, id) => {
+      trusted(event);
+      return runs.requestRunPause(id);
+    });
+    metricHandle("run:resume-pause", (event, id, pauseId) => {
+      trusted(event);
+      return runs.resumeRunPause(id, pauseId);
     });
     metricHandle(
       "command:decide",

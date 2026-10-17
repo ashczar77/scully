@@ -18,11 +18,11 @@ it("shows the actual requests for builder, tester and independent auditor", () =
     auditor: "Ellis",
     reserves: [],
     requiredRequests: 4,
-    requestCeiling: 4,
+    requestCeiling: 8,
     outputTokensPerRequest: 2048,
     rateStatus: "verified",
   });
-  expect(plan.planningEstimateNanoUsd).toBe(4 * 2048 * 4400);
+  expect(plan.planningEstimateNanoUsd).toBe(8 * 2048 * 4400);
   expect(previewTeamRun(initialTeam, "work", session, now)).toMatchObject({
     requiredRequests: 3,
     requestCeiling: 4,
@@ -37,7 +37,7 @@ it("shows Pearl as the fixed-cast planner without adding a request", () => {
     builder: "Maya",
     reserves: [],
     requiredRequests: 4,
-    requestCeiling: 4,
+    requestCeiling: 8,
     phases: [
       { id: "planning", member: "Pearl", requiredRequests: 1 },
       { id: "building", member: "Maya", requiredRequests: 1 },

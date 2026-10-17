@@ -11,6 +11,10 @@ import {
 import {
   ArrowLeft,
   ArrowRight,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Check,
   GitBranch,
   LayoutGrid,
@@ -45,7 +49,12 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import type { DesktopAPI, Teammate, Workspace } from "../shared/contracts";
+import type {
+  DesktopAPI,
+  Task,
+  Teammate,
+  Workspace,
+} from "../shared/contracts";
 import {
   characterById,
   characterCatalog,
@@ -60,17 +69,31 @@ import { runRole } from "../shared/teams";
 import { Portrait } from "./Portrait";
 import scullyLogo from "../../assets/branding/scully-friendly-nerd-transparent-v1.png";
 import { RunPanel, ConnectionSettings } from "./RunPanel";
+import { TeammateModelSettings } from "./TeammateModelSettings";
 import { MetricsPanel } from "./MetricsPanel";
 import { StoragePanel } from "./StoragePanel";
 import { RunSettings } from "./RunSettings";
+import { MessageSettings } from "./MessageSettings";
+import { PlanningSettings } from "./PlanningSettings";
 import { TeamPreview } from "./TeamPreview";
-import type { SessionInfo } from "../shared/runs";
+import {
+  RoomConversation,
+  RoomFiles,
+  type ProjectFilePreview,
+} from "./RoomConversation";
+import { FilePreview } from "./FilePreview";
+import { TaskPlan } from "./TaskPlan";
+import { ScrollPanel } from "./ScrollPanel";
+import { DiagnosticsPanel } from "./DiagnosticsPanel";
+import type { Run, SessionInfo } from "../shared/runs";
 
-type Page = "Room" | "Changes" | "Preview" | "Settings" | "Profile";
-type SettingsSection = "team" | "run" | "app";
+type Page =
+  "Room" | "Task" | "Changes" | "Preview" | "Settings" | "Profile" | "File";
+type SettingsSection = "team" | "run" | "messages" | "app";
 const settingsSections = [
   { id: "team", label: "Team", icon: Users },
   { id: "run", label: "Run usage", icon: Gauge },
+  { id: "messages", label: "Messages", icon: MessageSquare },
   { id: "app", label: "App & connection", icon: PlugZap },
 ] as const;
 const rosterGroups = [
@@ -107,6 +130,7 @@ const rosterGroups = [
 ] as const;
 const navigation = [
   { name: "Room", icon: MessageSquare },
+  { name: "Task", icon: BookText },
   { name: "Changes", icon: GitBranch },
   { name: "Preview", icon: Monitor },
   { name: "Settings", icon: Settings2 },
@@ -147,6 +171,18 @@ function savedPanelWidths(): PanelWidths {
     // Layout storage is optional and may be unavailable or malformed.
   }
   return panelDefaults;
+}
+function usePanelContent(collapsed: boolean) {
+  const [visible, setVisible] = useState(!collapsed);
+  useEffect(() => {
+    if (!collapsed) {
+      setVisible(true);
+      return;
+    }
+    const timer = window.setTimeout(() => setVisible(false), 240);
+    return () => window.clearTimeout(timer);
+  }, [collapsed]);
+  return visible;
 }
 function Modal({
   title,
@@ -386,10 +422,19 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [error, setError] = useState("");
   const [page, setPage] = useState<Page>("Room");
+  const [filePreview, setFilePreview] = useState<ProjectFilePreview | null>(
+    null,
+  );
+  const [fileReturnPage, setFileReturnPage] = useState<Page>("Room");
   const [settingsSection, setSettingsSection] =
     useState<SettingsSection>("team");
   const [personId, setPersonId] = useState("ellis");
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [roomDraft, setRoomDraft] = useState("");
+  const [pendingBuildQuestions, setPendingBuildQuestions] = useState<
+    NonNullable<Run["pendingQuestions"]>
+  >([]);
+  const [rightPanel, setRightPanel] = useState<"team" | "files">("team");
   const [settingsRunId, setSettingsRunId] = useState<string | null>(null);
   const [newTask, setNewTask] = useState(false);
   const [taskDraft, setTaskDraft] = useState({
@@ -410,12 +455,29 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
   const [newTeamName, setNewTeamName] = useState("");
   const [taskEditing, setTaskEditing] = useState(false);
   const [taskDeleting, setTaskDeleting] = useState(false);
+  const [taskRemovalInfo, setTaskRemovalInfo] = useState<Awaited<
+    ReturnType<DesktopAPI["taskDisposition"]>
+  > | null>(null);
+  const [archivedTasksOpen, setArchivedTasksOpen] = useState(false);
+  const [archivedTaskPage, setArchivedTaskPage] = useState(0);
+  const [permanentDeleteTarget, setPermanentDeleteTarget] =
+    useState<Task | null>(null);
+  const [permanentDeleteConfirmation, setPermanentDeleteConfirmation] =
+    useState("");
   const [taskRunCount, setTaskRunCount] = useState<number | null>(null);
   const [taskViewRevision, setTaskViewRevision] = useState(0);
   const [busy, setBusy] = useState(false);
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityError, setActivityError] = useState("");
+  const [taskActivity, setTaskActivity] = useState<{
+    taskId: string;
+    activity: Workspace["activity"];
+  } | null>(null);
   const [panelWidths, setPanelWidths] = useState(savedPanelWidths);
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [rightCollapsed, setRightCollapsed] = useState(false);
+  const leftContentVisible = usePanelContent(leftCollapsed);
+  const rightContentVisible = usePanelContent(rightCollapsed);
   const [availableWidth, setAvailableWidth] = useState(() => window.innerWidth);
   const displayPanelWidths = clampPanelWidths(panelWidths, availableWidth);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -503,6 +565,47 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
     };
   }, [api]);
   useEffect(() => {
+    if (!api || !taskId) return;
+    let active = true;
+    void api.taskActivity(taskId).then(
+      (activity) => {
+        if (active) setTaskActivity({ taskId, activity });
+      },
+      () => {
+        if (active)
+          setActivityError("Saved activity could not be loaded for this task.");
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [api, taskId]);
+  useEffect(() => {
+    setPendingBuildQuestions([]);
+    if (!api || !taskId) return;
+    let active = true;
+    let sawRunUpdate = false;
+    const off = api.onRun((run) => {
+      if (active && run.taskId === taskId) {
+        sawRunUpdate = true;
+        setPendingBuildQuestions(run.pendingQuestions || []);
+      }
+    });
+    void api.runs(taskId).then(
+      (runs) => {
+        if (active && !sawRunUpdate)
+          setPendingBuildQuestions(runs[0]?.pendingQuestions || []);
+      },
+      () => {
+        if (active) setPendingBuildQuestions([]);
+      },
+    );
+    return () => {
+      active = false;
+      off();
+    };
+  }, [api, taskId]);
+  useEffect(() => {
     if (
       !api ||
       (!newTask && !(page === "Settings" && settingsSection === "team"))
@@ -536,6 +639,11 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
       </div>
     );
   const task = workspace.tasks.find((t) => t.id === taskId);
+  const visibleActivity = task
+    ? taskActivity?.taskId === task.id
+      ? taskActivity.activity
+      : { byTeammate: {}, scannedRuns: 0, partial: false }
+    : workspace.activity;
   const savedTeams = workspace.savedTeams || [
     {
       id: "legacy-default",
@@ -560,6 +668,15 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
   const visibleTeam = page === "Settings" ? defaultTeam : taskTeam;
   const team = visibleTeam.members;
   const person = team.find((t) => t.id === personId) || team[0];
+  function beginNewTask() {
+    setError("");
+    setNewTask(false);
+    setTaskId(null);
+    setRoomDraft("");
+    setSettingsRunId(null);
+    setPage("Room");
+    setRightPanel("team");
+  }
   async function createTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -655,6 +772,96 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
       setBusy(false);
     }
   }
+  async function openTaskRemoval() {
+    if (!task) return;
+    setError("");
+    setTaskRemovalInfo(null);
+    setTaskDeleting(true);
+    try {
+      setTaskRemovalInfo(await api!.taskDisposition(task.id));
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Could not inspect this task.",
+      );
+    }
+  }
+  async function archiveTask() {
+    if (!task) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api!.archiveTask(task.id);
+      setWorkspace(await api!.load());
+      setTaskId(null);
+      setSettingsRunId(null);
+      setTaskDeleting(false);
+      setPage("Room");
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Could not archive this task.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function restoreTask(id: string) {
+    setBusy(true);
+    setError("");
+    try {
+      await api!.restoreTask(id);
+      setWorkspace(await api!.load());
+      setArchivedTasksOpen(false);
+      setTaskId(id);
+      setPage("Room");
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Could not restore this task.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function permanentlyDeleteArchivedTask() {
+    if (
+      !permanentDeleteTarget ||
+      permanentDeleteConfirmation !== permanentDeleteTarget.title
+    )
+      return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api!.permanentlyDeleteArchivedTask(
+        permanentDeleteTarget.id,
+        permanentDeleteConfirmation,
+      );
+      const refreshed = await api!.load();
+      setWorkspace(refreshed);
+      setArchivedTaskPage((page) =>
+        Math.min(
+          page,
+          Math.max(
+            0,
+            Math.ceil((refreshed.archivedTasks?.length || 0) / 10) - 1,
+          ),
+        ),
+      );
+      setPermanentDeleteTarget(null);
+      setPermanentDeleteConfirmation("");
+      if (result.privateArtifacts.failed > 0)
+        setError(
+          "The task records were deleted, but some private files could not be removed. Check local storage in Settings.",
+        );
+      else if (!refreshed.archivedTasks?.length) setArchivedTasksOpen(false);
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not permanently delete this task.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
   function openRosterEditor() {
     setError("");
     setRosterDraft(
@@ -728,8 +935,13 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
     setActivityLoading(true);
     setActivityError("");
     try {
-      const refreshed = await api!.load();
-      setWorkspace((w) => w && { ...w, activity: refreshed.activity });
+      if (task) {
+        const activity = await api!.taskActivity(task.id);
+        setTaskActivity({ taskId: task.id, activity });
+      } else {
+        const refreshed = await api!.load();
+        setWorkspace((w) => w && { ...w, activity: refreshed.activity });
+      }
     } catch {
       setActivityError("Saved activity could not be refreshed. Try again.");
     } finally {
@@ -882,89 +1094,134 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
         ref={gridRef}
         style={
           {
-            "--task-panel-width": `${displayPanelWidths.task}px`,
-            "--team-panel-width": `${displayPanelWidths.team}px`,
+            "--task-panel-width": `${leftCollapsed ? 60 : displayPanelWidths.task}px`,
+            "--team-panel-width": `${rightCollapsed ? 60 : displayPanelWidths.team}px`,
+            "--task-divider-width": leftCollapsed ? "0px" : "6px",
+            "--team-divider-width": rightCollapsed ? "0px" : "6px",
           } as CSSProperties
         }
       >
-        <aside className="project-sidebar">
-          <div className="project-heading">
-            <span className="project-mark">
-              <img src={scullyLogo} alt="Scully alien head" />
-            </span>
-            <div>
-              <strong>Scully home</strong>
-              <small>Tasks and team</small>
-            </div>
-          </div>
+        <aside
+          className={`project-sidebar ${leftCollapsed ? "panel-collapsed" : ""}`}
+        >
           <button
-            className="new-task"
-            onClick={() => {
-              setError("");
-              setNewTask(true);
-            }}
+            className="panel-collapse-button"
+            aria-label={
+              leftCollapsed ? "Expand task list" : "Collapse task list"
+            }
+            title={leftCollapsed ? "Expand task list" : "Collapse task list"}
+            aria-expanded={!leftCollapsed}
+            onClick={() => setLeftCollapsed((current) => !current)}
           >
-            <Plus size={17} /> New task <span>↗</span>
-          </button>
-          <div className="sidebar-label">HOME</div>
-          <button
-            className={`sidebar-item ${taskId === null ? "selected" : ""}`}
-            onClick={() => {
-              setTaskId(null);
-              setSettingsRunId(null);
-              setPage("Room");
-            }}
-          >
-            <LayoutGrid size={17} /> Overview
-          </button>
-          <div className="sidebar-label task-label">
-            YOUR TASKS <span>{workspace.tasks.length}</span>
-          </div>
-          <div className="task-list">
-            {workspace.tasks.length === 0 ? (
-              <p className="quiet-note">No tasks yet. Create one to begin.</p>
+            {leftCollapsed ? (
+              <PanelLeftOpen size={20} />
             ) : (
-              workspace.tasks.map((t) => (
+              <PanelLeftClose size={18} />
+            )}
+          </button>
+          {leftContentVisible && (
+            <>
+              <ScrollPanel
+                as="div"
+                className="project-sidebar-content"
+                inert={leftCollapsed}
+                aria-hidden={leftCollapsed}
+              >
+                <div className="project-heading">
+                  <span className="project-mark">
+                    <img src={scullyLogo} alt="Scully alien head" />
+                  </span>
+                  <div>
+                    <strong>Scully home</strong>
+                    <small>Tasks and team</small>
+                  </div>
+                </div>
+                <button className="new-task" onClick={beginNewTask}>
+                  <Plus size={17} /> New task <span>↗</span>
+                </button>
+                <div className="sidebar-label">HOME</div>
                 <button
-                  key={t.id}
-                  className={`sidebar-item task-item ${taskId === t.id ? "selected" : ""}`}
+                  className={`sidebar-item ${taskId === null ? "selected" : ""}`}
                   onClick={() => {
-                    setTaskId(t.id);
+                    setTaskId(null);
+                    setRoomDraft("");
                     setSettingsRunId(null);
                     setPage("Room");
                   }}
                 >
-                  <MessageSquare size={15} />
-                  <span>{t.title}</span>
+                  <LayoutGrid size={17} /> Overview
                 </button>
-              ))
-            )}
-          </div>
-          {task && (
-            <div className="current-task">
-              <span className="eyebrow">SAVED TASK</span>
-              <h3>{task.title}</h3>
-              {task.description && <p>{task.description}</p>}
-              <small>Run status is shown in the task room.</small>
-            </div>
+                <div className="sidebar-label task-label">
+                  YOUR TASKS <span>{workspace.tasks.length}</span>
+                </div>
+                <div className="task-list">
+                  {workspace.tasks.length === 0 ? (
+                    <p className="quiet-note">
+                      No tasks yet. Create one to begin.
+                    </p>
+                  ) : (
+                    workspace.tasks.map((t) => (
+                      <button
+                        key={t.id}
+                        className={`sidebar-item task-item ${taskId === t.id ? "selected" : ""}`}
+                        onClick={() => {
+                          setTaskId(t.id);
+                          setRoomDraft("");
+                          setSettingsRunId(null);
+                          setPage("Room");
+                        }}
+                      >
+                        <MessageSquare size={15} />
+                        <span>{t.title}</span>
+                      </button>
+                    ))
+                  )}
+                </div>
+                {!!workspace.archivedTasks?.length && (
+                  <button
+                    className="sidebar-item"
+                    onClick={() => {
+                      setError("");
+                      setArchivedTaskPage(0);
+                      setArchivedTasksOpen(true);
+                    }}
+                  >
+                    Archived tasks ({workspace.archivedTasks.length})
+                  </button>
+                )}
+                {task && (
+                  <div className="current-task">
+                    <span className="eyebrow">SAVED TASK</span>
+                    <h3>{task.title}</h3>
+                    {task.description && <p>{task.description}</p>}
+                    <small>Run status is shown in the task room.</small>
+                  </div>
+                )}
+                <div className="permission-card">
+                  <ShieldCheck size={18} />
+                  <div>
+                    <strong>You stay in control</strong>
+                    <small>
+                      Local commands require fresh approval.
+                      <br />
+                      Publishing is not available yet.
+                    </small>
+                  </div>
+                </div>
+              </ScrollPanel>
+              <div
+                className="sidebar-footer"
+                inert={leftCollapsed}
+                aria-hidden={leftCollapsed}
+              >
+                <span className="dot muted-dot" /> Local workspace{" "}
+                <span>v0.2</span>
+              </div>
+            </>
           )}
-          <div className="permission-card">
-            <ShieldCheck size={18} />
-            <div>
-              <strong>You stay in control</strong>
-              <small>
-                Local commands require fresh approval.
-                <br />
-                Publishing is not available yet.
-              </small>
-            </div>
-          </div>
-          <div className="sidebar-footer">
-            <span className="dot muted-dot" /> Local workspace <span>v0.2</span>
-          </div>
         </aside>
         <div
-          className="panel-divider"
+          className={`panel-divider ${leftCollapsed ? "divider-hidden" : ""}`}
           role="separator"
           aria-label="Resize task panel"
           aria-orientation="vertical"
@@ -983,94 +1240,99 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
           onPointerCancel={() => (draggingPanel.current = null)}
           onLostPointerCapture={() => (draggingPanel.current = null)}
         />
-        <main className="main-panel">
-          {page === "Room" && (
-            <>
-              <div className="room-heading">
-                <div>
-                  <span className="eyebrow">LET’S BUILD SOMETHING GOOD</span>
-                  <h1>
-                    Team room<span className="heading-dot">.</span>
-                  </h1>
-                  <p>{task?.title || "Your tasks and team, in one place."}</p>
-                </div>
-                <span className="team-count">
-                  <Users size={16} /> {team.length}{" "}
-                  {team.length === 1 ? "teammate" : "teammates"}
-                </span>
-              </div>
-              {task ? (
-                <>
-                  <div className="task-actions" aria-label="Task actions">
-                    <button className="secondary" onClick={openTaskEdit}>
-                      <Pencil size={14} /> Edit task
-                    </button>
-                    <button
-                      className="secondary danger-action"
-                      onClick={() => {
-                        setError("");
-                        setTaskDeleting(true);
-                      }}
-                    >
-                      Delete task
-                    </button>
-                  </div>
-                  <div className="preview-banner">
-                    <ShieldCheck size={17} />
-                    <span>
-                      Private drafts · applying changes requires your approval.
-                    </span>
-                  </div>
-                  <RunPanel
-                    key={`${task.id}:${taskViewRevision}`}
-                    api={api!}
-                    task={task}
-                    team={team}
-                    settingsView="summary"
-                    onOpenSettings={(runId) => {
-                      setSettingsRunId(runId);
-                      setSettingsSection("run");
-                      setPage("Settings");
-                    }}
-                  />
-                </>
-              ) : (
-                <section className="room-empty" aria-label="Task overview">
-                  <span className="room-empty-icon">
-                    <LayoutGrid size={28} />
-                  </span>
-                  <span className="eyebrow">
-                    {workspace.tasks.length ? "YOUR TASKS" : "START HERE"}
-                  </span>
-                  <h2>
-                    {workspace.tasks.length
-                      ? "Choose a saved task."
-                      : "Start your first task."}
-                  </h2>
-                  <p>
-                    {workspace.tasks.length
-                      ? "Select a task in the sidebar to continue where you left off, or create another one."
-                      : "Create a task, choose a project source, then review exactly what Scully will share before any model request."}
-                  </p>
-                  <button
-                    className="primary"
-                    onClick={() => {
-                      setError("");
-                      setNewTask(true);
-                    }}
-                  >
-                    {workspace.tasks.length
-                      ? "Create another task"
-                      : "Create your first task"}
-                    <ArrowRight size={16} />
-                  </button>
-                  <small>
-                    Nothing is sent to a model until you approve a run.
-                  </small>
-                </section>
-              )}
-            </>
+        <ScrollPanel
+          key={`${page}:${taskId ?? "new-task"}`}
+          as="main"
+          className={`main-panel ${page === "Room" ? "room-panel" : ""}`}
+        >
+          {page === "File" && filePreview && (
+            <FilePreview
+              file={filePreview}
+              onBack={() => {
+                setFilePreview(null);
+                setPage(fileReturnPage);
+              }}
+            />
           )}
+          {page === "Room" && (
+            <RoomConversation
+              key={task?.id ?? "new-task"}
+              api={api!}
+              task={task || null}
+              team={team}
+              draft={roomDraft}
+              onDraftChange={setRoomDraft}
+              onCreated={(created) => {
+                setWorkspace(
+                  (current) =>
+                    current && {
+                      ...current,
+                      tasks: [created, ...current.tasks],
+                    },
+                );
+                setTaskId(created.id);
+              }}
+              onOpenTask={() => setPage("Task")}
+              onOpenProfile={(id) => {
+                setPersonId(id);
+                setPage("Profile");
+              }}
+              onOpenSettings={() => {
+                setSettingsSection("app");
+                setPage("Settings");
+              }}
+            />
+          )}
+          {page === "Task" &&
+            (task ? (
+              <>
+                <div className="room-heading">
+                  <div>
+                    <span className="eyebrow">TASK DETAILS</span>
+                    <h1>{task.title}</h1>
+                    <p>Project source, permissions, and detailed review.</p>
+                  </div>
+                </div>
+                <div className="task-actions" aria-label="Task actions">
+                  <button className="secondary" onClick={openTaskEdit}>
+                    <Pencil size={14} /> Edit task
+                  </button>
+                  <button
+                    className="secondary danger-action"
+                    onClick={() => void openTaskRemoval()}
+                  >
+                    Remove task
+                  </button>
+                </div>
+                <TaskPlan api={api!} task={task} />
+                <RunPanel
+                  key={`${task.id}:${taskViewRevision}`}
+                  api={api!}
+                  task={task}
+                  team={team}
+                  settingsView="summary"
+                  hideConversation
+                  onOpenSettings={(runId) => {
+                    setSettingsRunId(runId);
+                    setSettingsSection("run");
+                    setPage("Settings");
+                  }}
+                  onOpenMessageSettings={(runId) => {
+                    setSettingsRunId(runId);
+                    setSettingsSection("messages");
+                    setPage("Settings");
+                  }}
+                />
+              </>
+            ) : (
+              <section className="room-empty">
+                <h2>Start in the Room</h2>
+                <p>Send your first message to create a private task.</p>
+                <button className="primary" onClick={() => setPage("Room")}>
+                  Open Room
+                </button>
+              </section>
+            ))}
           {page === "Profile" && (
             <>
               <button className="back-button" onClick={() => setPage("Room")}>
@@ -1078,7 +1340,7 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
               </button>
               <Profile
                 person={person}
-                activity={workspace.activity}
+                activity={visibleActivity}
                 full
                 onRefreshActivity={refreshActivity}
                 activityLoading={activityLoading}
@@ -1095,18 +1357,29 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
                 team={team}
                 changes
                 settingsView="summary"
+                onAskPearl={() => {
+                  setRoomDraft(
+                    "Pearl, can you help me set up Git for this project? Please explain the options before making changes.",
+                  );
+                  setPage("Room");
+                }}
                 onOpenSettings={(runId) => {
                   setSettingsRunId(runId);
                   setSettingsSection("run");
+                  setPage("Settings");
+                }}
+                onOpenMessageSettings={(runId) => {
+                  setSettingsRunId(runId);
+                  setSettingsSection("messages");
                   setPage("Settings");
                 }}
               />
             ) : (
               <EmptyPage
                 icon={<GitBranch size={30} />}
-                title="A clear view of every change."
-                text="When the team starts building, review its diffs, findings and checks here before anything is applied to your project."
-                note="No changes yet. This shell does not modify project files."
+                title="Project history starts with a task."
+                text="Choose a task and its project folder to see the repository's commits and uncommitted files here."
+                note="Pearl can help you set up Git after you choose a project folder."
               />
             ))}
           {page === "Preview" && (
@@ -1155,6 +1428,9 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
               <div className="settings-content" key={settingsSection}>
                 {settingsSection === "run" && (
                   <RunSettings api={api!} task={task} runId={settingsRunId} />
+                )}
+                {settingsSection === "messages" && (
+                  <MessageSettings api={api!} />
                 )}
                 {settingsSection === "team" && (
                   <section className="settings-card" aria-label="Team settings">
@@ -1231,9 +1507,8 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
                         <button
                           className="primary"
                           onClick={() => {
-                            setNewTask(true);
+                            beginNewTask();
                             setResumeTaskSetup(false);
-                            setPage("Room");
                           }}
                         >
                           Continue task setup
@@ -1399,6 +1674,9 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
                       />
                     </section>
                     <ConnectionSettings api={api!} />
+                    <TeammateModelSettings api={api!} />
+                    <PlanningSettings api={api!} />
+                    <DiagnosticsPanel api={api!} />
                     <MetricsPanel api={api!} />
                     <StoragePanel api={api!} />
                   </>
@@ -1406,9 +1684,9 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
               </div>
             </>
           )}
-        </main>
+        </ScrollPanel>
         <div
-          className="panel-divider"
+          className={`panel-divider ${rightCollapsed ? "divider-hidden" : ""}`}
           role="separator"
           aria-label="Resize team panel"
           aria-orientation="vertical"
@@ -1427,63 +1705,157 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
           onPointerCancel={() => (draggingPanel.current = null)}
           onLostPointerCapture={() => (draggingPanel.current = null)}
         />
-        <aside className="team-sidebar">
-          <div className="section-heading">
-            <h2>{visibleTeam.name}</h2>
-            <span className="tiny-badge">
-              {team.length} {team.length === 1 ? "member" : "members"}
-            </span>
-          </div>
-          <p className="muted">
-            {task && page !== "Settings"
-              ? "Saved for this task"
-              : "Default for new tasks"}
-          </p>
+        <aside
+          className={`team-sidebar ${rightCollapsed ? "panel-collapsed" : ""}`}
+        >
           <button
-            className="team-settings-link"
-            onClick={() => {
-              setSettingsSection("team");
-              setPage("Settings");
-            }}
+            className="panel-collapse-button"
+            aria-label={
+              rightCollapsed ? "Expand team panel" : "Collapse team panel"
+            }
+            title={rightCollapsed ? "Expand team panel" : "Collapse team panel"}
+            aria-expanded={!rightCollapsed}
+            onClick={() => setRightCollapsed((current) => !current)}
           >
-            <Settings2 size={14} /> Manage team
+            {rightCollapsed ? (
+              <PanelRightOpen size={20} />
+            ) : (
+              <PanelRightClose size={18} />
+            )}
           </button>
-          <div className="team-cards">
-            {team.map((t) => (
-              <button
-                key={t.id}
-                className={`team-card ${personId === t.id ? "selected" : ""}`}
-                aria-pressed={personId === t.id}
-                onClick={() => setPersonId(t.id)}
-              >
-                <Portrait person={t} />
-                <strong>{t.name}</strong>
-                <small>
-                  {t.role === "Code auditor"
-                    ? "Auditor"
-                    : t.role === "Test engineer"
-                      ? "Tester"
-                      : t.role}
-                </small>
-              </button>
-            ))}
-          </div>
-          <Profile
-            person={person}
-            activity={workspace.activity}
-            onRefreshActivity={refreshActivity}
-            activityLoading={activityLoading}
-            activityError={activityError}
-            onOpen={() => setPage("Profile")}
-          />
-          <div className="team-footnote">
-            <CircleHelp size={15} />
-            <span>
-              Different perspectives.
-              <br />
-              One shared outcome.
-            </span>
-          </div>
+          {rightContentVisible && (
+            <ScrollPanel
+              key={`${taskId ?? "new-task"}:${rightPanel}`}
+              as="div"
+              className="team-sidebar-content"
+              inert={rightCollapsed}
+              aria-hidden={rightCollapsed}
+            >
+              <>
+                {task && page !== "Settings" && (
+                  <div
+                    className="right-panel-tabs"
+                    role="tablist"
+                    aria-label="Right panel"
+                  >
+                    <button
+                      role="tab"
+                      aria-selected={rightPanel === "team"}
+                      className={rightPanel === "team" ? "selected" : ""}
+                      onClick={() => setRightPanel("team")}
+                    >
+                      Team
+                    </button>
+                    <button
+                      role="tab"
+                      aria-selected={rightPanel === "files"}
+                      className={rightPanel === "files" ? "selected" : ""}
+                      onClick={() => setRightPanel("files")}
+                    >
+                      Files
+                    </button>
+                  </div>
+                )}
+                {task && page !== "Settings" && rightPanel === "files" ? (
+                  <RoomFiles
+                    key={task.id}
+                    api={api!}
+                    task={task}
+                    onOpenFile={(file) => {
+                      setFilePreview(file);
+                      if (page !== "File") setFileReturnPage(page);
+                      setPage("File");
+                    }}
+                  />
+                ) : (
+                  <>
+                    <div className="section-heading">
+                      <h2>{visibleTeam.name}</h2>
+                      <span className="tiny-badge">
+                        {team.length} {team.length === 1 ? "member" : "members"}
+                      </span>
+                    </div>
+                    <p className="muted">
+                      {task && page !== "Settings"
+                        ? "Saved for this task"
+                        : "Default for new tasks"}
+                    </p>
+                    <button
+                      className="team-settings-link"
+                      onClick={() => {
+                        setSettingsSection("team");
+                        setPage("Settings");
+                      }}
+                    >
+                      <Settings2 size={14} /> Manage team
+                    </button>
+                    <div className="team-cards">
+                      {team.map((t) => (
+                        <button
+                          key={t.id}
+                          className={`team-card ${personId === t.id ? "selected" : ""}`}
+                          aria-pressed={personId === t.id}
+                          aria-label={`${t.name}${pendingBuildQuestions.some((question) => question.actor === t.id && !question.answer) ? `, ${pendingBuildQuestions.filter((question) => question.actor === t.id && !question.answer).length} unanswered question` : ""}`}
+                          onClick={() => {
+                            setPersonId(t.id);
+                            if (
+                              pendingBuildQuestions.some(
+                                (question) =>
+                                  question.actor === t.id && !question.answer,
+                              )
+                            )
+                              setPage("Room");
+                          }}
+                        >
+                          <Portrait person={t} />
+                          {pendingBuildQuestions.some(
+                            (question) =>
+                              question.actor === t.id && !question.answer,
+                          ) && (
+                            <span
+                              className="team-question-badge"
+                              aria-hidden="true"
+                            >
+                              {
+                                pendingBuildQuestions.filter(
+                                  (question) =>
+                                    question.actor === t.id && !question.answer,
+                                ).length
+                              }
+                            </span>
+                          )}
+                          <strong>{t.name}</strong>
+                          <small>
+                            {t.role === "Code auditor"
+                              ? "Auditor"
+                              : t.role === "Test engineer"
+                                ? "Tester"
+                                : t.role}
+                          </small>
+                        </button>
+                      ))}
+                    </div>
+                    <Profile
+                      person={person}
+                      activity={visibleActivity}
+                      onRefreshActivity={refreshActivity}
+                      activityLoading={activityLoading}
+                      activityError={activityError}
+                      onOpen={() => setPage("Profile")}
+                    />
+                    <div className="team-footnote">
+                      <CircleHelp size={15} />
+                      <span>
+                        Different perspectives.
+                        <br />
+                        One shared outcome.
+                      </span>
+                    </div>
+                  </>
+                )}
+              </>
+            </ScrollPanel>
+          )}
         </aside>
       </div>
       {newTask && (
@@ -1666,18 +2038,45 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
       )}
       {taskDeleting && task && (
         <Modal
-          title="Delete task?"
+          title={
+            taskRemovalInfo?.reason === "saved_work"
+              ? "Archive task?"
+              : "Delete task?"
+          }
           onClose={() => !busy && setTaskDeleting(false)}
         >
-          <p>
-            Delete <strong>{task.title}</strong> and its saved runs, usage and
-            cost records? This cannot be undone.
-          </p>
-          <p className="muted">
-            This is available before model work starts. Tasks with saved work
-            keep their run and recovery records. Any existing local files and
-            files already applied to a project stay unchanged.
-          </p>
+          {!taskRemovalInfo ? (
+            <p>Checking this task's saved work...</p>
+          ) : taskRemovalInfo.reason === "saved_work" ? (
+            <>
+              <p>
+                <strong>{task.title}</strong> has saved work
+                {taskRemovalInfo.requestCount > 0
+                  ? `, including ${taskRemovalInfo.requestCount} model request${taskRemovalInfo.requestCount === 1 ? "" : "s"}`
+                  : ""}
+                . Archive it to remove it from your active tasks. Its runs,
+                usage, cost and recovery records remain available if you restore
+                it later.
+              </p>
+              <p className="muted">
+                You can start a new task immediately. Existing project files
+                stay unchanged.
+              </p>
+            </>
+          ) : taskRemovalInfo.reason === "in_flight" ? (
+            <p>Stop the current work before removing this task.</p>
+          ) : (
+            <>
+              <p>
+                Delete <strong>{task.title}</strong> and its prepared runs? This
+                cannot be undone.
+              </p>
+              <p className="muted">
+                Existing local files and files already applied to a project stay
+                unchanged.
+              </p>
+            </>
+          )}
           {error && (
             <p role="alert" className="error">
               {error}
@@ -1692,11 +2091,149 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
               Cancel
             </button>
             <button
-              className="primary danger-confirm"
+              className="secondary"
               disabled={busy}
-              onClick={deleteTask}
+              onClick={() => {
+                setTaskDeleting(false);
+                beginNewTask();
+              }}
             >
-              {busy ? "Deleting..." : "Delete task"}
+              Start new task
+            </button>
+            {taskRemovalInfo?.canArchive &&
+              taskRemovalInfo.reason === "saved_work" && (
+                <button
+                  className="primary"
+                  disabled={busy}
+                  onClick={archiveTask}
+                >
+                  {busy ? "Archiving..." : "Archive task"}
+                </button>
+              )}
+            {taskRemovalInfo?.canDelete && (
+              <button
+                className="primary danger-confirm"
+                disabled={busy}
+                onClick={deleteTask}
+              >
+                {busy ? "Deleting..." : "Delete task"}
+              </button>
+            )}
+          </div>
+        </Modal>
+      )}
+      {archivedTasksOpen && !permanentDeleteTarget && (
+        <Modal
+          title="Archived tasks"
+          onClose={() => !busy && setArchivedTasksOpen(false)}
+        >
+          <p className="muted">
+            Archived tasks keep their runs and usage records. Restore a task to
+            return to its Room. Choose Delete forever to remove its local task
+            records and attributable private files.
+          </p>
+          <div className="archived-task-list">
+            {(workspace.archivedTasks || [])
+              .slice(archivedTaskPage * 10, archivedTaskPage * 10 + 10)
+              .map((item) => (
+                <div className="archived-task-row" key={item.id}>
+                  <span>{item.title}</span>
+                  <button
+                    className="secondary"
+                    disabled={busy}
+                    onClick={() => void restoreTask(item.id)}
+                  >
+                    Restore
+                  </button>
+                  <button
+                    className="secondary danger-action"
+                    disabled={busy}
+                    onClick={() => {
+                      setError("");
+                      setPermanentDeleteConfirmation("");
+                      setPermanentDeleteTarget(item);
+                    }}
+                  >
+                    Delete forever
+                  </button>
+                </div>
+              ))}
+          </div>
+          <div className="dialog-actions">
+            <button
+              className="secondary"
+              disabled={archivedTaskPage === 0 || busy}
+              onClick={() => setArchivedTaskPage((page) => page - 1)}
+            >
+              Previous
+            </button>
+            <span>Page {archivedTaskPage + 1}</span>
+            <button
+              className="secondary"
+              disabled={
+                (archivedTaskPage + 1) * 10 >=
+                  (workspace.archivedTasks?.length || 0) || busy
+              }
+              onClick={() => setArchivedTaskPage((page) => page + 1)}
+            >
+              Next
+            </button>
+          </div>
+          {error && (
+            <p role="alert" className="error">
+              {error}
+            </p>
+          )}
+        </Modal>
+      )}
+      {permanentDeleteTarget && (
+        <Modal
+          title="Delete archived task forever?"
+          onClose={() => !busy && setPermanentDeleteTarget(null)}
+        >
+          <p>
+            Delete <strong>{permanentDeleteTarget.title}</strong>, its saved
+            runs, messages, usage, cost and recovery records? This cannot be
+            undone.
+          </p>
+          <p className="muted">
+            Scully also removes private files it can attribute to this task.
+            Files already applied to a project stay in that project. Older check
+            copies and raw captures without a verifiable owner may remain on
+            disk.
+          </p>
+          <label className="confirm-task-title">
+            Type the task title to confirm
+            <input
+              value={permanentDeleteConfirmation}
+              onChange={(event) =>
+                setPermanentDeleteConfirmation(event.target.value)
+              }
+              autoComplete="off"
+            />
+          </label>
+          {error && (
+            <p role="alert" className="error">
+              {error}
+            </p>
+          )}
+          <div className="dialog-actions">
+            <button
+              className="secondary"
+              disabled={busy}
+              onClick={() => setPermanentDeleteTarget(null)}
+            >
+              Cancel
+            </button>
+            <button
+              className="primary danger-confirm"
+              disabled={
+                busy ||
+                permanentDeleteConfirmation !== permanentDeleteTarget.title
+              }
+              onClick={() => void permanentlyDeleteArchivedTask()}
+            >
+              {busy ? "Deleting..." : "Delete forever"}
             </button>
           </div>
         </Modal>

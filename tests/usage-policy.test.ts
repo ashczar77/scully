@@ -15,7 +15,7 @@ it("uses the assigned writer count when calculating consent ceilings", () => {
   ).toBe(2);
   expect(
     defaultUsagePolicy(lean as any, "plan", "model", 2048).requestCeiling,
-  ).toBe(3);
+  ).toBe(7);
   expect(
     chooseUsagePolicy(lean, "work", "model", { preset: "thorough" })
       .requestCeiling,
@@ -55,7 +55,7 @@ it("shows exact preset ceilings for work, planning and correction journeys", () 
     chooseUsagePolicy(work, "plan", "model", { preset: "thorough" }),
   ).toMatchObject({
     outputTokens: 4096,
-    requestCeiling: 6,
+    requestCeiling: 10,
     earlyReviews: true,
   });
   expect(
@@ -97,7 +97,7 @@ it("rejects custom ceilings below required work and invalid output settings", ()
     {
       preset: "custom",
       outputTokens: 1024,
-      requestCeiling: 7,
+      requestCeiling: 17,
       earlyReviews: false,
     },
     {

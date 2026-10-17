@@ -45,7 +45,7 @@ it("applies Save tokens for the remaining requests in one click", async () => {
       onUpdate={onUpdate}
     />,
   );
-  expect(screen.getByText(/Model: model/)).toHaveTextContent(
+  expect(screen.getByText(/Pearl: model/)).toHaveTextContent(
     "price have not been verified",
   );
   fireEvent.click(
@@ -79,7 +79,7 @@ it("shows the larger Thorough allowance before one-click approval and blocks Cus
   );
   const thorough = screen.getByRole("button", { name: "Apply Thorough" });
   expect(thorough).toHaveTextContent(
-    "4096 output tokens per request, 6 coordinator requests, early reviews on. Increases allowance.",
+    "4096 output tokens per request, 10 coordinator requests, early reviews on. Increases allowance.",
   );
   fireEvent.click(thorough);
   await waitFor(() =>

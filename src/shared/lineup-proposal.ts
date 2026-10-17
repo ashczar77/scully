@@ -1,4 +1,5 @@
 import { characterById, type CharacterId } from "./character-catalog";
+import type { CoreLineup, CoreLineupProposal } from "./core-lineup";
 
 export type SpecialistPhase =
   "planning" | "building" | "verification" | "release";
@@ -11,6 +12,7 @@ export type LineupProposal = {
   planRevision: string;
   suggestions: SpecialistSuggestion[];
   discardedInvalid: boolean;
+  core?: CoreLineupProposal;
 };
 export type SpecialistLineupEntry = {
   id: CharacterId;
@@ -20,6 +22,7 @@ export type SpecialistLineupEntry = {
 export type ApprovedSpecialistLineup = {
   planRevision: string;
   entries: SpecialistLineupEntry[];
+  core?: CoreLineup;
   approvedAt: string;
 };
 

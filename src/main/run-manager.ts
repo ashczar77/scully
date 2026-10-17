@@ -1,8 +1,26 @@
 import { utilityProcess, type UtilityProcess } from "electron";
-import { mkdirSync } from "node:fs";
+import {
+  mkdirSync,
+  existsSync,
+  readdirSync,
+  unlinkSync,
+  readFileSync,
+} from "node:fs";
 import { join } from "node:path";
+import {
+  bindProjectWorkspace,
+  verifyProjectWorkspace,
+} from "./project-workspace";
 import { randomUUID, createHash } from "node:crypto";
 import { Store } from "./store";
+import {
+  defaultRoleModelSettings,
+  modelForActor,
+  parseRoleModelSettings,
+  type RoleModelSettings,
+} from "../shared/role-models";
+import { fetchModelCatalog } from "./model-catalog";
+import { planQuestions } from "../shared/plan-conversation";
 import { validUsageStart, type UsageStart } from "../shared/usage";
 import type { UsageAlert } from "../shared/usage-alerts";
 import {
@@ -16,6 +34,11 @@ import {
 import { requestLimit } from "../shared/coordination";
 import { commandRevision, lineupPlanRevision } from "../engine/revision";
 import { parseSpecialistLineup } from "../shared/lineup-proposal";
+import { applyCoreLineup, parseCoreLineup } from "../shared/core-lineup";
+import { characterById } from "../shared/character-catalog";
+import { catalogTeammate } from "../shared/fixed-teams";
+import { bindRunTeam } from "../engine/character-context";
+import { routeTeamMessage } from "../shared/message-routing";
 import {
   adviceForHandoff,
   approvedAdviceForBuild,
@@ -34,6 +57,7 @@ import {
   type TeamReply,
 } from "../shared/messages";
 import { noopSink, emitMetric, type MetricSink } from "../shared/telemetry";
+import { sanitizeRequestDiagnostic } from "../shared/request-diagnostics";
 import {
   recordFindingDecision,
   findingKey,
@@ -53,13 +77,32 @@ import {
 } from "../shared/coordination";
 import {
   validateSession,
+  type ModelOption,
   type Run,
   type SessionConfig,
   type SourceSelection,
 } from "../shared/runs";
 import type { SavedTeam } from "../shared/teams";
+import type { Task } from "../shared/contracts";
+function sourceForNextAttempt(parent: Run) {
+  if (
+    parent.workspaceMode !== "direct" ||
+    !parent.projectWorkspace?.writtenFiles?.length
+  )
+    return structuredClone(parent.files);
+  if (
+    parent.drafts.some(
+      (file) => !parent.projectWorkspace!.writtenFiles!.includes(file.path),
+    )
+  )
+    throw new Error("Inspect the partial project write before another attempt");
+  const files = new Map(parent.files.map((file) => [file.path, file.content]));
+  for (const file of parent.drafts) files.set(file.path, file.content);
+  return [...files].map(([path, content]) => ({ path, content }));
+}
 export class RunManager {
   private config: SessionConfig | null = null;
+  private modelCatalog: ModelOption[] = [];
   private selection: SourceSelection | null = null;
   private active: {
     id: string;
@@ -76,6 +119,7 @@ export class RunManager {
     replyId: string;
     acknowledged: number;
     outputTokens: number;
+    model: string;
   } | null = null;
   private activeConsult: {
     id: string;
@@ -83,8 +127,65 @@ export class RunManager {
     consultationId: string;
     acknowledged: number;
     outputTokens: number;
+    model: string;
   } | null = null;
   private replyTicket: ReplyReview | null = null;
+  private conversationGrants = new Map<
+    string,
+    {
+      scope: string;
+      model: string;
+      outputTokens: number;
+      remaining: number;
+    }
+  >();
+  private conversationTickets = new Map<
+    string,
+    { token: string; scope: string; expiresAt: number }
+  >();
+  private rawCaptureArmed = false;
+  private rawCapturePath: string | null = null;
+  rawCaptureStatus() {
+    return {
+      armed: this.rawCaptureArmed,
+      saved: !!this.rawCapturePath && existsSync(this.rawCapturePath),
+    };
+  }
+  armRawCapture() {
+    this.clearRawCapture();
+    this.rawCaptureArmed = true;
+    return this.rawCaptureStatus();
+  }
+  readRawCapture() {
+    if (!this.rawCapturePath || !existsSync(this.rawCapturePath)) return null;
+    const raw = readFileSync(this.rawCapturePath, "utf8");
+    if (raw.length > 310000)
+      throw new Error("Capture exceeds the local read limit");
+    return JSON.parse(raw) as {
+      request: string;
+      response: string | null;
+      httpStatus: number | null;
+    };
+  }
+  clearRawCapture() {
+    this.rawCaptureArmed = false;
+    if (this.rawCapturePath && existsSync(this.rawCapturePath))
+      unlinkSync(this.rawCapturePath);
+    this.rawCapturePath = null;
+    return this.rawCaptureStatus();
+  }
+  private takeRawCapturePath(runId: string) {
+    if (!this.rawCaptureArmed) return undefined;
+    this.rawCaptureArmed = false;
+    const directory = join(this.dataRoot, "request-capture");
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const owner = createHash("sha256").update(runId).digest("hex");
+    this.rawCapturePath = join(
+      directory,
+      `capture-r-${owner}-${randomUUID()}.json`,
+    );
+    return this.rawCapturePath;
+  }
   private consultTicket: ConsultationReview | null = null;
   private handoffTicket: AdviceReview | null = null;
   private usageReview: {
@@ -101,14 +202,334 @@ export class RunManager {
       value: UsageStart;
     }
   >();
+  private recordRequestDiagnostic(id: string, value: unknown) {
+    const diagnostic = sanitizeRequestDiagnostic(value);
+    if (!diagnostic) return;
+    const run = this.store.getRun(id);
+    run.diagnostics = [...(run.diagnostics || []).slice(-19), diagnostic];
+    this.store.saveRun(run);
+    this.publish(this.store.getRun(id));
+    // The record has only allowlisted metadata. Prompt and response content never reach this log.
+    console.info("[scully:model-request]", diagnostic);
+  }
+  private modelFor(run: Run) {
+    return run.model || run.usagePolicy?.model || this.config?.model || "";
+  }
+  private actorModel(run: Run, actor: string | undefined) {
+    const team = this.teamForRun(run);
+    return modelForActor(
+      run.roleModels,
+      actor,
+      team.members,
+      this.modelFor(run),
+    );
+  }
+  roleModelSettings() {
+    return this.store.roleModelSettings();
+  }
+  setRoleModelSettings(value: unknown): RoleModelSettings {
+    const settings = parseRoleModelSettings(value);
+    const allowed = new Set([
+      ...this.modelCatalog.map((option) => option.id),
+      ...Object.values(defaultRoleModelSettings).filter(
+        (item): item is string => typeof item === "string",
+      ),
+      ...Object.values(defaultRoleModelSettings.specialists),
+    ]);
+    for (const model of [
+      settings.pearl,
+      settings.builder,
+      settings.tester,
+      settings.auditor,
+      ...Object.values(settings.specialists),
+    ])
+      if (!allowed.has(model))
+        throw new Error("Choose a model from the Nebius model list");
+    return this.store.setRoleModelSettings(settings);
+  }
+  async listModels() {
+    if (!this.config) throw new Error("Configure Nebius in Settings first");
+    const options = await this.getModels(this.config.key);
+    this.modelCatalog = options;
+    return options;
+  }
+  selectRunModel(id: unknown, model: unknown): Run {
+    const run = this.store.getRun(id);
+    if (!this.config) throw new Error("Configure Nebius in Settings first");
+    if (
+      typeof model !== "string" ||
+      !this.modelCatalog.some((option) => option.id === model)
+    )
+      throw new Error("Choose a model from the Nebius model list");
+    if (run.redirectedTo)
+      throw new Error("Open the current attempt to change its model");
+    if (this.modelFor(run) === model) return run;
+    if (
+      this.activeConsult?.id === run.id ||
+      this.activeReply?.id === run.id ||
+      run.executions?.some((item) => item.status === "running")
+    )
+      throw new Error(
+        "Wait for active work to finish before changing the model",
+      );
+    this.conversationGrants.delete(run.id);
+    this.conversationTickets.delete(run.id);
+    this.replyTicket = null;
+    this.consultTicket = null;
+    this.handoffTicket = null;
+    this.usageReview = null;
+    if (run.calls > 0 || !["prepared", "planned"].includes(run.status)) {
+      if (this.active?.id === run.id) this.stop(run.id);
+      const current = this.store.getRun(run.id);
+      const team = this.teamForRun(current);
+      const task = this.store
+        .load()
+        .tasks.find((item) => item.id === run.taskId);
+      if (!task) throw new Error("Task not found");
+      const child: Run = {
+        id: randomUUID(),
+        taskId: current.taskId,
+        taskSnapshot: current.taskSnapshot,
+        teamSnapshot: team,
+        sourceName: current.sourceName,
+        workspaceMode: current.workspaceMode,
+        projectWorkspace:
+          current.projectWorkspace && structuredClone(current.projectWorkspace),
+        files: sourceForNextAttempt(current),
+        status: "prepared",
+        events: [],
+        plan: "",
+        drafts: [],
+        findings: [],
+        checks: [],
+        error: "",
+        calls: 0,
+        model,
+        roleModels: {
+          ...structuredClone(
+            current.roleModels || this.store.roleModelSettings(),
+          ),
+          pearl: model,
+        },
+        outputTokens: 0,
+        coordination: makeCoordination(team.members),
+        redirection: {
+          parentId: current.id,
+          instructions: [...(current.redirection?.instructions || [])],
+          previousPlan: current.plan,
+          previousDrafts: structuredClone(current.drafts),
+        },
+      };
+      child.usagePolicy = defaultUsagePolicy(
+        child,
+        "plan",
+        model,
+        current.usagePolicy?.outputTokens || this.config.outputTokens,
+      );
+      current.redirectedTo = child.id;
+      current.status = "stopped";
+      this.store.redirectRun(current, child);
+      this.publish(current);
+      this.publish(child);
+      return child;
+    }
+    const task = this.store.load().tasks.find((item) => item.id === run.taskId);
+    if (!task) throw new Error("Task not found");
+    run.model = model;
+    run.roleModels = {
+      ...structuredClone(run.roleModels || this.store.roleModelSettings()),
+      pearl: model,
+    };
+    run.usagePolicy = {
+      ...(run.usagePolicy ||
+        defaultUsagePolicy(run, task.mode, model, this.config.outputTokens)),
+      model,
+    };
+    run.approvedLineup = undefined;
+    this.save(run);
+    return run;
+  }
+  selectDefaultModel(model: unknown) {
+    if (!this.config)
+      throw new Error("Connect Nebius before choosing a default model");
+    if (this.active || this.activeReply || this.activeConsult)
+      throw new Error(
+        "Wait for the active request before changing the default model",
+      );
+    if (
+      typeof model !== "string" ||
+      !this.modelCatalog.some((option) => option.id === model)
+    )
+      throw new Error("Choose a model from the Nebius model list");
+    this.config = { ...this.config, model };
+    this.conversationGrants.clear();
+    this.conversationTickets.clear();
+    return this.session();
+  }
+  private conversationScope(run: Run) {
+    const task = this.store.load().tasks.find((item) => item.id === run.taskId);
+    if (!task) throw new Error("Task not found");
+    const team = this.teamForRun(run);
+    return createHash("sha256")
+      .update(
+        JSON.stringify({
+          task: {
+            title: task.title,
+            description: task.description,
+            mode: task.mode,
+          },
+          team,
+          status: run.status,
+          files: run.files,
+          plan: run.plan,
+          drafts: run.drafts,
+          findings: run.findings,
+          redirection: run.redirection,
+          model: this.modelFor(run),
+          outputTokens:
+            run.usagePolicy?.outputTokens || this.config?.outputTokens,
+        }),
+      )
+      .digest("hex");
+  }
+  conversationAllowance(id: unknown) {
+    const run = this.store.getRun(id);
+    const grant = this.conversationGrants.get(run.id);
+    const valid =
+      !!grant &&
+      !!this.config &&
+      grant.scope === this.conversationScope(run) &&
+      grant.model === this.modelFor(run) &&
+      grant.outputTokens ===
+        (run.usagePolicy?.outputTokens || this.config.outputTokens);
+    if (!valid) this.conversationGrants.delete(run.id);
+    return {
+      remaining: valid ? grant!.remaining : 0,
+      model: this.modelFor(run),
+      outputTokens:
+        run.usagePolicy?.outputTokens || this.config?.outputTokens || 2048,
+      valid,
+    };
+  }
+  reviewConversation(id: unknown) {
+    const run = this.store.getRun(id);
+    if (!this.config) throw new Error("Configure Nebius in Settings first");
+    if (
+      ![
+        "prepared",
+        "planning",
+        "planned",
+        "building",
+        "auditing",
+        "complete",
+      ].includes(run.status) ||
+      run.redirectedTo
+    )
+      throw new Error("This attempt cannot receive conversation approval");
+    if (this.activeReply || this.activeConsult)
+      throw new Error("Wait for the active reply");
+    if ((run.replies?.length || 0) >= 3)
+      throw new Error(
+        "The conversation reply limit has been reached for this attempt",
+      );
+    const ticket = {
+      token: randomUUID(),
+      scope: this.conversationScope(run),
+      expiresAt: Date.now() + 120000,
+    };
+    this.conversationTickets.set(run.id, ticket);
+    return {
+      token: ticket.token,
+      expiresAt: ticket.expiresAt,
+      remaining: Math.max(0, 3 - (run.replies?.length || 0)),
+      model: this.modelFor(run),
+      outputTokens: run.usagePolicy?.outputTokens || this.config.outputTokens,
+    };
+  }
+  approveConversation(id: unknown, token: unknown, approved: unknown) {
+    const run = this.store.getRun(id);
+    const ticket = this.conversationTickets.get(run.id);
+    this.conversationTickets.delete(run.id);
+    if (
+      approved !== true ||
+      !ticket ||
+      ticket.token !== token ||
+      Date.now() >= ticket.expiresAt ||
+      ticket.scope !== this.conversationScope(run)
+    )
+      throw new Error(
+        "Conversation review expired or the task snapshot changed. Review again.",
+      );
+    if (!this.config) throw new Error("Configure Nebius in Settings first");
+    this.conversationGrants.set(run.id, {
+      scope: ticket.scope,
+      model: this.modelFor(run),
+      outputTokens: run.usagePolicy?.outputTokens || this.config.outputTokens,
+      remaining: Math.max(0, 3 - (run.replies?.length || 0)),
+    });
+    return this.conversationAllowance(run.id);
+  }
+  autoAnswerMessage(id: unknown, messageId: unknown, recipientId?: unknown) {
+    const run = this.store.getRun(id);
+    if (
+      typeof messageId !== "string" ||
+      run.replies?.some((reply) => reply.messageId === messageId)
+    )
+      throw new Error("This message already has a reply attempt");
+    const allowance = this.conversationAllowance(run.id);
+    const grant = this.conversationGrants.get(run.id);
+    if (!allowance.valid || !grant || grant.remaining <= 0)
+      throw new Error(
+        "Review the conversation allowance before requesting another reply",
+      );
+    const initialPrompt =
+      run.status === "prepared" &&
+      run.messages?.[0]?.id === messageId &&
+      run.messages?.[0]?.text === run.taskSnapshot?.description;
+    const routed =
+      initialPrompt &&
+      this.teamForRun(run).members.some((member) => member.id === "pearl")
+        ? {
+            routing: { recipientId: "pearl", needsChoice: false },
+            review: this.reviewReply(run.id, messageId, "pearl"),
+          }
+        : recipientId === undefined
+          ? this.reviewRoutedReply(run.id, messageId)
+          : {
+              routing: { recipientId, needsChoice: false },
+              review: this.reviewReply(run.id, messageId, recipientId),
+            };
+    if (routed.routing.needsChoice || !routed.review)
+      throw new Error("Choose a teammate for this question");
+    grant.remaining--;
+    return this.answerMessage(routed.review.token, true);
+  }
   constructor(
     private store: Store,
     private dataRoot: string,
     private publish: (run: Run) => void,
     private metricSink: MetricSink = noopSink,
     private notifyUsageAlert: (alert: UsageAlert) => void = () => {},
+    private getModels: (
+      key: string,
+    ) => Promise<ModelOption[]> = fetchModelCatalog,
   ) {
     store.recoverRuns();
+    const directory = join(this.dataRoot, "request-capture");
+    if (existsSync(directory)) {
+      for (const name of readdirSync(directory)) {
+        if (
+          /^capture-[0-9a-f-]{36}\.json$/.test(name) ||
+          /^capture-r-[0-9a-f]{64}-[0-9a-f-]{36}\.json$/.test(name)
+        ) {
+          try {
+            unlinkSync(join(directory, name));
+          } catch {
+            /* Cleanup is best effort. */
+          }
+        }
+      }
+    }
   }
   private teamForRun(run: Run): SavedTeam {
     const assigned = this.store.teamForTask(run.taskId);
@@ -119,14 +540,22 @@ export class RunManager {
         run.teamSnapshot.version !== assigned.version ||
         run.teamSnapshot.createdAt !== assigned.createdAt ||
         JSON.stringify(run.teamSnapshot.members) !==
-          JSON.stringify(assigned.members))
+          JSON.stringify(assigned.members) ||
+        (run.teamSnapshot.roster &&
+          JSON.stringify(run.teamSnapshot.roster) !==
+            JSON.stringify(assigned.roster)))
     )
       throw new Error("Saved run team does not match this task");
     return assigned;
   }
   private assertCoordinationTeam(run: Run, team: SavedTeam) {
     if (!run.coordination) return;
-    const expected = makeCoordination(team.members);
+    if (run.approvedLineup?.core && !run.lineupProposal?.core)
+      throw new Error("Unreviewed work lineup");
+    const members = run.approvedLineup?.core
+      ? applyCoreLineup(team.members, run.approvedLineup.core)
+      : team.members;
+    const expected = makeCoordination(members);
     if (
       run.coordination.integrator !== expected.integrator ||
       run.coordination.auditor !== expected.auditor ||
@@ -205,6 +634,67 @@ export class RunManager {
     active.child.postMessage({ usageOutputTokens: target });
     return run;
   }
+  requestRunPause(id: unknown) {
+    const run = this.store.getRun(id);
+    const active = this.active;
+    if (
+      !active ||
+      active.id !== run.id ||
+      active.kind !== "core" ||
+      !["planning", "building", "auditing"].includes(run.status) ||
+      run.redirectedTo
+    )
+      throw new Error("No active core task can be paused");
+    if (
+      run.requestPause?.status === "requested" ||
+      run.requestPause?.status === "paused" ||
+      run.requestPause?.status === "resuming"
+    )
+      throw new Error("A pause is already pending");
+    if ((run.requestPause?.attempts || 0) >= 3)
+      throw new Error("Three pause attempts per run maximum");
+    const pause = {
+      id: randomUUID(),
+      status: "requested" as const,
+      attempts: (run.requestPause?.attempts || 0) + 1,
+      requestedAt: new Date().toISOString(),
+    };
+    const updated = this.store.updateRequestPause(run.id, pause);
+    try {
+      active.child.postMessage({ pauseRequested: pause.id });
+    } catch {
+      this.fail(run.id, "Could not request a safe pause from the task worker");
+      throw new Error("Could not request a safe pause");
+    }
+    this.publish(updated);
+    return updated;
+  }
+  resumeRunPause(id: unknown, pauseId: unknown) {
+    const run = this.store.getRun(id);
+    if (
+      !this.active ||
+      this.active.id !== run.id ||
+      this.active.kind !== "core" ||
+      !["planning", "building", "auditing"].includes(run.status) ||
+      !run.requestPause ||
+      run.requestPause.status !== "paused" ||
+      typeof pauseId !== "string" ||
+      pauseId !== run.requestPause.id
+    )
+      throw new Error("Review the current active pause before resuming");
+    const updated = this.store.updateRequestPause(run.id, {
+      ...run.requestPause,
+      status: "resuming",
+    });
+    try {
+      this.active.child.postMessage({ resumePause: pauseId });
+    } catch {
+      this.fail(run.id, "Could not resume the paused task worker");
+      throw new Error("Could not resume the paused task");
+    }
+    this.publish(updated);
+    return updated;
+  }
   private usageAlertSequence(runId: string) {
     return this.store.alertsForRun(runId).state.sequence;
   }
@@ -252,26 +742,55 @@ export class RunManager {
   }
   configureCoordination(id: unknown, value: unknown) {
     this.usageReview = null;
+    if (this.active || this.activeReply || this.activeConsult)
+      throw new Error("Wait for active work to finish");
     const run = this.store.getRun(id);
-    if (run.status !== "prepared" || run.calls !== 0 || !run.coordination)
+    const prepared = run.status === "prepared" && run.calls === 0;
+    const planned =
+      run.status === "planned" &&
+      run.calls === 1 &&
+      !!run.plan?.trim() &&
+      !run.redirectedTo &&
+      !run.consultations?.length &&
+      !run.approvedAdvice?.length;
+    if ((!prepared && !planned) || !run.coordination)
       throw new Error(
-        "Coordination settings are locked once work starts. Prepare a new run.",
+        "Coordination settings are locked after building or specialist consultation starts. Prepare a new run.",
       );
+    const task = this.store.load().tasks.find((item) => item.id === run.taskId);
+    if (!task) throw new Error("Task not found");
+    if (
+      run.taskSnapshot &&
+      (run.taskSnapshot.title !== task.title ||
+        run.taskSnapshot.description !== task.description ||
+        run.taskSnapshot.mode !== task.mode)
+    )
+      throw new Error("Task details changed. Prepare a new run");
     this.assertCoordinationTeam(run, this.teamForRun(run));
     const { settings, rules } = parseCoordinationSettings(
       value,
       run.coordination.assignments.map((assignment) => assignment.owner),
     );
+    const changed =
+      JSON.stringify(run.coordination.settings || null) !==
+        JSON.stringify(settings) ||
+      JSON.stringify(run.coordination.rules || []) !== JSON.stringify(rules);
+    if (planned && changed && run.approvedLineup?.core)
+      throw new Error(
+        "Change advanced assignments before approving the team lineup",
+      );
+    if (planned && changed) {
+      run.approvedLineup = undefined;
+      this.consultTicket = null;
+      this.handoffTicket = null;
+      this.replyTicket = null;
+    }
     run.coordination.settings = settings;
     run.coordination.rules = rules;
     if (
       run.usagePolicy &&
       run.usagePolicy.earlyReviews !== settings.chunkReviews
     ) {
-      const task = this.store
-        .load()
-        .tasks.find((item) => item.id === run.taskId);
-      if (!task) throw new Error("Task not found");
       run.usagePolicy = {
         ...run.usagePolicy,
         preset: "custom",
@@ -289,6 +808,7 @@ export class RunManager {
     revision: unknown,
     entries: unknown,
     approved: unknown,
+    core: unknown = undefined,
   ): Run {
     this.consultTicket = null;
     this.handoffTicket = null;
@@ -299,6 +819,10 @@ export class RunManager {
     const run = this.store.getRun(id);
     if (run.status !== "planned" || !run.lineupProposal)
       throw new Error("No planned specialist lineup is awaiting review");
+    if (planQuestions(run.plan).length)
+      throw new Error(
+        "Resolve Pearl's planning questions before approving the team",
+      );
     const task = this.store.load().tasks.find((item) => item.id === run.taskId);
     if (
       !task ||
@@ -313,15 +837,73 @@ export class RunManager {
     const team = this.teamForRun(run);
     this.assertCoordinationTeam(run, team);
     const selected = parseSpecialistLineup(entries);
+    if (!run.lineupProposal.core && core !== undefined)
+      throw new Error("No work lineup was proposed for this plan");
+    const selectedCore = run.lineupProposal.core
+      ? parseCoreLineup(core, team.members)
+      : undefined;
+    if (
+      selectedCore &&
+      (run.consultations?.length || run.approvedAdvice?.length) &&
+      JSON.stringify(selectedCore) !== JSON.stringify(run.approvedLineup?.core)
+    )
+      throw new Error(
+        "The work lineup is locked after specialist consultation starts",
+      );
+    if (selectedCore) {
+      const previousMinimum =
+        requiredCalls(run, task.mode) +
+        (run.usagePolicy?.earlyReviews
+          ? run.coordination?.assignments.length || 0
+          : 0);
+      const coordination = makeCoordination(
+        applyCoreLineup(team.members, selectedCore),
+      );
+      const settings = run.coordination?.settings;
+      const rules = run.coordination?.rules || [];
+      if (
+        rules.some(
+          (rule) =>
+            !coordination.assignments.some(
+              (assignment) => assignment.owner === rule.owner,
+            ),
+        )
+      )
+        throw new Error(
+          "An ownership override belongs to a different writer. Update advanced assignments first",
+        );
+      run.coordination = { ...coordination, settings, rules };
+      if (run.usagePolicy) {
+        const policy = run.usagePolicy;
+        const required =
+          requiredCalls(run, task.mode) +
+          (policy.earlyReviews ? coordination.assignments.length : 0);
+        run.usagePolicy = chooseUsagePolicy(
+          run,
+          task.mode,
+          policy.model,
+          policy.preset === "custom"
+            ? {
+                ...policy,
+                requestCeiling:
+                  policy.requestCeiling === previousMinimum
+                    ? required
+                    : Math.max(policy.requestCeiling, required),
+              }
+            : { preset: policy.preset },
+        );
+      }
+    }
     run.approvedLineup = {
       planRevision: revision as string,
       entries: selected,
+      ...(selectedCore && { core: selectedCore }),
       approvedAt: new Date().toISOString(),
     };
     run.events.push({
       actor: "system",
       at: run.approvedLineup.approvedAt,
-      text: `User approved ${selected.length} specialist ${selected.length === 1 ? "assignment" : "assignments"} for later review. No specialist request or budget change occurred.`,
+      text: `User approved the work lineup and ${selected.length} specialist ${selected.length === 1 ? "assignment" : "assignments"} for later review. No model request started.`,
     });
     this.store.saveRun(run);
     const updated = this.store.updateApprovedAdvice(run.id, []);
@@ -357,13 +939,15 @@ export class RunManager {
     const entry = entries.find((item) => item.id === specialistId);
     if (
       !entry ||
-      (entry.phase !== "planning" && entry.phase !== "verification") ||
-      (entry.phase === "planning" && run.status !== "planned") ||
+      (entry.phase !== "planning" &&
+        entry.phase !== "building" &&
+        entry.phase !== "verification") ||
+      ((entry.phase === "planning" || entry.phase === "building") &&
+        run.status !== "planned") ||
       (entry.phase === "verification" && run.status !== "complete")
     )
       throw new Error("Choose a specialist approved for this phase");
-    const phase: "planning" | "verification" =
-      entry.phase === "planning" ? "planning" : "verification";
+    const phase: "planning" | "building" | "verification" = entry.phase;
     if (run.consultations?.some((item) => item.specialistId === entry.id))
       throw new Error(
         "This specialist already received a consultation request for this run",
@@ -408,7 +992,7 @@ export class RunManager {
     const { run, task, entry, phase, context, artifactRevision } =
       this.consultationContext(id, specialistId);
     const policy = this.checkedRunPolicy(run, task.mode);
-    const cost = this.costForRun(run.id);
+    const cost = this.store.costForRun(run.id, this.actorModel(run, entry.id));
     const review: ConsultationReview = {
       token: randomUUID(),
       runId: run.id,
@@ -419,7 +1003,7 @@ export class RunManager {
       planRevision: run.lineupProposal!.planRevision,
       artifactRevision,
       expiresAt: Date.now() + 120000,
-      model: this.config.model,
+      model: this.actorModel(run, entry.id),
       outputTokens: policy.outputTokens,
       projectedNanoUsd: cost.nextProjectedNanoUsd,
       rateStatus: cost.rateStatus,
@@ -436,14 +1020,15 @@ export class RunManager {
       throw new Error("Fresh specialist upload and usage approval is required");
     if (
       !this.config ||
-      ticket.model !== this.config.model ||
+      ticket.model !==
+        this.actorModel(this.store.getRun(ticket.runId), ticket.specialistId) ||
       Date.now() >= ticket.expiresAt
     )
       throw new Error("Specialist review expired or model changed");
     const { run, task, entry, phase, context, artifactRevision } =
       this.consultationContext(ticket.runId, ticket.specialistId);
     const policy = this.checkedRunPolicy(run, task.mode);
-    const cost = this.costForRun(run.id);
+    const cost = this.store.costForRun(run.id, this.actorModel(run, entry.id));
     if (
       ticket.outputTokens !== policy.outputTokens ||
       ticket.phase !== phase ||
@@ -489,6 +1074,7 @@ export class RunManager {
       consultationId: consultation.id,
       acknowledged: 0,
       outputTokens: ticket.outputTokens,
+      model: ticket.model,
     };
     child.on(
       "message",
@@ -496,11 +1082,16 @@ export class RunManager {
         metric?: unknown;
         usageStart?: unknown;
         usageFinish?: unknown;
+        requestDiagnostic?: unknown;
         consultationStarted?: unknown;
         consultationResult?: unknown;
         failed?: boolean;
       }) => {
         if (this.activeConsult?.child !== child) return;
+        if (message.requestDiagnostic) {
+          this.recordRequestDiagnostic(run.id, message.requestDiagnostic);
+          return;
+        }
         if (message.metric) {
           emitMetric(this.metricSink, message.metric);
           return;
@@ -550,7 +1141,12 @@ export class RunManager {
     try {
       child.postMessage({
         consultContext: ticket.context,
-        config: { ...this.config, outputTokens: ticket.outputTokens },
+        rawCapturePath: this.takeRawCapturePath(run.id),
+        config: {
+          ...this.config,
+          model: ticket.model,
+          outputTokens: ticket.outputTokens,
+        },
       });
     } catch {
       return this.finishConsultation(run.id, consultation.id, null);
@@ -590,7 +1186,11 @@ export class RunManager {
       null,
     );
   }
-  private adviceContext(id: unknown, consultationId: unknown) {
+  private adviceContext(
+    id: unknown,
+    consultationId: unknown,
+    answers?: unknown,
+  ) {
     const run = this.store.getRun(id);
     if (
       run.status !== "planned" ||
@@ -612,10 +1212,18 @@ export class RunManager {
       throw new Error("Task changed. Prepare and review a new plan");
     const team = this.teamForRun(run);
     this.assertCoordinationTeam(run, team);
-    const { consultation, adviceRevision, handoff } = adviceForHandoff(
+    const base = adviceForHandoff(run, task, consultationId);
+    const {
+      consultation,
+      adviceRevision,
+      handoffRevision,
+      handoff,
+      questionAnswers,
+    } = adviceForHandoff(
       run,
       task,
       consultationId,
+      answers === undefined ? base.handoff.questions.map(() => "") : answers,
     );
     if (
       run.approvedAdvice?.some((item) => item.consultationId === consultationId)
@@ -630,19 +1238,27 @@ export class RunManager {
       task,
       consultation,
       adviceRevision,
+      handoffRevision,
+      answers: questionAnswers!,
       handoff: text,
       writerRequests: run.coordination?.assignments.length || 1,
     };
   }
-  reviewAdvice(id: unknown, consultationId: unknown): AdviceReview {
+  reviewAdvice(
+    id: unknown,
+    consultationId: unknown,
+    answers?: unknown,
+  ): AdviceReview {
     this.handoffTicket = null;
-    const context = this.adviceContext(id, consultationId);
+    const context = this.adviceContext(id, consultationId, answers);
     const review: AdviceReview = {
       token: randomUUID(),
       runId: context.run.id,
       consultationId: context.consultation.id,
       planRevision: context.consultation.planRevision,
       adviceRevision: context.adviceRevision,
+      handoffRevision: context.handoffRevision,
+      answers: context.answers,
       handoff: context.handoff,
       inputBytes: Buffer.byteLength(context.handoff),
       writerRequests: context.writerRequests,
@@ -660,10 +1276,15 @@ export class RunManager {
       throw new Error("Explicit advice handoff approval is required");
     if (Date.now() >= ticket.expiresAt)
       throw new Error("Specialist handoff review expired");
-    const context = this.adviceContext(ticket.runId, ticket.consultationId);
+    const context = this.adviceContext(
+      ticket.runId,
+      ticket.consultationId,
+      ticket.answers,
+    );
     if (
       ticket.planRevision !== context.consultation.planRevision ||
       ticket.adviceRevision !== context.adviceRevision ||
+      ticket.handoffRevision !== context.handoffRevision ||
       ticket.handoff !== context.handoff ||
       ticket.inputBytes !== Buffer.byteLength(context.handoff) ||
       ticket.writerRequests !== context.writerRequests
@@ -676,6 +1297,8 @@ export class RunManager {
         specialistId: context.consultation.specialistId,
         planRevision: ticket.planRevision,
         adviceRevision: ticket.adviceRevision,
+        handoffRevision: ticket.handoffRevision,
+        answers: ticket.answers,
         approvedAt: new Date().toISOString(),
       },
     ]);
@@ -710,7 +1333,7 @@ export class RunManager {
       this.active ||
       this.activeReply ||
       this.activeConsult ||
-      !["prepared", "planned"].includes(run.status)
+      !["prepared", "planned", "awaiting_input"].includes(run.status)
     )
       throw new Error("Wait for a stable run before changing usage settings");
     const task = this.store.load().tasks.find((item) => item.id === run.taskId);
@@ -726,7 +1349,7 @@ export class RunManager {
     const next = chooseUsagePolicy(
       run,
       task.mode,
-      this.config.model,
+      this.modelFor(run),
       choice as UsagePolicyChoice,
     );
     if (run.calls > 0 && run.model && next.model !== run.model)
@@ -789,6 +1412,9 @@ export class RunManager {
         "Wait for the active run before changing its provider settings",
       );
     this.config = validateSession(value);
+    this.modelCatalog = [];
+    this.conversationGrants.clear();
+    this.conversationTickets.clear();
     this.replyTicket = null;
     this.consultTicket = null;
     this.usageReview = null;
@@ -798,7 +1424,14 @@ export class RunManager {
     this.selection = selection;
     return selection;
   }
-  prepare(taskId: unknown, sourceId: unknown, paths: unknown): Run {
+  prepare(
+    taskId: unknown,
+    sourceId: unknown,
+    paths: unknown,
+    workspaceMode?: unknown,
+  ): Run {
+    if (workspaceMode !== undefined && workspaceMode !== "direct")
+      throw new Error("Invalid project workspace mode");
     const task = this.store.load().tasks.find((t) => t.id === taskId);
     if (!task) throw new Error("Task not found");
     if (
@@ -832,6 +1465,16 @@ export class RunManager {
       },
       teamSnapshot: assignedTeam,
       sourceName: sourceId === null ? "New project" : this.selection!.name,
+      ...(workspaceMode === "direct" && {
+        workspaceMode: "direct" as const,
+        ...(sourceId !== null && {
+          projectWorkspace: bindProjectWorkspace(
+            this.selection!.root || "",
+            "existing",
+            this.dataRoot,
+          ),
+        }),
+      }),
       files:
         sourceId === null
           ? []
@@ -844,17 +1487,37 @@ export class RunManager {
       checks: [],
       error: "",
       calls: 0,
-      model: "",
+      model: this.store.roleModelSettings().pearl,
+      roleModels: this.store.roleModelSettings(),
       outputTokens: 0,
       coordination: makeCoordination(assignedTeam.members),
     };
     run.usagePolicy = defaultUsagePolicy(
       run,
       task.mode,
-      this.config?.model || "",
+      run.model,
       this.config?.outputTokens || 2048,
     );
     this.store.saveRun(run);
+    return run;
+  }
+  chooseProjectWorkspace(id: unknown, directory: string): Run {
+    const run = this.store.getRun(id);
+    if (
+      run.workspaceMode !== "direct" ||
+      !["prepared", "planned"].includes(run.status) ||
+      run.drafts.length ||
+      this.active?.id === run.id
+    )
+      throw new Error("Project location can only change before building");
+    if (run.files.length)
+      throw new Error("Existing projects use their selected source folder");
+    run.projectWorkspace = bindProjectWorkspace(
+      directory,
+      "new",
+      this.dataRoot,
+    );
+    this.save(run);
     return run;
   }
   private replyContext(id: unknown, messageId: unknown, recipientId?: unknown) {
@@ -871,22 +1534,73 @@ export class RunManager {
         "planning",
         "building",
         "auditing",
+        "awaiting_input",
+        "failed",
+        "conflicted",
+        "stopped",
+        "interrupted",
       ].includes(run.status) ||
       run.executions?.some((e) => e.status === "running")
     )
       throw new Error("Wait for a stable, non-superseded task snapshot");
-    if ((run.replies?.length || 0) >= 3)
-      throw new Error("Three reply attempts per run maximum");
+    if ((run.replies?.length || 0) >= 20)
+      throw new Error("This run reached its 20-reply limit");
+    if (
+      (run.replies || []).filter((reply) => reply.messageId === messageId)
+        .length >= 3
+    )
+      throw new Error("Three reply attempts per message maximum");
     const message = run.messages?.find(
       (m) => m.id === messageId && m.intent === "continue",
     );
     const workspace = this.store.load();
     const team = this.teamForRun(run);
     this.assertCoordinationTeam(run, team);
-    const profile =
+    const task = workspace.tasks.find((t) => t.id === run.taskId);
+    if (!message || !task) throw new Error("Question not found");
+    if (recipientId !== undefined && typeof recipientId !== "string")
+      throw new Error("Unknown reply recipient");
+    const member =
       recipientId === undefined
         ? undefined
-        : team.members.find((t) => t.id === recipientId);
+        : bindRunTeam(team.members, team.roster).find(
+            (person) => person.id === recipientId,
+          );
+    const specialist =
+      recipientId === undefined ? undefined : characterById(recipientId);
+    let profile = member;
+    let assignment:
+      import("../shared/messages").ReplyRecipient["assignment"] | undefined;
+    if (specialist?.role === "specialist" && team.roster && !member) {
+      const allowedPhases =
+        run.status === "planned"
+          ? ["planning", "building"]
+          : run.status === "building" || run.status === "auditing"
+            ? ["building"]
+            : run.status === "complete"
+              ? ["verification"]
+              : [];
+      if (
+        !run.lineupProposal ||
+        !run.approvedLineup ||
+        run.taskSnapshot?.title !== task.title ||
+        run.taskSnapshot.description !== task.description ||
+        run.taskSnapshot.mode !== task.mode ||
+        run.lineupProposal.planRevision !== lineupPlanRevision(run, task) ||
+        run.approvedLineup.planRevision !== run.lineupProposal.planRevision
+      )
+        throw new Error("Review the current specialist lineup before routing");
+      const entry = parseSpecialistLineup(run.approvedLineup.entries).find(
+        (item) => item.id === recipientId && allowedPhases.includes(item.phase),
+      );
+      if (!entry) throw new Error("Specialist is not approved for this phase");
+      profile = catalogTeammate(entry.id);
+      assignment = {
+        phase: entry.phase,
+        purpose: entry.purpose,
+        planRevision: run.approvedLineup.planRevision,
+      };
+    }
     if (recipientId !== undefined && !profile)
       throw new Error("Unknown reply recipient");
     const recipient = profile
@@ -895,10 +1609,9 @@ export class RunManager {
           name: profile.name,
           role: profile.role,
           instructions: profile.instructions,
+          ...(assignment ? { assignment } : {}),
         }
       : undefined;
-    const task = workspace.tasks.find((t) => t.id === run.taskId);
-    if (!message || !task) throw new Error("Question not found");
     const context = JSON.stringify({
       progress: {
         status: run.status,
@@ -911,6 +1624,17 @@ export class RunManager {
       },
       recipient,
       question: message.text,
+      conversation: (run.messages || [])
+        .filter((item) => item.id !== messageId)
+        .slice(-8)
+        .map((item) => ({
+          user: item.text,
+          reply:
+            run.replies?.find(
+              (reply) =>
+                reply.messageId === item.id && reply.status === "answered",
+            )?.answer || null,
+        })),
       task: { title: task.title, description: task.description },
       redirection: run.redirection?.instructions,
       plan: run.plan,
@@ -942,11 +1666,34 @@ export class RunManager {
       context,
       revision: createHash("sha256").update(context).digest("hex"),
       expiresAt: Date.now() + 120000,
-      model: this.config.model,
+      model: this.actorModel(run, recipient?.id || "pearl"),
       outputTokens: policy.outputTokens,
     };
     this.replyTicket = review;
     return review;
+  }
+  reviewRoutedReply(id: unknown, messageId: unknown) {
+    this.replyTicket = null;
+    this.replyContext(id, messageId);
+    const run = this.store.getRun(id);
+    const message = run.messages?.find(
+      (item) => item.id === messageId && item.intent === "continue",
+    );
+    if (!message) throw new Error("Question not found");
+    const team = this.teamForRun(run);
+    const routing = routeTeamMessage(
+      message.text,
+      bindRunTeam(team.members, team.roster),
+      this.store.messageRoutingSettings(),
+    );
+    return {
+      routing,
+      needsConnection: !this.config,
+      review:
+        routing.needsChoice || !this.config
+          ? null
+          : this.reviewReply(id, messageId, routing.recipientId),
+    };
   }
   answerMessage(token: unknown, approved: unknown) {
     const ticket = this.replyTicket;
@@ -957,7 +1704,11 @@ export class RunManager {
       throw new Error("Fresh reply upload approval is required");
     if (
       !this.config ||
-      ticket.model !== this.config.model ||
+      ticket.model !==
+        this.actorModel(
+          this.store.getRun(ticket.runId),
+          ticket.recipient?.id || "pearl",
+        ) ||
       ticket.outputTokens !==
         (this.store.getRun(ticket.runId).usagePolicy?.outputTokens ||
           this.config.outputTokens) ||
@@ -1018,6 +1769,7 @@ export class RunManager {
       replyId: reply.id,
       acknowledged: 0,
       outputTokens: ticket.outputTokens,
+      model: ticket.model,
     };
     child.on(
       "message",
@@ -1025,11 +1777,16 @@ export class RunManager {
         metric?: unknown;
         usageStart?: unknown;
         usageFinish?: unknown;
+        requestDiagnostic?: unknown;
         replyStarted?: unknown;
         answer?: unknown;
         failed?: boolean;
       }) => {
         if (this.activeReply?.child !== child) return;
+        if (message.requestDiagnostic) {
+          this.recordRequestDiagnostic(run.id, message.requestDiagnostic);
+          return;
+        }
         if (message.metric) {
           emitMetric(this.metricSink, message.metric);
           return;
@@ -1085,7 +1842,12 @@ export class RunManager {
     try {
       child.postMessage({
         replyContext: ticket.context,
-        config: { ...this.config, outputTokens: ticket.outputTokens },
+        rawCapturePath: this.takeRawCapturePath(run.id),
+        config: {
+          ...this.config,
+          model: ticket.model,
+          outputTokens: ticket.outputTokens,
+        },
       });
     } catch {
       return this.finishReply(
@@ -1129,6 +1891,103 @@ export class RunManager {
       true,
     );
   }
+  private preparePlanningRevision(
+    parent: Run,
+    task: Task,
+    instructions: string[],
+    at: string,
+  ): Run {
+    const conversation = [
+      ...(parent.redirection?.conversation || [
+        { from: "user", text: task.description },
+      ]),
+      ...(parent.planReply
+        ? [
+            {
+              from: "Pearl",
+              text: [parent.planReply, ...planQuestions(parent.plan)].join(
+                "\n",
+              ),
+            },
+          ]
+        : parent.plan
+          ? [
+              {
+                from: "Pearl",
+                text:
+                  [...planQuestions(parent.plan)].join("\n") ||
+                  parent.plan.slice(0, 1000),
+              },
+            ]
+          : []),
+      { from: "user", text: instructions.at(-1) || task.description },
+    ].slice(-20);
+    const child: Run = {
+      id: randomUUID(),
+      taskId: parent.taskId,
+      taskSnapshot: {
+        title: task.title,
+        description: task.description,
+        mode: task.mode,
+      },
+      teamSnapshot:
+        parent.teamSnapshot || this.store.teamForTask(parent.taskId),
+      sourceName: parent.sourceName,
+      workspaceMode: parent.workspaceMode,
+      projectWorkspace:
+        parent.projectWorkspace && structuredClone(parent.projectWorkspace),
+      files: sourceForNextAttempt(parent),
+      status: "prepared",
+      events: [],
+      plan: "",
+      drafts: [],
+      findings: [],
+      checks: [],
+      error: "",
+      calls: 0,
+      model: this.modelFor(parent),
+      roleModels: structuredClone(
+        parent.roleModels || this.store.roleModelSettings(),
+      ),
+      outputTokens: 0,
+      coordination: makeCoordination(
+        (parent.teamSnapshot || this.store.teamForTask(parent.taskId)).members,
+      ),
+      redirection: {
+        parentId: parent.id,
+        instructions: [...instructions],
+        previousPlan: parent.plan || parent.redirection?.previousPlan || "",
+        previousDrafts: structuredClone(
+          parent.drafts.length
+            ? parent.drafts
+            : parent.redirection?.previousDrafts || [],
+        ),
+        conversation,
+      },
+    };
+    child.usagePolicy = defaultUsagePolicy(
+      child,
+      "plan",
+      this.modelFor(parent),
+      this.config?.outputTokens || 2048,
+    );
+    parent.redirectedTo = child.id;
+    parent.status = "stopped";
+    parent.events.push({
+      actor: "system",
+      at,
+      text: "Superseded by a revised planning turn. Earlier work is retained for inspection; no execution or apply permission carries forward.",
+    });
+    child.events.push({
+      actor: "system",
+      at,
+      text: "Revised planning turn prepared. Code will not be written until you approve a plan and team.",
+    });
+    this.store.redirectRun(parent, child);
+    this.publish(parent);
+    this.publish(child);
+    return child;
+  }
   sendTeamMessage(id: unknown, value: unknown) {
     const input = parseMessage(value);
     let parent = this.store.getRun(id);
@@ -1138,6 +1997,14 @@ export class RunManager {
       );
     if (parent.redirectedTo)
       throw new Error("This run was superseded. Open its revised attempt.");
+    if (input.intent === "continue") {
+      const team = this.teamForRun(parent);
+      routeTeamMessage(
+        input.text,
+        bindRunTeam(team.members, team.roster),
+        this.store.messageRoutingSettings(),
+      );
+    }
     if ((parent.messages?.length || 0) >= 20)
       throw new Error("This run reached its 20-message limit");
     if (
@@ -1150,9 +2017,11 @@ export class RunManager {
       );
     if (
       input.intent === "replan" &&
-      (parent.redirection?.instructions.length || 0) >= 3
+      (parent.redirection?.instructions.length || 0) >= 20
     )
-      throw new Error("Three redirections reached. Prepare a fresh task.");
+      throw new Error(
+        "This task reached its 20 planning revisions. Start a new task to continue.",
+      );
     const message = {
       ...input,
       id: randomUUID(),
@@ -1165,55 +2034,166 @@ export class RunManager {
     }
     if (this.active?.id === parent.id || this.activeReply?.id === parent.id)
       parent = this.stop(parent.id);
-    const child: Run = {
-      id: randomUUID(),
-      taskId: parent.taskId,
-      teamSnapshot:
-        parent.teamSnapshot || this.store.teamForTask(parent.taskId),
-      sourceName: parent.sourceName,
-      files: structuredClone(parent.files),
-      status: "prepared",
-      events: [],
-      plan: "",
-      drafts: [],
-      findings: [],
-      checks: [],
-      error: "",
-      calls: 0,
-      model: "",
-      outputTokens: 0,
-      coordination: makeCoordination(
-        (parent.teamSnapshot || this.store.teamForTask(parent.taskId)).members,
-      ),
-      redirection: {
-        parentId: parent.id,
-        instructions: [...(parent.redirection?.instructions || []), input.text],
-        previousPlan: parent.plan,
-        previousDrafts: structuredClone(parent.drafts),
-      },
-    };
-    child.usagePolicy = defaultUsagePolicy(
-      child,
-      "plan",
-      this.config?.model || "",
-      this.config?.outputTokens || 2048,
+    const task = this.store
+      .load()
+      .tasks.find((item) => item.id === parent.taskId);
+    if (!task) throw new Error("Task not found");
+    return this.preparePlanningRevision(
+      parent,
+      task,
+      [...(parent.redirection?.instructions || []), input.text],
+      message.at,
     );
-    parent.redirectedTo = child.id;
-    parent.status = "stopped";
-    parent.events.push({
-      actor: "system",
-      at: message.at,
-      text: "Superseded by a revised attempt. Old work is retained for inspection but cannot be executed or applied. Remote cancellation is unconfirmed.",
+  }
+  sendPlanningMessage(id: unknown, text: unknown): Run {
+    if (typeof text !== "string" || !text.trim() || text.length > 2000)
+      throw new Error("Enter a message up to 2,000 characters");
+    if (!this.config) throw new Error("Connect Nebius before messaging Pearl");
+    if (this.active || this.activeReply || this.activeConsult)
+      throw new Error("Wait for the active request to finish");
+    const run = this.store.getRun(id);
+    const task = this.store.load().tasks.find((item) => item.id === run.taskId);
+    if (!task || task.mode !== "plan" || run.redirectedTo)
+      throw new Error("This task cannot receive a planning message");
+    if (
+      !["prepared", "planned"].includes(run.status) &&
+      !(run.status === "failed" && !run.plan)
+    )
+      throw new Error(
+        "Wait for Pearl to finish before sending another message",
+      );
+    const next = this.sendTeamMessage(run.id, {
+      text,
+      intent: run.status === "prepared" ? "continue" : "replan",
     });
-    child.events.push({
-      actor: "system",
-      at: message.at,
-      text: "Revised attempt prepared. Review redirection context and approve a new plan. No inherited execution, upload or apply permission.",
-    });
-    this.store.redirectRun(parent, child);
-    this.publish(parent);
-    this.publish(child);
-    return child;
+    next.planningConsultationPolicy =
+      this.store.messageRoutingSettings().specialistConsultation;
+    this.save(next);
+    // Sending starts a bounded read-only planning turn for this task snapshot.
+    // Pearl may consult a saved teammate and synthesize the reply within that
+    // turn. Build, commands, and applying changes stay separately approved.
+    return this.start(next.id, true);
+  }
+  retryPlanning(id: unknown): Run {
+    if (!this.config) throw new Error("Connect Nebius before messaging Pearl");
+    if (this.active || this.activeReply || this.activeConsult)
+      throw new Error("Wait for the active request to finish");
+    const parent = this.store.getRun(id);
+    const task = this.store
+      .load()
+      .tasks.find((item) => item.id === parent.taskId);
+    if (
+      !task ||
+      task.mode !== "plan" ||
+      parent.status !== "failed" ||
+      parent.plan ||
+      parent.redirectedTo
+    )
+      throw new Error("Only a failed planning turn can be retried");
+    const instructions = parent.redirection?.instructions?.length
+      ? parent.redirection.instructions
+      : parent.messages?.length
+        ? parent.messages.map((message) => message.text)
+        : [task.description];
+    if (!instructions.length || instructions.length > 20)
+      throw new Error("This planning turn cannot be retried");
+    if ((parent.planningRetries || 0) >= 3)
+      throw new Error(
+        "This planning turn reached its retry limit. Send Pearl a new message to continue.",
+      );
+    const next = this.preparePlanningRevision(
+      parent,
+      task,
+      instructions,
+      new Date().toISOString(),
+    );
+    next.planningRetries = (parent.planningRetries || 0) + 1;
+    next.planningConsultationPolicy =
+      this.store.messageRoutingSettings().specialistConsultation;
+    this.save(next);
+    return this.start(next.id, true);
+  }
+  sendConversationMessage(id: unknown, text: unknown, recipientId?: unknown) {
+    if (typeof text !== "string" || !text.trim() || text.length > 2000)
+      throw new Error("Enter a message up to 2,000 characters");
+    if (!this.config)
+      throw new Error("Connect Nebius before messaging the team");
+    if (this.activeReply || this.activeConsult)
+      throw new Error("Wait for the active reply to finish");
+    const run = this.store.getRun(id);
+    const asideToPearl =
+      run.status === "awaiting_input" &&
+      recipientId === undefined &&
+      !/(?:^|\s)@([a-z][a-z0-9_-]*)\b/i.test(text) &&
+      text.trim().endsWith("?");
+    if (run.status === "awaiting_input") {
+      const pending = (run.pendingQuestions || []).filter(
+        (item) => !item.answer,
+      );
+      const tagged = /(?:^|\s)@([a-z][a-z0-9_-]*)\b/i.exec(text);
+      const recipient = tagged
+        ? routeTeamMessage(
+            text,
+            bindRunTeam(
+              this.teamForRun(run).members,
+              this.teamForRun(run).roster,
+            ),
+            this.store.messageRoutingSettings(),
+          ).recipientId
+        : typeof recipientId === "string"
+          ? recipientId
+          : undefined;
+      const question = asideToPearl
+        ? undefined
+        : [...pending]
+            .reverse()
+            .find((item) => !recipient || item.actor === recipient);
+      if (question && (!recipient || question.actor === recipient))
+        return {
+          run: this.answerBuildQuestion(run.id, question.id, text),
+          needsChoice: false,
+        };
+    }
+    if (
+      ![
+        "planned",
+        "building",
+        "auditing",
+        "awaiting_input",
+        "complete",
+        "failed",
+        "conflicted",
+        "stopped",
+        "interrupted",
+      ].includes(run.status) ||
+      run.redirectedTo
+    )
+      throw new Error("This task is not ready for a conversation reply");
+    const saved = this.sendTeamMessage(run.id, { text, intent: "continue" });
+    const message = saved.messages!.at(-1)!;
+    const routedRecipientId = asideToPearl ? "pearl" : recipientId;
+    const routed =
+      routedRecipientId === undefined
+        ? this.reviewRoutedReply(saved.id, message.id)
+        : {
+            routing: { needsChoice: false },
+            review: this.reviewReply(saved.id, message.id, routedRecipientId),
+          };
+    if (routed.routing.needsChoice || !routed.review)
+      return { run: saved, needsChoice: true };
+    return {
+      run: this.answerMessage(routed.review.token, true),
+      needsChoice: false,
+    };
+  }
+  answerConversationMessage(
+    id: unknown,
+    messageId: unknown,
+    recipientId: unknown,
+  ) {
+    if (typeof recipientId !== "string") throw new Error("Choose a teammate");
+    const review = this.reviewReply(id, messageId, recipientId);
+    return this.answerMessage(review.token, true);
   }
   decideFinding(id: unknown, value: unknown) {
     const run = this.store.getRun(id);
@@ -1316,7 +2296,10 @@ export class RunManager {
       teamSnapshot:
         parent.teamSnapshot || this.store.teamForTask(parent.taskId),
       sourceName: parent.sourceName,
-      files: structuredClone(parent.files),
+      workspaceMode: parent.workspaceMode,
+      projectWorkspace:
+        parent.projectWorkspace && structuredClone(parent.projectWorkspace),
+      files: sourceForNextAttempt(parent),
       status: "prepared",
       events: [],
       plan: parent.plan,
@@ -1325,7 +2308,10 @@ export class RunManager {
       checks: [],
       error: "",
       calls: 0,
-      model: "",
+      model: this.modelFor(parent),
+      roleModels: structuredClone(
+        parent.roleModels || this.store.roleModelSettings(),
+      ),
       outputTokens: 0,
       correction: {
         parentId: parent.id,
@@ -1367,8 +2353,8 @@ export class RunManager {
     child.usagePolicy = defaultUsagePolicy(
       child,
       task.mode,
-      this.config?.model || "",
-      this.config?.outputTokens || 2048,
+      this.modelFor(parent),
+      parent.usagePolicy?.outputTokens || this.config?.outputTokens || 2048,
     );
     child.events.push({
       actor: "system",
@@ -1386,6 +2372,65 @@ export class RunManager {
   ): Run {
     assertAuditKind(kind);
     return this.start(id, approved, { kind, revision });
+  }
+  answerBuildQuestion(id: unknown, questionId: unknown, answer: unknown): Run {
+    if (this.active || this.activeReply || this.activeConsult)
+      throw new Error("Wait for the current request to finish");
+    const run = this.store.getRun(id);
+    if (run.status !== "awaiting_input" || typeof questionId !== "string")
+      throw new Error("This build is not waiting for that question");
+    const question = run.pendingQuestions?.find(
+      (item) => item.id === questionId,
+    );
+    if (!question || question.answer)
+      throw new Error("This build question is missing or already answered");
+    const parsed = parseMessage({ text: answer, intent: "continue" });
+    question.answer = parsed.text.trim();
+    question.answeredAt = new Date().toISOString();
+    const message = {
+      id: randomUUID(),
+      at: question.answeredAt,
+      text: question.answer,
+      intent: "continue" as const,
+      questionId,
+    };
+    this.store.appendMessage(run.id, message);
+    run.messages = [...(run.messages || []), message];
+    const allAnswered = run.pendingQuestions?.every((item) => !!item.answer);
+    if (allAnswered) {
+      const remainingWriters =
+        run.coordination?.assignments.filter(
+          (assignment) => assignment.status !== "ready",
+        ).length || 0;
+      const needed =
+        remainingWriters +
+        1 +
+        (run.coordination?.settings?.chunkReviews ? remainingWriters : 0);
+      const remaining =
+        requestLimit(run) -
+        Math.max(run.calls, this.store.coreUsageRequests(run.id));
+      if (remaining < needed)
+        run.events.push({
+          actor: "pearl",
+          actorName: "Pearl",
+          text: `I have your answer, but finishing this build needs ${needed} more model requests and only ${Math.max(0, remaining)} remain in the approved limit. Increase the request ceiling in Task settings, then continue the build.`,
+          at: new Date().toISOString(),
+        });
+    }
+    this.save(run);
+    if (!allAnswered) return run;
+    const remainingWriters =
+      run.coordination?.assignments.filter(
+        (assignment) => assignment.status !== "ready",
+      ).length || 0;
+    const needed =
+      remainingWriters +
+      1 +
+      (run.coordination?.settings?.chunkReviews ? remainingWriters : 0);
+    const remaining =
+      requestLimit(run) -
+      Math.max(run.calls, this.store.coreUsageRequests(run.id));
+    return remaining >= needed ? this.start(run.id, true) : run;
   }
   start(
     id: unknown,
@@ -1415,8 +2460,15 @@ export class RunManager {
         throw new Error("Audit revision is stale");
       if ((run.specialistAudits?.length || 0) >= 3)
         throw new Error("Three specialist dispatches per run maximum");
-    } else if (!["prepared", "planned"].includes(run.status))
+    } else if (!["prepared", "planned", "awaiting_input"].includes(run.status))
       throw new Error("This run cannot be started again");
+    if (
+      !specialist &&
+      run.status === "awaiting_input" &&
+      (!run.pendingQuestions?.length ||
+        run.pendingQuestions.some((question) => !question.answer))
+    )
+      throw new Error("Answer all build questions before continuing");
     const workspace = this.store.load();
     const task = workspace.tasks.find((t) => t.id === run.taskId);
     if (!task) throw new Error("Task not found");
@@ -1431,11 +2483,18 @@ export class RunManager {
       );
     const team = this.teamForRun(run);
     this.assertCoordinationTeam(run, team);
+    if (
+      !specialist &&
+      run.status === "planned" &&
+      planQuestions(run.plan).length
+    )
+      throw new Error("Resolve Pearl's planning questions before building");
     if (!specialist && run.status === "planned" && run.lineupProposal) {
       if (
         !run.approvedLineup ||
         run.lineupProposal.planRevision !== lineupPlanRevision(run, task) ||
         run.approvedLineup.planRevision !== run.lineupProposal.planRevision ||
+        !!run.lineupProposal.core !== !!run.approvedLineup.core ||
         JSON.stringify(parseSpecialistLineup(run.approvedLineup.entries)) !==
           JSON.stringify(run.approvedLineup.entries)
       )
@@ -1446,12 +2505,24 @@ export class RunManager {
     if (!specialist) approvedAdviceForBuild(run, task);
     run.teamSnapshot = team;
     run.usagePolicy = this.checkedRunPolicy(run, task.mode);
-    if (
-      !specialist &&
-      this.store.coreUsageRequests(run.id) >= run.usagePolicy.requestCeiling
-    )
-      throw new Error("This run reached its saved request ceiling");
-    run.model = this.config.model;
+    if (!specialist && run.status !== "prepared") {
+      const remainingWriters =
+        run.coordination?.assignments.filter(
+          (assignment) => assignment.status !== "ready",
+        ).length || 0;
+      const needed =
+        remainingWriters +
+        1 +
+        (run.coordination?.settings?.chunkReviews ? remainingWriters : 0);
+      const remaining =
+        run.usagePolicy.requestCeiling -
+        Math.max(run.calls, this.store.coreUsageRequests(run.id));
+      if (remaining < needed)
+        throw new Error(
+          `This build needs ${needed} model requests for the remaining team work, but only ${Math.max(0, remaining)} remain in this attempt. Increase the request ceiling in Task settings, then start the build. No build request was sent.`,
+        );
+    }
+    run.model = run.usagePolicy.model;
     run.outputTokens = run.usagePolicy.outputTokens;
     if (specialist) {
       run.specialistAudits ||= [];
@@ -1476,6 +2547,11 @@ export class RunManager {
           ? "planning"
           : "building",
     };
+    if (queued.status === "building" && queued.workspaceMode === "direct") {
+      if (!queued.projectWorkspace)
+        throw new Error("Choose the project folder before building");
+      verifyProjectWorkspace(queued.projectWorkspace, queued.files);
+    }
     this.save(queued);
     let child: UtilityProcess;
     try {
@@ -1508,9 +2584,46 @@ export class RunManager {
         metric?: unknown;
         usageStart?: unknown;
         usageFinish?: unknown;
+        requestDiagnostic?: unknown;
         usageLimitApplied?: unknown;
+        pauseReached?: unknown;
+        pauseReleased?: unknown;
       }) => {
         if (this.active?.child !== child) return;
+        if (message.requestDiagnostic) {
+          this.recordRequestDiagnostic(run.id, message.requestDiagnostic);
+          return;
+        }
+        if (typeof message.pauseReached === "string") {
+          const current = this.store.getRun(run.id);
+          if (
+            current.requestPause?.id === message.pauseReached &&
+            current.requestPause.status === "requested"
+          ) {
+            const paused = this.store.updateRequestPause(run.id, {
+              ...current.requestPause,
+              status: "paused",
+              reachedAt: new Date().toISOString(),
+            });
+            this.publish(paused);
+          }
+          return;
+        }
+        if (typeof message.pauseReleased === "string") {
+          const current = this.store.getRun(run.id);
+          if (
+            current.requestPause?.id === message.pauseReleased &&
+            current.requestPause.status === "resuming"
+          )
+            this.publish(
+              this.store.updateRequestPause(run.id, {
+                ...current.requestPause,
+                status: "resumed",
+                resolvedAt: new Date().toISOString(),
+              }),
+            );
+          return;
+        }
         if (message.metric) {
           emitMetric(this.metricSink, message.metric);
           return;
@@ -1563,6 +2676,7 @@ export class RunManager {
           const approvedRun = this.store.getRun(run.id);
           message.run.usagePolicy = approvedRun.usagePolicy;
           message.run.model = approvedRun.model;
+          message.run.roleModels = approvedRun.roleModels;
           message.run.outputTokens = approvedRun.outputTokens;
           message.run.teamSnapshot = approvedRun.teamSnapshot;
           message.run.approvedLineup = approvedRun.approvedLineup;
@@ -1575,6 +2689,16 @@ export class RunManager {
           }
           this.save(message.run);
           if (message.done) {
+            const current = this.store.getRun(run.id);
+            if (current.requestPause?.status === "requested") {
+              this.publish(
+                this.store.updateRequestPause(run.id, {
+                  ...current.requestPause,
+                  status: "not_reached",
+                  resolvedAt: new Date().toISOString(),
+                }),
+              );
+            }
             this.active = null;
             child.kill();
             this.clearHeld(run.id, "coordinator");
@@ -1592,10 +2716,16 @@ export class RunManager {
     });
     child.postMessage({
       specialist: !!specialist,
+      rawCapturePath: this.takeRawCapturePath(run.id),
       run,
       task,
       team: team.members,
-      config: { ...this.config, outputTokens: run.usagePolicy.outputTokens },
+      config: {
+        ...this.config,
+        model: run.model,
+        outputTokens: run.usagePolicy.outputTokens,
+        planningTemperature: this.store.planningSettings().temperature,
+      },
       outputRoot: join(this.dataRoot, "drafts", run.id),
     });
     return queued;
@@ -1608,6 +2738,17 @@ export class RunManager {
     if (hadReply && this.active?.id !== run.id) return run;
     if (this.active?.id !== run.id) throw new Error("This run is not active");
     const child = this.active.child;
+    if (
+      run.requestPause?.status === "requested" ||
+      run.requestPause?.status === "paused" ||
+      run.requestPause?.status === "resuming"
+    ) {
+      run = this.store.updateRequestPause(run.id, {
+        ...run.requestPause,
+        status: "stopped",
+        resolvedAt: new Date().toISOString(),
+      });
+    }
     this.active = null;
     child.kill();
     this.clearHeld(run.id, "coordinator");
@@ -1700,22 +2841,19 @@ export class RunManager {
       !!run.coordination?.settings?.chunkReviews !== policy.earlyReviews
     )
       throw new Error("Saved usage policy is invalid. Review it again");
-    if (policy.model && policy.model !== this.config.model)
-      throw new Error(
-        "Configured model changed. Review and apply a run usage policy again",
-      );
-    if (run.model && run.model !== this.config.model)
+    if (run.model && policy.model && run.model !== policy.model)
       throw new Error("Keep this run's approved model unchanged");
-    return { ...policy, model: this.config.model };
+    return { ...policy, model: this.modelFor(run) };
   }
   private acceptUsageStart(
     value: unknown,
     scope: "reply" | "consult" | "coordinator",
+    expectedModel: string,
     expectedOutputTokens: number,
   ): value is UsageStart {
     return (
       validUsageStart(value) &&
-      value.model === this.config?.model &&
+      value.model === expectedModel &&
       value.maxOutputTokens === expectedOutputTokens &&
       (scope === "reply"
         ? value.stage === "answer_question"
@@ -1765,10 +2903,23 @@ export class RunManager {
         !this.acceptUsageStart(
           value,
           scope,
+          scope === "reply"
+            ? this.activeReply!.model
+            : scope === "consult"
+              ? this.activeConsult!.model
+              : validUsageStart(value)
+                ? this.actorModel(this.store.getRun(runId), value.actor)
+                : "",
           pauseId && validUsageStart(value) && this.heldUsage.has(value.id)
             ? value.maxOutputTokens
             : active.outputTokens,
         ) ||
+        (scope === "coordinator" &&
+          validUsageStart(value) &&
+          !!value.actor &&
+          !this.teamForRun(this.store.getRun(runId)).members.some(
+            (member) => member.id === value.actor,
+          )) ||
         (scope === "coordinator" &&
           (this.active!.kind === "core"
             ? value.stage === "specialist_audit"
@@ -1804,7 +2955,17 @@ export class RunManager {
     this.publish(run);
   }
   private fail(id: string, error: string) {
-    const run = this.store.getRun(id);
+    let run = this.store.getRun(id);
+    if (
+      run.requestPause?.status === "requested" ||
+      run.requestPause?.status === "paused" ||
+      run.requestPause?.status === "resuming"
+    )
+      run = this.store.updateRequestPause(id, {
+        ...run.requestPause,
+        status: "interrupted",
+        resolvedAt: new Date().toISOString(),
+      });
     const child = this.active?.child;
     this.active = null;
     child?.kill();

@@ -6,6 +6,7 @@ import type { DesktopAPI } from "../src/shared/contracts";
 import type { Run } from "../src/shared/runs";
 import { initialTeam } from "../src/shared/contracts";
 import { rosterMembers, starterRoster } from "../src/shared/fixed-teams";
+import { makeCoordination } from "../src/shared/coordination";
 import {
   defaultUsageAlertPolicy,
   emptyUsageAlertState,
@@ -51,6 +52,158 @@ it("shows the exact saved team attached to a prepared run", async () => {
   expect(
     await screen.findByText(/Saved team for this run: Security team v2/),
   ).toBeInTheDocument();
+});
+it("makes plan review the next step before team messaging is available", async () => {
+  const bridge = api();
+  bridge.runs = vi
+    .fn()
+    .mockResolvedValue([{ ...run, coordination: makeCoordination() }]);
+  render(
+    <RunPanel
+      api={bridge}
+      task={{ ...task, mode: "plan" }}
+      settingsView="summary"
+    />,
+  );
+  const review = await screen.findByRole("heading", {
+    name: "Start with a plan",
+  });
+  expect(review).toBeInTheDocument();
+  expect(screen.getByText(/Pearl will prepare a plan/)).toBeInTheDocument();
+  expect(
+    review.compareDocumentPosition(screen.getByText("Run settings")) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Request plan" })).toBeDisabled();
+  expect(
+    screen.queryByRole("region", { name: "Team conversation" }),
+  ).toBeNull();
+  expect(screen.queryByRole("region", { name: "Work assignments" })).toBeNull();
+  expect(bridge.sendTeamMessage).not.toHaveBeenCalled();
+});
+it("counts only other saved workspaces as other attempts", async () => {
+  const bridge = api();
+  bridge.runs = vi
+    .fn()
+    .mockResolvedValue([
+      run,
+      { ...run, id: "earlier", sourceName: "Earlier source" },
+    ]);
+  render(<RunPanel api={bridge} task={{ ...task, mode: "plan" }} />);
+  expect(await screen.findByText("Other attempts (1)")).toBeInTheDocument();
+  fireEvent.click(screen.getByText("Other attempts (1)"));
+  expect(
+    screen.getByRole("button", { name: /Earlier source/ }),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: /New project · prepared/ }),
+  ).toBeNull();
+});
+it("shows the saved core assignments with the plan and allows later configuration", async () => {
+  const bridge = api();
+  bridge.configureCoordination = vi.fn().mockResolvedValue(run);
+  bridge.runs = vi.fn().mockResolvedValue([
+    {
+      ...run,
+      status: "planned",
+      plan: "Build a reading list",
+      coordination: makeCoordination(),
+    },
+  ]);
+  render(<RunPanel api={bridge} task={{ ...task, mode: "plan" }} />);
+  const ownership = await screen.findByRole("region", {
+    name: "Work assignments",
+  });
+  expect(ownership).toHaveTextContent("Maya combines the work");
+  expect(ownership).toHaveTextContent("Ellis independently reviews");
+  expect(ownership).toHaveTextContent("Jun · waiting");
+  expect(ownership).toHaveTextContent(
+    "Advanced work assignments and early reviews",
+  );
+  expect(
+    screen.getByRole("heading", {
+      name: "Review the plan, then approve building",
+    }).parentElement,
+  ).toContainElement(ownership);
+  fireEvent.click(
+    screen.getByText("Advanced work assignments and early reviews"),
+  );
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "Ownership overrides" }),
+    {
+      target: { value: "jun tests/" },
+    },
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Save coordination settings" }),
+  );
+  await waitFor(() =>
+    expect(bridge.configureCoordination).toHaveBeenCalledWith("run", {
+      ownership: "jun tests/",
+      chunkReviews: false,
+    }),
+  );
+});
+it("asks for one post-plan team approval before building", async () => {
+  const bridge = api();
+  bridge.approveLineup = vi.fn().mockResolvedValue(run);
+  bridge.runs = vi.fn().mockResolvedValue([
+    {
+      ...run,
+      status: "planned",
+      calls: 1,
+      plan: "Build a reading list",
+      coordination: makeCoordination(),
+      teamSnapshot: {
+        id: "fixed-team",
+        name: "Scully team",
+        version: 1,
+        createdAt: "now",
+        members: rosterMembers(starterRoster),
+        roster: starterRoster,
+      },
+      lineupProposal: {
+        planRevision: "revision",
+        suggestions: [],
+        discardedInvalid: false,
+        core: {
+          builderId: "maya",
+          auditorId: "ellis",
+          testerId: "jun",
+          reason: "The builder and tester can work in parallel.",
+          fallback: false,
+        },
+      },
+    },
+  ]);
+  render(<RunPanel api={bridge} task={{ ...task, mode: "plan" }} />);
+  const lineup = await screen.findByRole("region", { name: "Team lineup" });
+  expect(lineup).toHaveTextContent("Pearl's proposed team");
+  expect(screen.queryByRole("region", { name: "Work assignments" })).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Build and audit" }),
+  ).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "No tester" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Approve team for this plan" }),
+  );
+  await waitFor(() =>
+    expect(bridge.approveLineup).toHaveBeenCalledWith(
+      "run",
+      "revision",
+      [],
+      true,
+      { builderId: "maya", auditorId: "ellis", testerId: null },
+    ),
+  );
+});
+it("shows team messaging after planning begins", async () => {
+  const bridge = api();
+  bridge.runs = vi.fn().mockResolvedValue([{ ...run, status: "planning" }]);
+  render(<RunPanel api={bridge} task={{ ...task, mode: "plan" }} />);
+  expect(
+    await screen.findByRole("region", { name: "Team conversation" }),
+  ).toHaveTextContent("Ask your team");
 });
 it("shows Pearl's task-specific suggestions beside the plan without adding a dispatch action", async () => {
   const bridge = api();
@@ -183,6 +336,8 @@ it("renders recorded identity as text instead of markup", async () => {
 });
 function api() {
   return {
+    messageRoutingSettings: vi.fn().mockResolvedValue({ unclear: "pearl" }),
+    sendTeamMessage: vi.fn(),
     cloudImages: vi.fn(),
     cloudSession: vi
       .fn()

@@ -9,6 +9,39 @@ import type { Run } from "../src/shared/runs";
 import { initialTeam } from "../src/shared/contracts";
 import { defaultUsageAlertPolicy } from "../src/shared/usage-alerts";
 import { emptyCostSettings } from "../src/shared/model-cost";
+import { defaultRoleModelSettings } from "../src/shared/role-models";
+
+it("persists teammate model choices across workspace restart", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scully-role-models-"));
+  const path = join(dir, "test.sqlite");
+  let db: Store | undefined;
+  try {
+    db = new Store(path);
+    expect(db.roleModelSettings()).toEqual(defaultRoleModelSettings);
+    const updated = {
+      ...defaultRoleModelSettings,
+      builder: "zai-org/GLM-5.3",
+      specialists: {
+        ...defaultRoleModelSettings.specialists,
+        sloane: "zai-org/GLM-5.3",
+      },
+    };
+    db.setRoleModelSettings(updated);
+    db.close();
+    db = new Store(path);
+    expect(db.roleModelSettings()).toEqual(updated);
+    expect(() =>
+      db!.setRoleModelSettings({
+        ...updated,
+        specialists: { sloane: "model" },
+      }),
+    ).toThrow();
+    expect(db.roleModelSettings()).toEqual(updated);
+  } finally {
+    db?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 it("preserves approved handoffs through worker saves and SQLite restart", () => {
   const dir = mkdtempSync(join(tmpdir(), "scully-advice-persistence-"));
@@ -44,6 +77,8 @@ it("preserves approved handoffs through worker saves and SQLite restart", () => 
         specialistId: "sloane",
         planRevision: "plan-revision",
         adviceRevision: "advice-revision",
+        handoffRevision: "handoff-revision",
+        answers: ["Use account email recovery."],
         approvedAt: "2026-10-14T12:00:00.000Z",
       },
     ]);
@@ -52,6 +87,9 @@ it("preserves approved handoffs through worker saves and SQLite restart", () => 
     db.close();
     db = new Store(path);
     expect(db.getRun(run.id).approvedAdvice).toHaveLength(1);
+    expect(db.getRun(run.id).approvedAdvice?.[0].answers).toEqual([
+      "Use account email recovery.",
+    ]);
   } finally {
     db?.close();
     rmSync(dir, { recursive: true, force: true });
@@ -190,6 +228,7 @@ it("persists fixed-cast membership and keeps each earlier task roster after rest
     });
     const firstSnapshot = db.teamForTask(originalTask.id);
     const originalTeam = db.defaultTeam();
+    expect(firstSnapshot.roster).toEqual(originalTeam.roster);
     const lean = db.saveTeam({
       name: originalTeam.name,
       ...originalTeam.roster!,
@@ -219,6 +258,7 @@ it("persists fixed-cast membership and keeps each earlier task roster after rest
     });
     expect(db.teamForTask(originalTask.id)).toEqual(firstSnapshot);
     expect(db.teamForTask(leanTask.id).members).toEqual(lean.members);
+    expect(db.teamForTask(leanTask.id).roster).toEqual(lean.roster);
   } finally {
     db?.close();
     rmSync(dir, { recursive: true, force: true });
@@ -360,6 +400,63 @@ it("rejects restore when an available team already uses the deleted name", () =>
     ).toBeTruthy();
   } finally {
     db?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("persists message routing defaults and validates changes across reopen", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scully-message-settings-"));
+  const path = join(dir, "test.sqlite");
+  let db = new Store(path);
+  try {
+    expect(db.messageRoutingSettings()).toEqual({
+      unclear: "pearl",
+      specialistConsultation: "automatic",
+    });
+    expect(() =>
+      db.setMessageRoutingSettings({
+        unclear: "all",
+        specialistConsultation: "automatic",
+      }),
+    ).toThrow();
+    expect(
+      db.setMessageRoutingSettings({
+        unclear: "ask",
+        specialistConsultation: "ask",
+      }),
+    ).toEqual({
+      unclear: "ask",
+      specialistConsultation: "ask",
+    });
+    db.close();
+    db = new Store(path);
+    expect(db.messageRoutingSettings()).toEqual({
+      unclear: "ask",
+      specialistConsultation: "ask",
+    });
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+it("persists planning temperature and rejects invalid values", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scully-planning-settings-"));
+  const path = join(dir, "test.sqlite");
+  let db = new Store(path);
+  try {
+    expect(db.planningSettings()).toEqual({ temperature: 0.2 });
+    expect(() => db.setPlanningSettings({ temperature: 1.1 })).toThrow();
+    expect(() => db.setPlanningSettings({ temperature: -0.1 })).toThrow();
+    expect(() => db.setPlanningSettings({ temperature: Number.NaN })).toThrow();
+    expect(() => db.setPlanningSettings({ temperature: 0.25 })).toThrow();
+    expect(db.setPlanningSettings({ temperature: 0.4 })).toEqual({
+      temperature: 0.4,
+    });
+    db.close();
+    db = new Store(path);
+    expect(db.planningSettings()).toEqual({ temperature: 0.4 });
+  } finally {
+    db.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -769,6 +866,227 @@ it("keeps completed task and recovery records available", () => {
     expect(() => db!.deleteTask(task.id)).toThrow("saved work");
     expect(db.load().tasks).toHaveLength(1);
     expect(db.runs(task.id)).toHaveLength(1);
+  } finally {
+    db?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("archives a failed model attempt without losing usage, then restores it after restart", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scully-task-archive-"));
+  const path = join(dir, "test.sqlite");
+  let db: Store | undefined;
+  try {
+    db = new Store(path);
+    const task = db.createTask({
+      title: "Reading list",
+      description: "Build a reading list",
+      mode: "plan",
+    });
+    db.saveRun({
+      id: "failed-plan",
+      taskId: task.id,
+      status: "prepared",
+      calls: 0,
+    } as Run);
+    expect(
+      db.reserveUsage("failed-plan", {
+        id: "11111111-1111-4111-8111-111111111111",
+        stage: "propose_plan",
+        model: "nvidia/Nemotron-3_5-Lightning",
+        maxOutputTokens: 2048,
+      }),
+    ).toBe("allowed");
+    expect(db.taskDisposition(task.id).reason).toBe("in_flight");
+    expect(() => db!.archiveTask(task.id)).toThrow("in-flight");
+    db.finishUsage("failed-plan", {
+      id: "11111111-1111-4111-8111-111111111111",
+      usage: { inputTokens: 100, outputTokens: 2048 },
+    });
+    db.saveRun({
+      ...db.getRun("failed-plan"),
+      status: "failed",
+      calls: 1,
+    });
+    expect(db.taskDisposition(task.id)).toMatchObject({
+      canDelete: false,
+      canArchive: true,
+      reason: "saved_work",
+      requestCount: 1,
+    });
+    expect(() => db!.deleteTask(task.id)).toThrow("Archive it");
+    db.archiveTask(task.id);
+    expect(db.load().tasks).toEqual([]);
+    expect(db.load().archivedTasks?.map((item) => item.id)).toEqual([task.id]);
+    expect(db.usageForRun("failed-plan").requests).toBe(1);
+    expect(() => db!.archiveTask(task.id)).toThrow("already archived");
+    expect(() => db!.deleteTask(task.id)).toThrow("Restore");
+    db.close();
+    db = new Store(path);
+    expect(db.load().tasks).toEqual([]);
+    expect(db.usageForRun("failed-plan").outputTokens).toBe(2048);
+    db.restoreTask(task.id);
+    expect(db.load().tasks.map((item) => item.id)).toEqual([task.id]);
+    expect(db.load().archivedTasks).toEqual([]);
+    expect(db.getRun("failed-plan").status).toBe("failed");
+  } finally {
+    db?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("permanently deletes only the confirmed archived task and its saved records", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scully-archive-delete-"));
+  let db: Store | undefined;
+  try {
+    db = new Store(join(dir, "test.sqlite"));
+    const removed = db.createTask({
+      title: "Remove me",
+      description: "",
+      mode: "plan",
+    });
+    const retained = db.createTask({
+      title: "Keep me",
+      description: "",
+      mode: "plan",
+    });
+    db.saveRun({
+      id: "removed-run",
+      taskId: removed.id,
+      status: "prepared",
+      calls: 0,
+    } as Run);
+    expect(
+      db.reserveUsage("removed-run", {
+        id: "11111111-1111-4111-8111-111111111111",
+        stage: "propose_plan",
+        model: "test/model",
+        maxOutputTokens: 2048,
+      }),
+    ).toBe("allowed");
+    db.finishUsage("removed-run", {
+      id: "11111111-1111-4111-8111-111111111111",
+      usage: { inputTokens: 10, outputTokens: 20 },
+    });
+    db.saveRun({ ...db.getRun("removed-run"), status: "failed", calls: 1 });
+    db.saveRun({
+      id: "retained-run",
+      taskId: retained.id,
+      status: "failed",
+      calls: 1,
+    } as Run);
+    expect(() =>
+      db!.permanentlyDeleteArchivedTask(removed.id, removed.title),
+    ).toThrow("archived");
+    db.archiveTask(removed.id);
+    expect(() =>
+      db!.permanentlyDeleteArchivedTask(removed.id, "Wrong title"),
+    ).toThrow("confirmation");
+    expect(db.load().archivedTasks).toHaveLength(1);
+    expect(
+      db.permanentlyDeleteArchivedTask(removed.id, removed.title),
+    ).toMatchObject({ deletedRuns: 1 });
+    expect(db.load().archivedTasks).toHaveLength(0);
+    expect(db.load().tasks.map((task) => task.id)).toEqual([retained.id]);
+    expect(db.runs(removed.id)).toEqual([]);
+    expect(db.runs(retained.id)).toHaveLength(1);
+    const raw = new DatabaseSync(join(dir, "test.sqlite"));
+    try {
+      for (const table of [
+        "usage_requests",
+        "usage_totals",
+        "usage_cost_totals",
+      ])
+        expect(
+          (
+            raw
+              .prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE runId=?`)
+              .get("removed-run") as { count: number }
+          ).count,
+        ).toBe(0);
+      expect(
+        (
+          raw
+            .prepare("SELECT COUNT(*) AS count FROM saved_teams WHERE id=?")
+            .get(removed.teamConfigId!) as { count: number }
+        ).count,
+      ).toBe(0);
+    } finally {
+      raw.close();
+    }
+    expect(() =>
+      db!.permanentlyDeleteArchivedTask(removed.id, removed.title),
+    ).toThrow();
+  } finally {
+    db?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("reports team activity only from the requested task", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scully-task-activity-"));
+  let db: Store | undefined;
+  try {
+    db = new Store(join(dir, "test.sqlite"));
+    const first = db.createTask({
+      title: "First",
+      description: "",
+      mode: "plan",
+    });
+    const second = db.createTask({
+      title: "Second",
+      description: "",
+      mode: "plan",
+    });
+    db.saveRun({
+      id: "first-run",
+      taskId: first.id,
+      status: "complete",
+      events: [
+        { actor: "maya", text: "First work", at: "2026-10-15T00:00:00Z" },
+      ],
+    } as Run);
+    db.saveRun({
+      id: "second-run",
+      taskId: second.id,
+      status: "complete",
+      events: [
+        { actor: "maya", text: "Second work", at: "2026-10-15T00:00:00Z" },
+        { actor: "maya", text: "More work", at: "2026-10-15T00:00:01Z" },
+      ],
+    } as Run);
+    expect(db.activityForTask(first.id).byTeammate.maya.recordedEvents).toBe(1);
+    expect(db.activityForTask(second.id).byTeammate.maya.recordedEvents).toBe(
+      2,
+    );
+    expect(() => db!.activityForTask("missing")).toThrow("Task not found");
+  } finally {
+    db?.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it("adds the task archive to an existing version 12 workspace without changing its tasks", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scully-task-archive-migration-"));
+  const path = join(dir, "test.sqlite");
+  let db: Store | undefined;
+  try {
+    db = new Store(path);
+    const task = db.createTask({
+      title: "Existing",
+      description: "",
+      mode: "plan",
+    });
+    db.close();
+    db = undefined;
+    const old = new DatabaseSync(path);
+    old.exec("DROP TABLE task_archive; PRAGMA user_version=12");
+    old.close();
+    db = new Store(path);
+    expect(db.load().tasks.map((item) => item.id)).toEqual([task.id]);
+    expect(db.load().archivedTasks).toEqual([]);
+    db.archiveTask(task.id);
+    expect(db.load().tasks).toEqual([]);
   } finally {
     db?.close();
     rmSync(dir, { recursive: true, force: true });

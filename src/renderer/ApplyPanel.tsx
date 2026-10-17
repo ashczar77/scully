@@ -20,6 +20,38 @@ export function ApplyPanel({ api, run }: { api: DesktopAPI; run: Run }) {
       setBusy(false);
     }
   }
+  if (run.workspaceMode === "direct") {
+    return (
+      <section className="settings-card" aria-label="Project files">
+        <h3>Project files</h3>
+        {run.projectWorkspace ? (
+          <>
+            <p>
+              {run.projectWorkspace.writtenFiles?.length || 0} file(s) written
+              in the selected project folder. Review the changes and checks
+              before committing them.
+            </p>
+            <code className="project-path">{run.projectWorkspace.path}</code>
+            <button
+              type="button"
+              className="secondary"
+              disabled={busy}
+              onClick={() => act(() => api.openProjectWorkspace(run.id))}
+            >
+              Open project folder
+            </button>
+            {error && (
+              <p className="error" role="alert">
+                {error}
+              </p>
+            )}
+          </>
+        ) : (
+          <p>Choose a project folder before building.</p>
+        )}
+      </section>
+    );
+  }
   return (
     <section className="settings-card" aria-label="Review and apply">
       <h3>Review and apply</h3>

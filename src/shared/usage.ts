@@ -23,6 +23,7 @@ export type UsageSnapshot = {
 export type UsageStart = {
   id: string;
   stage: UsageStage;
+  actor?: string;
   model: string;
   maxOutputTokens: number;
 };
@@ -36,6 +37,9 @@ export function validUsageStart(value: unknown): value is UsageStart {
     typeof row.id === "string" &&
     requestId.test(row.id) &&
     usageStages.includes(row.stage as UsageStage) &&
+    (row.actor === undefined ||
+      (typeof row.actor === "string" &&
+        /^[a-z][a-z0-9-]{0,63}$/.test(row.actor))) &&
     typeof row.model === "string" &&
     row.model.length > 0 &&
     row.model.length <= 160 &&

@@ -39,6 +39,18 @@ it("uses fixed HTTPS endpoint, bounded output, no storage and an explicit tool r
   expect(body.max_tokens).toBe(1024);
   expect(options.body).not.toContain(config.key);
 });
+it("sends the selected teammate model for a request", async () => {
+  const fetcher = vi
+    .fn()
+    .mockResolvedValue(new Response(JSON.stringify(response())));
+  await nebiusModel(config, fetcher).complete({
+    ...request,
+    model: "nvidia/nemotron-3-super-120b-a12b",
+  });
+  expect(JSON.parse(fetcher.mock.calls[0][1].body).model).toBe(
+    "nvidia/nemotron-3-super-120b-a12b",
+  );
+});
 it("uses the request's captured output limit and rejects invalid overrides", async () => {
   const fetcher = vi
     .fn()
@@ -50,6 +62,63 @@ it("uses the request's captured output limit and rejects invalid overrides", asy
     model.complete({ ...request, maxOutputTokens: 999999 }),
   ).rejects.toThrow("Invalid output token limit");
   expect(fetcher).toHaveBeenCalledTimes(1);
+});
+it("uses a lower sampling temperature for planning so fresh drafts vary less", async () => {
+  const fetcher = vi.fn().mockImplementation(
+    async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              finish_reason: "tool_calls",
+              message: {
+                tool_calls: [
+                  {
+                    function: {
+                      name: "propose_plan",
+                      arguments: '{"plan":"Draft"}',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      ),
+  );
+  await nebiusModel(config, fetcher).complete({
+    ...request,
+    name: "propose_plan",
+  });
+  expect(JSON.parse(fetcher.mock.calls[0][1].body).temperature).toBe(0.2);
+  fetcher.mockClear();
+  await nebiusModel({ ...config, planningTemperature: 0.4 }, fetcher).complete({
+    ...request,
+    name: "propose_plan",
+  });
+  expect(JSON.parse(fetcher.mock.calls[0][1].body).temperature).toBe(0.4);
+  await expect(
+    nebiusModel({ ...config, planningTemperature: 2 }, fetcher).complete({
+      ...request,
+      name: "propose_plan",
+    }),
+  ).rejects.toThrow("Invalid planning temperature");
+});
+it("reserves Nemotron 3.5 Lightning output for a concise structured answer", async () => {
+  const fetcher = vi
+    .fn()
+    .mockImplementation(async () => new Response(JSON.stringify(response())));
+  await nebiusModel(
+    { ...config, model: "nvidia/Nemotron-3_5-Lightning" },
+    fetcher,
+  ).complete(request);
+  expect(
+    JSON.parse(fetcher.mock.calls[0][1].body).chat_template_kwargs,
+  ).toEqual({ enable_thinking: false });
+  await nebiusModel(config, fetcher).complete(request);
+  expect(JSON.parse(fetcher.mock.calls[1][1].body)).not.toHaveProperty(
+    "chat_template_kwargs",
+  );
 });
 it.each([401, 429, 500])(
   "does not retry HTTP %s or disclose raw response",
@@ -101,6 +170,62 @@ it("reports valid provider usage even when the structured result is invalid", as
     ).complete({ ...request, onUsage }),
   ).rejects.toThrow();
   expect(onUsage).toHaveBeenCalledWith({ inputTokens: 15, outputTokens: 4 });
+});
+it("explains output truncation, records safe diagnostics, and makes no automatic retry", async () => {
+  const onDiagnostic = vi.fn();
+  const fetcher = vi.fn().mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        choices: [
+          {
+            finish_reason: "length",
+            message: { content: "private partial text" },
+          },
+        ],
+        usage: { prompt_tokens: 20, completion_tokens: 1024 },
+      }),
+    ),
+  );
+  await expect(
+    nebiusModel(config, fetcher).complete({ ...request, onDiagnostic }),
+  ).rejects.toThrow("1024-token output limit");
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(onDiagnostic).toHaveBeenCalledWith(
+    expect.objectContaining({
+      stage: "result",
+      httpStatus: 200,
+      finishReason: "length",
+      outcome: "incomplete",
+      usage: { inputTokens: 20, outputTokens: 1024 },
+    }),
+  );
+  expect(JSON.stringify(onDiagnostic.mock.calls)).not.toContain(
+    "private partial text",
+  );
+});
+it("accepts a complete JSON content result when a provider ignores the forced tool format", async () => {
+  const fetcher = vi.fn().mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        choices: [
+          { finish_reason: "stop", message: { content: '{"ok":true}' } },
+        ],
+      }),
+    ),
+  );
+  expect(await nebiusModel(config, fetcher).complete(request)).toEqual({
+    ok: true,
+  });
+});
+it("captures only when explicitly supplied a local callback and never includes credentials in the body", async () => {
+  const capture = vi.fn();
+  const fetcher = vi
+    .fn()
+    .mockResolvedValue(new Response(JSON.stringify(response())));
+  await nebiusModel(config, fetcher, capture).complete(request);
+  expect(capture).toHaveBeenCalledTimes(1);
+  expect(capture.mock.calls[0][0].request).toContain("Task");
+  expect(capture.mock.calls[0][0].request).not.toContain(config.key);
 });
 it.each([
   undefined,

@@ -17,9 +17,13 @@ export function AdviceHandoffPanel({
   const [approved, setApproved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [answersByConsultation, setAnswersByConsultation] = useState<
+    Record<string, string[]>
+  >({});
   useEffect(() => {
     setReview(null);
     setApproved(false);
+    setAnswersByConsultation({});
   }, [run.id, run.approvedLineup?.planRevision]);
   if (
     run.status !== "planned" ||
@@ -29,11 +33,11 @@ export function AdviceHandoffPanel({
     return null;
   const answered = (run.consultations || []).filter(
     (item) =>
-      item.phase === "planning" &&
+      (item.phase === "planning" || item.phase === "building") &&
       item.status === "answered" &&
       item.planRevision === run.approvedLineup?.planRevision &&
       run.approvedLineup.entries.some(
-        (entry) => entry.id === item.specialistId && entry.phase === "planning",
+        (entry) => entry.id === item.specialistId && entry.phase === item.phase,
       ),
   );
   if (!answered.length) return null;
@@ -62,8 +66,11 @@ export function AdviceHandoffPanel({
         Open questions remain yours to decide.
       </p>
       {answered.map((item) => {
-        const attached = run.approvedAdvice?.some(
+        const attachment = run.approvedAdvice?.find(
           (approval) => approval.consultationId === item.id,
+        );
+        const answers = item.questions.map(
+          (_, index) => answersByConsultation[item.id]?.[index] || "",
         );
         return (
           <div className="consultation-member" key={item.id}>
@@ -72,6 +79,11 @@ export function AdviceHandoffPanel({
                 <strong>
                   {characterById(item.specialistId)?.name || item.specialistId}
                 </strong>
+                <span className="handoff-phase">
+                  {item.phase === "building"
+                    ? "Pre-build briefing"
+                    : "Planning advice"}
+                </span>
                 <p>{item.purpose}</p>
               </div>
               <button
@@ -79,20 +91,63 @@ export function AdviceHandoffPanel({
                 disabled={busy}
                 onClick={() =>
                   perform(async () => {
-                    if (attached) {
+                    if (attachment) {
                       onUpdated(await api.removeAdvice(run.id, item.id));
                     } else {
-                      setReview(await api.reviewAdvice(run.id, item.id));
+                      setReview(
+                        await api.reviewAdvice(run.id, item.id, answers),
+                      );
                     }
                   })
                 }
               >
-                {attached ? "Remove from build" : "Review builder handoff"}
+                {attachment ? "Remove from build" : "Review builder handoff"}
               </button>
             </div>
+            {!attachment && item.questions.length > 0 && (
+              <div className="handoff-questions">
+                <h5>Your decisions</h5>
+                <p>
+                  Answer the specialist's questions that you can decide now.
+                  Blank answers remain open for the builders. Answers are saved
+                  when you attach this handoff.
+                </p>
+                {item.questions.map((question, index) => (
+                  <label key={index}>
+                    <span>{question}</span>
+                    <textarea
+                      aria-label={`Your answer to: ${question}`}
+                      maxLength={1000}
+                      rows={2}
+                      value={answers[index]}
+                      onChange={(event) => {
+                        setReview(null);
+                        setApproved(false);
+                        setAnswersByConsultation((current) => {
+                          const next = [...(current[item.id] || answers)];
+                          next[index] = event.target.value;
+                          return { ...current, [item.id]: next };
+                        });
+                      }}
+                    />
+                  </label>
+                ))}
+              </div>
+            )}
+            {attachment && item.questions.length > 0 && (
+              <div className="handoff-questions">
+                <h5>Your saved decisions</h5>
+                {item.questions.map((question, index) => (
+                  <p key={index}>
+                    <strong>{question}</strong>{" "}
+                    {attachment.answers?.[index] || "Unanswered"}
+                  </p>
+                ))}
+              </div>
+            )}
             <p className="muted">
-              {attached
-                ? "Included in the next builder requests."
+              {attachment
+                ? `Included in the next builder requests. ${attachment.answers?.filter(Boolean).length || 0} user answers saved.`
                 : "Advice stays here until you approve a handoff."}
             </p>
           </div>

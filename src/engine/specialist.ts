@@ -9,6 +9,8 @@ import { commandRevision } from "./revision";
 import { randomUUID } from "node:crypto";
 import { runRole } from "../shared/teams";
 import { bindRunTeam } from "./character-context";
+import { applyCoreLineup } from "../shared/core-lineup";
+import { lineupPlanRevision } from "./revision";
 export async function executeSpecialist(
   run: Run,
   task: Task,
@@ -18,6 +20,15 @@ export async function executeSpecialist(
 ) {
   const next = structuredClone(run);
   team = bindRunTeam(team, next.teamSnapshot?.roster);
+  if (next.approvedLineup?.core) {
+    if (
+      !next.lineupProposal?.core ||
+      next.approvedLineup.planRevision !== next.lineupProposal.planRevision ||
+      next.lineupProposal.planRevision !== lineupPlanRevision(next, task)
+    )
+      throw new Error("Work lineup approval does not match this plan");
+    team = applyCoreLineup(team, next.approvedLineup.core);
+  }
   const builder = team.find((member) => runRole(member) === "builder");
   const auditor = team.find((member) => runRole(member) === "auditor");
   if (!builder || !auditor || builder.id === auditor.id)
@@ -59,7 +70,7 @@ export async function executeSpecialist(
       next,
       actor,
       name,
-      () => model.complete({ system, name, schema, input }),
+      () => model.complete({ actor, system, name, schema, input }),
       emit,
     );
   };

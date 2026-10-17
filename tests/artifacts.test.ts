@@ -1,5 +1,6 @@
 // @vitest-environment node
 import {
+  existsSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
@@ -11,7 +12,99 @@ import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { inspectLocalArtifacts } from "../src/main/artifacts";
+import {
+  inspectLocalArtifacts,
+  planTaskArtifactRemoval,
+} from "../src/main/artifacts";
+import type { Run } from "../src/shared/runs";
+
+it("removes only attributable private files for a deleted task", () => {
+  const root = mkdtempSync(join(tmpdir(), "scully-task-artifacts-"));
+  try {
+    const hash = createHash("sha256").update("run-a").digest("hex");
+    const applicationId = "11111111-1111-4111-8111-111111111111";
+    mkdirSync(join(root, "drafts", "run-a"), { recursive: true });
+    mkdirSync(join(root, "drafts", "run-b"), { recursive: true });
+    mkdirSync(join(root, "executions", `check-r-${hash}-one`), {
+      recursive: true,
+    });
+    mkdirSync(join(root, "executions", "check-old"), { recursive: true });
+    mkdirSync(join(root, "applications", applicationId), { recursive: true });
+    mkdirSync(join(root, "applications", "other-application"), {
+      recursive: true,
+    });
+    mkdirSync(join(root, "request-capture"));
+    const ownedCapture = `capture-r-${hash}-11111111-1111-4111-8111-111111111111.json`;
+    const otherCapture = `capture-r-${createHash("sha256").update("run-b").digest("hex")}-22222222-2222-4222-8222-222222222222.json`;
+    writeFileSync(join(root, "request-capture", ownedCapture), "private");
+    writeFileSync(join(root, "request-capture", otherCapture), "other");
+    writeFileSync(join(root, "drafts", "run-a", "draft.txt"), "private");
+    writeFileSync(join(root, "drafts", "run-b", "draft.txt"), "other");
+    const result = planTaskArtifactRemoval(root, [
+      { id: "run-a", applications: [{ id: applicationId }] } as unknown as Run,
+    ])();
+    expect(result).toEqual({ removed: 4, failed: 0 });
+    expect(() =>
+      readFileSync(join(root, "drafts", "run-a", "draft.txt")),
+    ).toThrow();
+    expect(
+      readFileSync(join(root, "drafts", "run-b", "draft.txt"), "utf8"),
+    ).toBe("other");
+    expect(existsSync(join(root, "executions", "check-old"))).toBe(true);
+    expect(existsSync(join(root, "applications", applicationId))).toBe(false);
+    expect(existsSync(join(root, "applications", "other-application"))).toBe(
+      true,
+    );
+    expect(existsSync(join(root, "request-capture", ownedCapture))).toBe(false);
+    expect(
+      readFileSync(join(root, "request-capture", otherCapture), "utf8"),
+    ).toBe("other");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it("refuses private artifact removal when a task folder contains a symlink", () => {
+  const root = mkdtempSync(join(tmpdir(), "scully-task-artifacts-"));
+  const outside = mkdtempSync(join(tmpdir(), "scully-task-external-"));
+  try {
+    mkdirSync(join(root, "drafts", "run-a"), { recursive: true });
+    writeFileSync(join(outside, "keep.txt"), "keep");
+    symlinkSync(outside, join(root, "drafts", "run-a", "linked"));
+    expect(() =>
+      planTaskArtifactRemoval(root, [{ id: "run-a" } as Run]),
+    ).toThrow("unsupported");
+    expect(readFileSync(join(outside, "keep.txt"), "utf8")).toBe("keep");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+it("refuses an owned raw capture that is a symlink", () => {
+  const root = mkdtempSync(join(tmpdir(), "scully-task-artifacts-"));
+  const outside = mkdtempSync(join(tmpdir(), "scully-task-external-"));
+  try {
+    const hash = createHash("sha256").update("run-a").digest("hex");
+    mkdirSync(join(root, "request-capture"));
+    writeFileSync(join(outside, "keep.json"), "private");
+    symlinkSync(
+      join(outside, "keep.json"),
+      join(
+        root,
+        "request-capture",
+        `capture-r-${hash}-11111111-1111-4111-8111-111111111111.json`,
+      ),
+    );
+    expect(() =>
+      planTaskArtifactRemoval(root, [{ id: "run-a" } as Run]),
+    ).toThrow("unsupported");
+    expect(readFileSync(join(outside, "keep.json"), "utf8")).toBe("private");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
 
 it("counts only app-owned artifact roots without reading or changing file content", () => {
   const root = mkdtempSync(join(tmpdir(), "scully-artifacts-"));

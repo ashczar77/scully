@@ -54,8 +54,11 @@ it("shows unknown portions and saves a model-bound user estimate", async () => {
     screen.getByText(/Tavily: not connected in this build/),
   ).toHaveTextContent("no Tavily requests");
   expect(
-    screen.getByText(/Next request projection: unknown/),
+    screen.getByText(/Next Pearl request projection: unknown/),
   ).toBeInTheDocument();
+  expect(
+    screen.getByText(/Other teammates may use different models/),
+  ).toHaveTextContent("Their rates are assessed when they make requests");
   fireEvent.change(screen.getByLabelText("USD warning budget"), {
     target: { value: "1.25" },
   });

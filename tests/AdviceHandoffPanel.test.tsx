@@ -53,6 +53,9 @@ it("requires a separate consent before attaching exact advice as text", async ()
     purpose: "Check the first-run flow",
     advice: "<script>show a clear error</script>",
     questions: ["Which users need access?"],
+    questionDecisions: [
+      { question: "Which users need access?", answer: "New users." },
+    ],
   });
   const reviewAdvice = vi.fn().mockResolvedValue({
     token: "ticket",
@@ -60,6 +63,8 @@ it("requires a separate consent before attaching exact advice as text", async ()
     consultationId: "consult",
     planRevision: "revision",
     adviceRevision: "advice-revision",
+    handoffRevision: "handoff-revision",
+    answers: ["New users."],
     handoff,
     inputBytes: 163,
     writerRequests: 2,
@@ -72,8 +77,19 @@ it("requires a separate consent before attaching exact advice as text", async ()
   const onUpdated = vi.fn();
   render(<AdviceHandoffPanel api={api} run={planned} onUpdated={onUpdated} />);
   expect(approveAdvice).not.toHaveBeenCalled();
+  fireEvent.change(
+    screen.getByRole("textbox", {
+      name: "Your answer to: Which users need access?",
+    }),
+    {
+      target: { value: "New users." },
+    },
+  );
   fireEvent.click(
     screen.getByRole("button", { name: "Review builder handoff" }),
+  );
+  await waitFor(() =>
+    expect(reviewAdvice).toHaveBeenCalledWith("run", "consult", ["New users."]),
   );
   expect(await screen.findByText(handoff)).toBeInTheDocument();
   expect(
@@ -117,4 +133,68 @@ it("can remove attached advice without requesting another consultation", async (
   await waitFor(() =>
     expect(removeAdvice).toHaveBeenCalledWith("run", "consult"),
   );
+});
+
+it("clears approval review when the user changes an answer", async () => {
+  const reviewAdvice = vi.fn().mockResolvedValue({
+    token: "ticket",
+    runId: "run",
+    consultationId: "consult",
+    planRevision: "revision",
+    adviceRevision: "advice-revision",
+    handoffRevision: "handoff-revision",
+    answers: [""],
+    handoff: "Exact answer preview",
+    inputBytes: 20,
+    writerRequests: 2,
+    expiresAt: Date.now() + 1000,
+  });
+  const api = { reviewAdvice } as unknown as DesktopAPI;
+  render(<AdviceHandoffPanel api={api} run={planned} onUpdated={vi.fn()} />);
+  fireEvent.click(
+    screen.getByRole("button", { name: "Review builder handoff" }),
+  );
+  expect(await screen.findByText("Exact answer preview")).toBeInTheDocument();
+  fireEvent.change(
+    screen.getByRole("textbox", {
+      name: "Your answer to: Which users need access?",
+    }),
+    {
+      target: { value: "Returning users." },
+    },
+  );
+  expect(
+    screen.queryByRole("button", { name: "Attach advice" }),
+  ).not.toBeInTheDocument();
+});
+
+it("offers answered pre-build advice for a separate builder handoff", () => {
+  const api = { reviewAdvice: vi.fn() } as unknown as DesktopAPI;
+  render(
+    <AdviceHandoffPanel
+      api={api}
+      run={{
+        ...planned,
+        approvedLineup: {
+          ...planned.approvedLineup!,
+          entries: [
+            { id: "rafi", phase: "building", purpose: "Check architecture" },
+          ],
+        },
+        consultations: [
+          {
+            ...planned.consultations![0],
+            specialistId: "rafi",
+            phase: "building",
+            purpose: "Check architecture",
+          },
+        ],
+      }}
+      onUpdated={vi.fn()}
+    />,
+  );
+  expect(screen.getByText("Pre-build briefing")).toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "Review builder handoff" }),
+  ).toBeInTheDocument();
 });

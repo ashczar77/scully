@@ -105,7 +105,7 @@ it.each([true, false])(
         description: "Export addition, including negative and zero inputs",
         mode: "work",
       });
-      const team = store.load().teammates;
+      const team = store.teamForTask(task.id).members;
       const prepared = manager.prepare(task.id, null, []);
       const baselineRoot = join(root, "baseline");
       const parent = await executeLoop(
@@ -165,6 +165,7 @@ it.each([true, false])(
               },
         ),
         save,
+        team,
       );
       save(audited);
       const beforeCheck = await execute(audited);

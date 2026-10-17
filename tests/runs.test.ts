@@ -5,6 +5,7 @@ import {
   parseAudit,
   validateSession,
   containsSecret,
+  normalizeDraftPath,
 } from "../src/shared/runs";
 it.each([
   "../escape",
@@ -29,6 +30,23 @@ it.each(["src/main.rs", "index.html", "tests/test_service.py", "pom.xml"])(
   "accepts cross-language source %s",
   (path) => expect(() => safePath(path)).not.toThrow(),
 );
+it("normalizes a harmless current-directory prefix before checking duplicate paths", () => {
+  expect(normalizeDraftPath("./src/app.ts")).toBe("src/app.ts");
+  expect(() => normalizeDraftPath("../src/app.ts")).toThrow(
+    /parent directory/i,
+  );
+  expect(() => normalizeDraftPath("./.env")).toThrow(/hidden or private/i);
+  expect(() => normalizeDraftPath("/private/app.ts")).toThrow(/absolute/i);
+  expect(() =>
+    parseDraft({
+      summary: "x",
+      files: [
+        { path: "./src/app.ts", content: "a" },
+        { path: "src/app.ts", content: "b" },
+      ],
+    }),
+  ).toThrow(/Conflicting output paths/);
+});
 it("rejects duplicated, case-colliding and parent-child paths", () => {
   for (const paths of [
     ["a", "a"],

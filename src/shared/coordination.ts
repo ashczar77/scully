@@ -14,9 +14,10 @@ export type Writer = string;
 export type Assignment = {
   owner: Writer;
   scope: string;
-  status: "waiting" | "working" | "ready" | "failed";
+  status: "waiting" | "working" | "awaiting_input" | "ready" | "failed";
   summary: string;
   files: SourceFile[];
+  commands?: import("./commands").CommandSpec[];
 };
 export type Coordination = {
   rules?: OwnershipRule[];

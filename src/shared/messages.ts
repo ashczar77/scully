@@ -1,9 +1,19 @@
 export type TeamMessageInput = { text: string; intent: "continue" | "replan" };
-export type TeamMessage = TeamMessageInput & { id: string; at: string };
+export type TeamMessage = TeamMessageInput & {
+  id: string;
+  at: string;
+  questionId?: string;
+};
 export type ReplyRecipient = Pick<
   import("./contracts").Teammate,
   "id" | "name" | "role" | "instructions"
->;
+> & {
+  assignment?: {
+    phase: import("./lineup-proposal").SpecialistPhase;
+    purpose: string;
+    planRevision: string;
+  };
+};
 export type ReplyReview = {
   duringWork?: boolean;
   recipient?: ReplyRecipient;

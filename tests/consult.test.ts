@@ -76,3 +76,24 @@ it("lets a verification specialist assess only the supplied draft without claimi
   ).rejects.toThrow(/phase/i);
   expect(complete).toHaveBeenCalledOnce();
 });
+
+it("gives a building specialist a plan-only pre-build briefing", async () => {
+  const complete = vi.fn().mockResolvedValue({
+    advice: "Use explicit state transitions.",
+    questions: [],
+  });
+  const context = JSON.stringify({
+    specialistId: "rafi",
+    phase: "building",
+    purpose: "Check recovery architecture",
+    task: { title: "Account recovery" },
+    plan: "Build a recovery flow",
+  });
+  await consultSpecialist(context, { complete });
+  expect(complete.mock.calls[0][0].input).toBe(context);
+  expect(complete.mock.calls[0][0].system).toMatch(/before writers start/);
+  expect(complete.mock.calls[0][0].system).toMatch(
+    /Do not claim you inspected source files/,
+  );
+  expect(complete.mock.calls[0][0].system).toMatch(/read-only/);
+});

@@ -5,16 +5,31 @@ import { approvedAdviceForBuild } from "./advice-handoff";
 import { makeCoordination, requestLimit } from "../shared/coordination";
 import { runRole } from "../shared/teams";
 import { bindRunTeam } from "./character-context";
-import { characterCatalog } from "../shared/character-catalog";
+import { characterById, characterCatalog } from "../shared/character-catalog";
+import { messageMatchesTeammateTopic } from "../shared/message-routing";
 import { parseSpecialistSuggestions } from "../shared/lineup-proposal";
+import {
+  planQuestions,
+  planningTurnContext,
+  repeatsAnsweredQuestion,
+  samePlanText,
+  echoesConsultationQuestion,
+  userAuthorizedSpecialistConsultation,
+  cleanPlanningText,
+  coordinatorReply,
+  asksForResolvedChoices,
+} from "../shared/plan-conversation";
+import { applyCoreLineup, parseCoreProposal } from "../shared/core-lineup";
 import { integrate, snapshotRevision } from "./integration";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import type { Task, Teammate } from "../shared/contracts";
 import { parseAudit, parseDraft, safePath, type Run } from "../shared/runs";
+import { writeProjectWorkspace } from "../main/project-workspace";
 import type { Model } from "./provider";
 import { whileRequest } from "./progress";
 import { parseSuggestions } from "../shared/suggestions";
+import type { RequestPauseGate } from "./request-pause";
 const object = (properties: object, required: string[]) => ({
   type: "object",
   properties,
@@ -45,6 +60,7 @@ const builderSchema = object(
       maxItems: 12,
       items: object({ path: string, content: string }, ["path", "content"]),
     },
+    questions: { type: "array", maxItems: 3, items: string },
   },
   ["summary", "files", "commands"],
 );
@@ -75,9 +91,19 @@ export async function executeLoop(
   model: Model,
   outputRoot: string,
   emit: (run: Run) => void,
+  pauseGate?: RequestPauseGate,
 ): Promise<Run> {
   const next = structuredClone(run);
   team = bindRunTeam(team, next.teamSnapshot?.roster);
+  if (next.approvedLineup?.core) {
+    if (
+      !next.lineupProposal?.core ||
+      next.approvedLineup.planRevision !== next.lineupProposal.planRevision ||
+      next.lineupProposal.planRevision !== lineupPlanRevision(next, task)
+    )
+      throw new Error("Work lineup approval does not match this plan");
+    team = applyCoreLineup(team, next.approvedLineup.core);
+  }
   const builder = team.find((member) => runRole(member) === "builder");
   const auditor = team.find((member) => runRole(member) === "auditor");
   if (!builder || !auditor || builder.id === auditor.id)
@@ -98,12 +124,13 @@ export async function executeLoop(
       next.coordination.auditor !== auditor.id)
   )
     throw new Error("Run coordination does not match its saved team");
-  const event = (actor: string, text: string) => {
+  const event = (actor: string, text: string, questionId?: string) => {
     const person = team.find((member) => member.id === actor);
     next.events.push({
       actor,
       text,
       at: new Date().toISOString(),
+      ...(questionId && { questionId }),
       ...(person && {
         actorName: person.name,
         actorRole: person.role,
@@ -114,8 +141,20 @@ export async function executeLoop(
   };
   const context = JSON.stringify({
     task: { title: task.title, description: task.description },
+    conversation: (next.messages || []).slice(-8).map((message) => ({
+      from: "user",
+      text: message.text,
+      reply:
+        next.replies?.find(
+          (reply) =>
+            reply.messageId === message.id && reply.status === "answered",
+        )?.answer || null,
+    })),
     selectedFiles: next.files,
     plan: next.plan,
+    buildQuestionAnswers: (next.pendingQuestions || [])
+      .filter((question) => question.answer)
+      .map(({ actor, text, answer }) => ({ actor, question: text, answer })),
     ownershipRules: next.coordination?.rules || [],
     correction: next.correction
       ? { ...next.correction, recheck: undefined }
@@ -126,8 +165,14 @@ export async function executeLoop(
   const builderContext = specialistAdvice.length
     ? JSON.stringify({ ...JSON.parse(context), specialistAdvice })
     : context;
-  if (next.status !== "prepared" && next.status !== "planned")
+  const resumingBuild = next.status === "awaiting_input";
+  if (next.status !== "prepared" && next.status !== "planned" && !resumingBuild)
     throw new Error("Run cannot be started from this state");
+  if (
+    resumingBuild &&
+    next.pendingQuestions?.some((question) => !question.answer)
+  )
+    throw new Error("Answer the teammate's question before continuing");
   const call = async (
     actor: string,
     system: string,
@@ -137,14 +182,21 @@ export async function executeLoop(
   ) => {
     if (next.calls >= requestLimit(next))
       throw new Error("Run call limit reached");
-    next.calls++;
-    return whileRequest(
-      next,
-      actor,
-      name,
-      () => model.complete({ system, name, schema, input }),
-      emit,
-    );
+    if (pauseGate) await pauseGate.enter();
+    try {
+      if (next.calls >= requestLimit(next))
+        throw new Error("Run call limit reached");
+      next.calls++;
+      return await whileRequest(
+        next,
+        actor,
+        name,
+        () => model.complete({ actor, system, name, schema, input }),
+        emit,
+      );
+    } finally {
+      pauseGate?.leave();
+    }
   };
   try {
     if (
@@ -162,6 +214,7 @@ export async function executeLoop(
         ? object(
             {
               plan: string,
+              roomMessage: { type: "string", maxLength: 1000 },
               suggestedSpecialists: {
                 type: "array",
                 maxItems: 3,
@@ -177,26 +230,88 @@ export async function executeLoop(
                   ["id", "phase", "reason"],
                 ),
               },
+              suggestedTeam: {
+                ...object(
+                  {
+                    builderId: string,
+                    auditorId: string,
+                    testerId: { type: ["string", "null"] },
+                    reason: { type: "string", maxLength: 360 },
+                  },
+                  ["builderId", "auditorId", "testerId", "reason"],
+                ),
+                type: ["object", "null"],
+              },
+              consultation: {
+                type: ["object", "null"],
+                properties: {
+                  memberId: string,
+                  question: string,
+                },
+                required: ["memberId", "question"],
+                additionalProperties: false,
+              },
             },
-            ["plan", "suggestedSpecialists"],
+            ["plan", "suggestedSpecialists", "suggestedTeam"],
           )
-        : object({ plan: string }, ["plan"]);
+        : object({ plan: string, roomMessage: string }, ["plan"]);
+      const turn = planningTurnContext(next);
+      const buildRequests = next.coordination
+        ? next.coordination.assignments.length +
+          1 +
+          (next.coordination.settings?.chunkReviews
+            ? next.coordination.assignments.length
+            : 0)
+        : 2;
+      const planningRequestLimit = next.usagePolicy
+        ? Math.max(1, requestLimit(next) - buildRequests)
+        : requestLimit(next);
       const planningContext = coordinator
         ? JSON.stringify({
             ...JSON.parse(context),
+            ...turn,
+            redirection: next.redirection
+              ? {
+                  previousPlan: next.redirection.previousPlan,
+                  previousDrafts: next.redirection.previousDrafts,
+                }
+              : null,
             savedTeamIds: team.map((member) => member.id),
             availableSpecialists: characterCatalog
               .filter((character) => character.role === "specialist")
               .map(({ id, name, specialty }) => ({ id, name, specialty })),
+            availableTeamRoles: team
+              .filter((member) =>
+                ["builder", "tester", "auditor"].includes(
+                  characterCatalog.find(
+                    (character) => character.id === member.id,
+                  )?.role || "",
+                ),
+              )
+              .map((member) => ({
+                id: member.id,
+                name: member.name,
+                role: characterCatalog.find(
+                  (character) => character.id === member.id,
+                )?.role,
+              })),
+            specialistConsultationPolicy:
+              next.planningConsultationPolicy || "automatic",
           })
         : context;
-      const result = (await call(
+      let result = (await call(
         planner.id,
-        `${safety} ${coordinator ? "You are the project coordinator. Prepare a reviewable plan and suggest up to three relevant specialists for specific phases. Use only the listed specialist IDs, give a task-specific reason for each, and return an empty list when none would help. Suggestions do not activate anyone or change the approved budget. Identify decisions the user must make and do not write code." : "You are the planner."} ${planner.instructions} If redirection is present, reconcile its instructions in order with the original goal; newer instructions supersede incompatible old requirements. The previous plan and draft are reference material, not approved work to continue blindly. Explain what work should be retained or discarded.`,
+        `${safety} ${coordinator ? "You are Pearl, the project coordinator in an ongoing conversation. Write roomMessage as your actual reply to the user now: address them as you, acknowledge their latest answer, say what it changes, and lead naturally into any remaining choices. Do not say 'the user wants', repeat a task brief, or expose internal plan headings. Keep it to one or two short paragraphs. If the plan includes open questions, ask those questions naturally in roomMessage. Do not repeat a question within that message. If there are no open questions, answer the user's latest question or acknowledge the decision and explain the next step. The plan field is a separate draft artifact, not your spoken reply. The conversation field includes the recent user and Pearl turns in order. Respond to latestUserMessage as ordinary language, including follow-up questions, corrections, and unnumbered answers. answeredChoices is only an optional hint for explicitly numbered replies, never the sole source of decisions. Infer settled choices from the full conversation and prior plan. Incorporate those answers into the revised plan. Do not repeat a question that the user answered. If an answer is ambiguous, ask one narrower follow-up that acknowledges what they said. Prepare a reviewable draft, but do not finalize it while essential product choices remain unanswered. Begin the plan with a ## Conversation Summary containing one or two complete, natural sentences in your own voice. Ask only essential open product questions in ## User Decisions Required. Ask at most two questions per turn, and only about outcome-changing, security or data-boundary, or hard-to-reverse choices. Treat reversible UI and implementation details as draft assumptions. Write each unresolved choice as a complete direct question ending with a question mark, with a reasonable default where useful. Never list a confirmed choice as a question; put confirmed choices in another section. Omit User Decisions Required when the user's replies resolved the choices. If a teammate's expertise would materially improve this particular user turn, request one consultation using their saved member ID and a focused question; otherwise return null. For specialists, the question must relate directly to latestUserMessage; do not consult a specialist for an older or generic task concern. If specialistConsultationPolicy is ask, ask the user in your Conversation Summary whether you may ask that named specialist and wait for their answer before requesting the consultation. Never request a general review of a draft that has not been built. Do not consult to decide a product preference that the user must answer. Before the user chooses a technology, describe that part without presuming a choice. Do not discuss or choose the team while questions remain; return suggestedTeam as null. Once choices are resolved, recommend exactly one builder and independent auditor, plus one tester or null, using availableTeamRoles. You coordinate the team and do not personally write code; refer to Maya, Jun, and Ellis by their assigned roles, and describe your next action as handing work to them once approved. Do not claim tests passed. Do not invent prices, hours, or an approved budget. A local profile name or copy-paste UUID is not secure authentication; when the user asks for real accounts, ask about the identity provider and data boundary rather than inventing security." : "You are the planner. Write roomMessage as a concise direct reply to the user."} ${planner.instructions} If redirection is present, the previous plan is reference material, not a reply to repeat. Newer user messages supersede incompatible old requirements.`,
         "propose_plan",
         plannerSchema,
         planningContext,
-      )) as { plan: string; suggestedSpecialists?: unknown };
+      )) as {
+        plan: string;
+        roomMessage?: string;
+        suggestedSpecialists?: unknown;
+        suggestedTeam?: unknown;
+        consultation?: { memberId: string; question: string } | null;
+      };
       if (
         !result ||
         typeof result.plan !== "string" ||
@@ -204,30 +319,194 @@ export async function executeLoop(
         result.plan.length > 12000
       )
         throw new Error("Invalid plan response");
-      next.plan = result.plan;
-      if (coordinator) {
+      const request = result.consultation;
+      const member =
+        request &&
+        typeof request.memberId === "string" &&
+        typeof request.question === "string" &&
+        request.question.trim().length > 0 &&
+        request.question.length <= 400
+          ? team.find(
+              (person) =>
+                person.id === request.memberId && person.id !== coordinator?.id,
+            )
+          : undefined;
+      const specialist =
+        member && characterById(member.id)?.role === "specialist";
+      const consultationAllowed =
+        !specialist ||
+        (next.planningConsultationPolicy === "ask"
+          ? userAuthorizedSpecialistConsultation(
+              turn.latestUserMessage,
+              next.redirection?.previousPlan || "",
+              member!.name,
+            )
+          : messageMatchesTeammateTopic(turn.latestUserMessage, member!));
+      if (
+        coordinator &&
+        member &&
+        consultationAllowed &&
+        next.calls + 2 <= planningRequestLimit
+      ) {
+        event(
+          coordinator.id,
+          `${member.name}, could you look at this for me? ${request!.question.trim()}`,
+        );
+        event(member.id, "On it, Pearl. I'll check and report back.");
+        let advice = (await call(
+          member.id,
+          `${safety} You are ${member.name}. Give focused, read-only advice for Pearl's planning question. The user's choices in task.conversation are settled unless the user changes them. Do not substitute your own product preference for an explicit user choice. Do not write code, run commands, or claim checks were performed. ${member.instructions}`,
+          "propose_plan",
+          object({ advice: string }, ["advice"]),
+          JSON.stringify({
+            task: planningContext,
+            question: request!.question,
+          }),
+        )) as { advice?: unknown };
+        if (
+          typeof advice?.advice !== "string" ||
+          !advice.advice.trim() ||
+          advice.advice.length > 5000
+        )
+          throw new Error("Invalid teammate planning advice");
+        if (echoesConsultationQuestion(advice.advice, request!.question)) {
+          if (next.calls >= requestLimit(next))
+            throw new Error(
+              "Teammate repeated the question instead of answering it",
+            );
+          advice = (await call(
+            member.id,
+            `${safety} You are ${member.name}. Your previous response only repeated Pearl's question. Answer it with specific, useful advice in your own words. Do not repeat the assignment. ${member.instructions}`,
+            "propose_plan",
+            object({ advice: string }, ["advice"]),
+            JSON.stringify({
+              task: planningContext,
+              question: request!.question,
+            }),
+          )) as { advice?: unknown };
+          if (
+            typeof advice?.advice !== "string" ||
+            !advice.advice.trim() ||
+            advice.advice.length > 5000 ||
+            echoesConsultationQuestion(advice.advice, request!.question)
+          )
+            throw new Error(
+              "Teammate repeated the question instead of answering it",
+            );
+        }
+        event(member.id, advice.advice);
+        result = (await call(
+          coordinator.id,
+          `${safety} You are Pearl. Respond directly to the user's latest message in roomMessage, then provide an updated, reviewable draft plan informed by the teammate's advice. Acknowledge answers already given, and ask only essential unresolved questions as complete direct questions in the plan. Do not request another consultation in this turn. ${coordinator.instructions}`,
+          "propose_plan",
+          plannerSchema,
+          JSON.stringify({
+            task: planningContext,
+            earlierPlan: result.plan,
+            teammate: member.name,
+            advice: advice.advice,
+          }),
+        )) as typeof result;
+        if (
+          typeof result?.plan !== "string" ||
+          !result.plan.trim() ||
+          result.plan.length > 12000
+        )
+          throw new Error("Invalid revised plan response");
+      }
+      if (coordinator && next.redirection?.previousPlan) {
+        const previousPlan = next.redirection.previousPlan;
+        const revisionIssue = (candidate: typeof result) => {
+          if (typeof candidate?.plan !== "string" || !candidate.plan.trim())
+            return "The revised draft was empty.";
+          if (
+            !turn.latestUserMessage.includes("?") &&
+            samePlanText(candidate.plan, previousPlan)
+          )
+            return "The draft was unchanged after your message.";
+          if (asksForResolvedChoices(candidate.plan))
+            return "The draft listed settled choices as open questions.";
+          if (
+            repeatsAnsweredQuestion(
+              candidate.plan,
+              previousPlan,
+              turn.latestUserMessage,
+            )
+          )
+            return "The draft repeated a question you answered.";
+          return "";
+        };
+        let issue = revisionIssue(result);
+        for (
+          let repair = 0;
+          issue && repair < 2 && next.calls < planningRequestLimit;
+          repair++
+        ) {
+          result = (await call(
+            coordinator.id,
+            `${safety} You are Pearl, the coordinator. Correct the draft once using the full conversation and latestUserMessage. The problem is: ${issue} Answer the user's actual message, including unnumbered replies and questions, instead of repeating old questions. Keep roomMessage concise and do not claim to be the builder. ${coordinator.instructions}`,
+            "propose_plan",
+            plannerSchema,
+            JSON.stringify({
+              ...JSON.parse(planningContext),
+              rejectedDraft: result.plan,
+              revisionIssue: issue,
+            }),
+          )) as typeof result;
+          issue = revisionIssue(result);
+        }
+        if (issue)
+          throw new Error(
+            `Pearl did not reflect your latest message in the plan. ${issue} Your message is saved; ask Pearl to try again or add a clarification.`,
+          );
+      }
+      next.plan = cleanPlanningText(result.plan);
+      if (!next.plan) throw new Error("Invalid plan response");
+      next.planReply =
+        typeof result.roomMessage === "string" &&
+        result.roomMessage.trim() &&
+        result.roomMessage.length <= 2000 &&
+        !/[\x00-\x08\x0b-\x1f\x7f]/.test(result.roomMessage)
+          ? coordinator
+            ? coordinatorReply(
+                result.roomMessage,
+                planQuestions(next.plan).length === 0,
+              )
+            : cleanPlanningText(result.roomMessage)
+          : undefined;
+      if (coordinator && planQuestions(result.plan).length === 0) {
         const parsed = parseSpecialistSuggestions(result.suggestedSpecialists);
         next.lineupProposal = {
           planRevision: lineupPlanRevision(next, task),
           ...parsed,
+          core: parseCoreProposal(result.suggestedTeam, team),
         };
       }
       next.status = "planned";
-      event(planner.id, result.plan);
+      event(planner.id, next.plan);
       if (next.lineupProposal?.discardedInvalid)
         event(
           "system",
           "Some specialist suggestions were invalid and were not saved or dispatched.",
+        );
+      if (next.lineupProposal?.core?.fallback)
+        event(
+          "system",
+          "The work recommendation was invalid or missing. The saved team lineup is shown for review instead.",
         );
       return next;
     }
     if (
       next.coordination &&
       next.calls +
-        (next.coordination.assignments.length +
+        (next.coordination.assignments.filter(
+          (assignment) => assignment.status !== "ready",
+        ).length +
           1 +
           (next.coordination.settings?.chunkReviews
-            ? next.coordination.assignments.length
+            ? next.coordination.assignments.filter(
+                (assignment) => assignment.status !== "ready",
+              ).length
             : 0)) >
         requestLimit(next)
     )
@@ -237,8 +516,31 @@ export async function executeLoop(
     next.status = "building";
     event(
       "system",
-      "Builder is preparing isolated changes. Your source project will not be modified.",
+      next.workspaceMode === "direct"
+        ? "Build approved. The team is working in the selected project folder."
+        : "Build approved. Preparing private drafts; the source project has not changed.",
     );
+    if (next.coordination) {
+      const writerRequests = next.coordination.assignments
+        .filter((assignment) => assignment.status !== "ready")
+        .map((assignment) => {
+          const name =
+            team.find((member) => member.id === assignment.owner)?.name ||
+            assignment.owner;
+          return `${name}, please take ${assignment.scope.toLowerCase()}`;
+        });
+      event(
+        coordinator?.id || "system",
+        resumingBuild
+          ? `I have your answers. ${writerRequests.join(". ")}. I’ll bring the completed work together for ${auditor.name} to review.`
+          : `${writerRequests.join(". ")}. Work in separate proposals and report back when ready. I’ll combine them for ${auditor.name} to review.`,
+      );
+    } else {
+      event(
+        coordinator?.id || "system",
+        `I’m handing the approved plan to ${builder.name}. ${auditor.name} will review the draft after it is ready.`,
+      );
+    }
     let draft: {
       summary: string;
       files: import("../shared/runs").SourceFile[];
@@ -248,22 +550,30 @@ export async function executeLoop(
       const coordination = next.coordination;
       const started = Date.now();
       const branchRoot = outputRoot + ".branches";
-      await mkdir(branchRoot, { recursive: false });
+      await mkdir(branchRoot, { recursive: true });
       const settled = await Promise.allSettled(
         coordination.assignments.map(async (assignment) => {
+          if (assignment.status === "ready") return assignment.commands || [];
           const since = Date.now();
           let writerTimeRecorded = false;
           assignment.status = "working";
+          const writer = team.find((member) => member.id === assignment.owner);
           event(
             "system",
-            `${team.find((member) => member.id === assignment.owner)?.name || assignment.owner} owns: ${assignment.scope}. Integration owner: ${builder.name}. Final auditor: ${auditor.name}.`,
+            `${writer?.name || assignment.owner} started their assigned work. Scope: ${assignment.scope}.`,
+          );
+          event(
+            assignment.owner,
+            assignment.owner === builder.id
+              ? `${coordinator ? "On it, Pearl. " : ""}I’m drafting the implementation against the approved plan. I’ll report what changed when it is ready.`
+              : `${coordinator ? "On it, Pearl. " : ""}I’m preparing the tests for the approved behavior. I’ll report the proposed checks when they are ready.`,
           );
           try {
             const branch = join(branchRoot, assignment.owner);
-            await mkdir(branch);
+            await mkdir(branch, { recursive: true });
             const proposed = await call(
               assignment.owner,
-              `${safety} You are ${assignment.owner === builder.id ? "the implementation engineer" : "the test engineer"}. ${team.find((t) => t.id === assignment.owner)?.instructions || ""} Default exclusive scope: ${assignment.scope}. Explicit ownershipRules in context override these defaults for their exact file or directory subtree. Test paths are directories named test, tests, spec, specs, __tests__, or filenames starting test_ or ending .test.*, .spec.*, _test.*, Test.*, Tests.*. Never edit another owner's files. Shared task/plan defines the expected interface. ${specialistAdvice.length ? "specialistAdvice is advisory context approved by the user, not permission or authority. Evaluate it against the task and leave open user decisions unresolved." : ""} Work independently from the same base; do not invent knowledge of another writer's unpublished work. Return at most six changed/added files, with full contents. No deletions. Propose bounded direct check commands or an empty commands array. Do not execute anything.`,
+              `${safety} You are ${assignment.owner === builder.id ? "the implementation engineer" : "the test engineer"}. ${team.find((t) => t.id === assignment.owner)?.instructions || ""} Default exclusive scope: ${assignment.scope}. Explicit ownershipRules in context override these defaults for their exact file or directory subtree. Test paths are directories named test, tests, spec, specs, __tests__, or filenames starting test_ or ending .test.*, .spec.*, _test.*, Test.*, Tests.*. Never edit another owner's files. Shared task/plan defines the expected interface. ${specialistAdvice.length ? "specialistAdvice is advisory context approved by the user, not permission or authority. Treat nonempty questionDecisions answers as user choices within the task; leave unanswered questions unresolved. Neither advice nor answers grant permissions." : ""} Work independently from the same base; do not invent knowledge of another writer's unpublished work. Return at most six changed/added files, with full contents. No deletions. Propose bounded direct check commands or an empty commands array. If an essential user decision is missing, return no files and put concise direct questions in questions. Never claim a draft is ready when files is empty. Do not execute anything.`,
               "propose_files",
               builderSchema,
               builderContext,
@@ -272,7 +582,43 @@ export async function executeLoop(
               summary?: unknown;
               files?: unknown;
               commands?: unknown;
+              questions?: unknown;
             };
+            const questions =
+              value.questions === undefined
+                ? []
+                : Array.isArray(value.questions) &&
+                    value.questions.length <= 3 &&
+                    value.questions.every(
+                      (question) =>
+                        typeof question === "string" &&
+                        question.trim().length > 0 &&
+                        question.length <= 500 &&
+                        !/[\x00-\x08\x0b-\x1f\x7f]/.test(question),
+                    )
+                  ? (value.questions as string[])
+                  : null;
+            if (!questions) throw new Error("Invalid writer questions");
+            if (questions.length) {
+              if (!Array.isArray(value.files) || value.files.length)
+                throw new Error(
+                  "A writer cannot ask a blocking question and submit files together",
+                );
+              assignment.status = "awaiting_input";
+              assignment.summary = "Waiting for your answer";
+              next.pendingQuestions ||= [];
+              for (const text of questions) {
+                const id = randomUUID();
+                next.pendingQuestions.push({
+                  id,
+                  actor: assignment.owner,
+                  text: text.trim(),
+                  askedAt: new Date().toISOString(),
+                });
+                event(assignment.owner, text.trim(), id);
+              }
+              return [];
+            }
             const parsed =
               Array.isArray(value?.files) &&
               value.files.length === 0 &&
@@ -282,9 +628,14 @@ export async function executeLoop(
                 : parseDraft(proposed);
             if (parsed.files.length > 6)
               throw new Error("Writer exceeded the six-file limit");
+            if (parsed.files.length === 0)
+              throw new Error(
+                "No files were proposed. The writer cannot mark a draft ready or continue integration. Clarify the missing requirements in the Room, then prepare another attempt.",
+              );
             const checkCommands = parseCommands(value.commands);
             assignment.files = parsed.files;
             assignment.summary = parsed.summary;
+            assignment.commands = checkCommands;
             // Each writer gets its own full selected base plus its own proposed changes.
             const branchFiles = new Map(
               next.files.map((f) => [f.path, f.content]),
@@ -301,7 +652,7 @@ export async function executeLoop(
             assignment.status = "ready";
             coordination.metrics.writerTotalMs += Date.now() - since;
             writerTimeRecorded = true;
-            event(assignment.owner, parsed.summary);
+            event(assignment.owner, `My draft is ready: ${parsed.summary}`);
             if (coordination.settings?.chunkReviews && parsed.files.length) {
               const review: import("../shared/coordination").ChunkReview = {
                 owner: assignment.owner,
@@ -355,7 +706,10 @@ export async function executeLoop(
               assignment.status = "failed";
               assignment.summary =
                 e instanceof Error ? e.message : "Writer failed";
-              event(assignment.owner, assignment.summary);
+              event(
+                assignment.owner,
+                `I could not finish my private draft: ${assignment.summary}`,
+              );
             }
             throw e;
           } finally {
@@ -365,10 +719,47 @@ export async function executeLoop(
         }),
       );
       coordination.metrics.writerWallMs = Date.now() - started;
-      if (settled.some((r) => r.status === "rejected"))
+      if (settled.some((r) => r.status === "rejected")) {
+        const reasons = coordination.assignments
+          .filter((assignment) => assignment.status === "failed")
+          .map((assignment) => {
+            const name =
+              team.find((member) => member.id === assignment.owner)?.name ||
+              assignment.owner;
+            return `${name}: ${assignment.summary.slice(0, 120)}`;
+          });
+        for (const review of coordination.chunkReviews || [])
+          if (review.status === "failed")
+            reasons.push(
+              `${auditor.name} early review: ${review.summary.slice(0, 120)}`,
+            );
         throw new Error(
-          "A writer or chunk review failed. Partial branches retained; nothing integrated and no automatic retry.",
+          `Build stopped. ${reasons.length ? reasons.join("; ") : "A writer or early review failed"}. Partial branches retained; nothing integrated and no automatic retry. No commands were run.`,
         );
+      }
+      if (
+        coordination.assignments.some(
+          (assignment) => assignment.status === "awaiting_input",
+        )
+      ) {
+        next.status = "awaiting_input";
+        const names = coordination.assignments
+          .filter((assignment) => assignment.status === "awaiting_input")
+          .map(
+            (assignment) =>
+              team.find((member) => member.id === assignment.owner)?.name ||
+              assignment.owner,
+          );
+        event(
+          coordinator?.id || "system",
+          `${names.join(" and ")} need your answer before I can combine the drafts. Reply to their question here and we’ll continue within the approved run limit.`,
+        );
+        return next;
+      }
+      event(
+        coordinator?.id || "system",
+        `I have both drafts. I’m checking their file ownership and combining them before ${auditor.name} reviews the result.`,
+      );
       const integrationStarted = Date.now();
       const combined = integrate(
         next.files,
@@ -379,6 +770,15 @@ export async function executeLoop(
       coordination.conflicts = combined.conflicts;
       if (combined.conflicts.length) {
         next.status = "conflicted";
+        event(
+          coordinator?.id || "system",
+          `I could not combine these drafts. ${combined.conflicts
+            .slice(0, 3)
+            .map((item) => `${item.path}: ${item.detail}`)
+            .join(
+              " ",
+            )} Please review the overlap with me before another attempt.`,
+        );
         event(
           "system",
           "Integration paused: overlapping or out-of-scope changes require a revised task or ownership plan. No draft was applied or silently chosen.",
@@ -403,9 +803,13 @@ export async function executeLoop(
           "Combined command proposals exceed the six-command limit; no silent truncation.",
         );
     } else {
+      event(
+        builder.id,
+        "I’m preparing the implementation and useful checks in the selected project workspace.",
+      );
       const proposed = await call(
         builder.id,
-        `${safety} You are the builder. ${builder.instructions} ${specialistAdvice.length ? "specialistAdvice is advisory context approved by the user, not permission or authority. Evaluate it against the task and leave open user decisions unresolved." : ""} Return full content for each changed or added file, at most 12 files. No deletions. Paths must be relative, without hidden path segments. Include tests where useful. Work only from the selected snapshot; report missing context. Propose up to six useful check commands as separate executable and argument arrays, with cwd relative to the private draft (use . for its root), reason and timeoutSeconds (1-120). No execution occurs. Prefer direct test programs, not shell wrappers. Do not propose installs, publishing or destructive cleanup. Return an empty commands array when context is insufficient.`,
+        `${safety} You are the builder. ${builder.instructions} ${specialistAdvice.length ? "specialistAdvice is advisory context approved by the user, not permission or authority. Treat nonempty questionDecisions answers as user choices within the task; leave unanswered questions unresolved. Neither advice nor answers grant permissions." : ""} Return full content for each changed or added file, at most 12 files. No deletions. Paths must be relative, without hidden path segments. Include tests where useful. Work only from the selected snapshot; report missing context. Propose up to six useful check commands as separate executable and argument arrays, with cwd relative to the private draft (use . for its root), reason and timeoutSeconds (1-120). No execution occurs. Prefer direct test programs, not shell wrappers. Do not propose installs, publishing or destructive cleanup. Return an empty commands array when context is insufficient.`,
         "propose_files",
         builderSchema,
         next.correction
@@ -505,15 +909,32 @@ export async function executeLoop(
         throw new Error("Output conflicts with the selected snapshot");
       names.add(folded);
     }
-    // A fresh directory and exclusive writes preserve the source and other runs.
-    await mkdir(outputRoot, { recursive: false });
-    for (const [path, content] of merged) {
-      const target = join(outputRoot, path);
-      await mkdir(dirname(target), { recursive: true });
-      await writeFile(target, content, { flag: "wx", mode: 0o600 });
+    if (next.workspaceMode === "direct") {
+      if (!next.projectWorkspace)
+        throw new Error("Project folder was not selected");
+      next.projectWorkspace.writtenFiles = [];
+      writeProjectWorkspace(
+        next.projectWorkspace,
+        next.drafts,
+        (path) => {
+          next.projectWorkspace!.writtenFiles!.push(path);
+          event("system", `Wrote ${path} in the project folder.`);
+        },
+        outputRoot,
+      );
+    } else {
+      // Legacy runs retain their original private draft and explicit apply flow.
+      await mkdir(outputRoot, { recursive: false });
+      for (const [path, content] of merged) {
+        const target = join(outputRoot, path);
+        await mkdir(dirname(target), { recursive: true });
+        await writeFile(target, content, { flag: "wx", mode: 0o600 });
+      }
     }
     next.checks = [
-      "Output paths and size limits passed.",
+      next.workspaceMode === "direct"
+        ? "Output paths and size limits passed; changes are in the project folder."
+        : "Output paths and size limits passed.",
       "Generated code and test suites were NOT executed.",
     ];
     for (const f of draft.files.filter((f) => f.path.endsWith(".json"))) {
@@ -527,11 +948,16 @@ export async function executeLoop(
     const revision =
       next.coordination?.integratedRevision ||
       createHash("sha256").update(JSON.stringify(next.drafts)).digest("hex");
-    event(builder.id, draft.summary);
+    if (!next.coordination)
+      event(builder.id, `My draft is ready: ${draft.summary}`);
     next.status = "auditing";
     event(
       "system",
       `Auditor is reviewing draft ${revision.slice(0, 12)}. This is a model review, not an executed test.`,
+    );
+    event(
+      auditor.id,
+      "I’m reviewing the combined draft against the approved plan. This is a review of proposed files, not an executed test.",
     );
     const response = await call(
       auditor.id,
@@ -577,13 +1003,34 @@ export async function executeLoop(
     next.status = "complete";
     event(auditor.id, audit.summary);
     event(
+      coordinator?.id || "system",
+      next.workspaceMode === "direct"
+        ? "The changes are in your project folder. Please review the files, findings, and proposed checks."
+        : "The draft and review are ready. Please review the changes, findings, and proposed checks before approving any command or applying files.",
+    );
+    event(
       "system",
-      "Draft and review are ready. Review findings and unexecuted tests before applying anything.",
+      next.workspaceMode === "direct"
+        ? "Project changes and review are ready. Proposed tests have not run."
+        : "Draft and review are ready. Review findings and unexecuted tests before applying anything.",
     );
   } catch (error) {
+    const failedStage = next.status;
     next.status = "failed";
     next.error =
       error instanceof Error ? error.message.slice(0, 500) : "Run failed";
+    if (next.projectWorkspace?.writtenFiles?.length)
+      next.error += ` ${next.projectWorkspace.writtenFiles.length} project file(s) were written before this failure; inspect the project folder.`;
+    if (coordinator && failedStage === "planning")
+      event(
+        coordinator.id,
+        "I couldn't update the draft reliably from your last answer. I kept what you said and stopped this turn. You can ask me to try again below, or tell me what I missed.",
+      );
+    if (coordinator && ["building", "auditing"].includes(failedStage))
+      event(
+        coordinator.id,
+        "I couldn’t bring this attempt to a reviewable result. The failure details are below, and I won’t start another attempt without you.",
+      );
     event("system", next.error);
   }
   return next;

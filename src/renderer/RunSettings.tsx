@@ -81,7 +81,7 @@ export function RunSettings({
         <div className="settings-card">
           <h3>No run prepared yet</h3>
           <p>
-            Prepare a private workspace for {task.title} to configure its run.
+            Prepare a project plan for {task.title} to configure its run.
             Defaults apply until then.
           </p>
         </div>

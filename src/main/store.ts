@@ -2,6 +2,16 @@ import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import type { Run } from "../shared/runs";
 import {
+  defaultRoleModelSettings,
+  parseRoleModelSettings,
+  type RoleModelSettings,
+} from "../shared/role-models";
+import {
+  defaultPlanningSettings,
+  parsePlanningSettings,
+  type PlanningSettings,
+} from "../shared/planning-settings";
+import {
   validUsageStart,
   validUsageFinish,
   type UsageStart,
@@ -33,16 +43,22 @@ import {
 } from "../shared/model-cost";
 import { interruptAudits } from "../shared/audits";
 import { summarizeTeamActivity } from "../shared/team-activity";
-import type { SavedTeam } from "../shared/teams";
+import { runRole, type SavedTeam } from "../shared/teams";
 import {
   parseFixedRoster,
   parseSaveFixedTeam,
   rosterMembers,
   starterRoster,
 } from "../shared/fixed-teams";
+import { characterById } from "../shared/character-catalog";
 import { inspectFixedCastMigration } from "./fixed-cast-migration";
 import { emitMetric, noopSink, type MetricSink } from "../shared/telemetry";
 import type { TeamMessage, TeamReply } from "../shared/messages";
+import {
+  defaultMessageRoutingSettings,
+  parseMessageRoutingSettings,
+  type MessageRoutingSettings,
+} from "../shared/message-routing";
 import {
   initialTeam,
   parseTask,
@@ -76,7 +92,7 @@ export class Store {
     const version = (
       this.db.prepare("PRAGMA user_version").get() as { user_version: number }
     ).user_version;
-    if (version > 11) {
+    if (version > 16) {
       this.db.close();
       throw new Error("Workspace database is newer than this application");
     }
@@ -286,6 +302,66 @@ export class Store {
         }
       }
     }
+    if (version < 12) {
+      this.db.exec("BEGIN");
+      try {
+        this.db.exec(
+          "CREATE TABLE IF NOT EXISTS message_routing_settings (singleton INTEGER PRIMARY KEY CHECK(singleton=1), unclear TEXT NOT NULL CHECK(unclear IN ('pearl','ask'))); INSERT OR IGNORE INTO message_routing_settings (singleton,unclear) VALUES (1,'pearl'); PRAGMA user_version=12; COMMIT",
+        );
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
+    if (version < 13) {
+      this.db.exec("BEGIN");
+      try {
+        this.db.exec(
+          "CREATE TABLE IF NOT EXISTS task_archive (taskId TEXT PRIMARY KEY, archivedAt TEXT NOT NULL); PRAGMA user_version=13; COMMIT",
+        );
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
+    if (version < 14) {
+      this.db.exec("BEGIN");
+      try {
+        const columns = this.db
+          .prepare("PRAGMA table_info(message_routing_settings)")
+          .all() as { name: string }[];
+        if (!columns.some((column) => column.name === "specialistConsultation"))
+          this.db.exec(
+            "ALTER TABLE message_routing_settings ADD COLUMN specialistConsultation TEXT NOT NULL DEFAULT 'automatic' CHECK(specialistConsultation IN ('automatic','ask'))",
+          );
+        this.db.exec("PRAGMA user_version=14; COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
+    if (version < 15) {
+      this.db.exec("BEGIN");
+      try {
+        this.db.exec(
+          "CREATE TABLE IF NOT EXISTS planning_settings (singleton INTEGER PRIMARY KEY CHECK(singleton=1), temperature REAL NOT NULL CHECK(temperature >= 0 AND temperature <= 1)); INSERT OR IGNORE INTO planning_settings (singleton,temperature) VALUES (1,0.2); PRAGMA user_version=15; COMMIT",
+        );
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
+    if (version < 16) {
+      this.db.exec("BEGIN");
+      try {
+        this.db.exec(
+          "CREATE TABLE IF NOT EXISTS role_model_settings (singleton INTEGER PRIMARY KEY CHECK(singleton=1), data TEXT NOT NULL); PRAGMA user_version=16; COMMIT",
+        );
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
     const insert = this.db.prepare(
       "INSERT OR IGNORE INTO teammates (id,name,role,bio,instructions,portraitId) VALUES (?, ?, ?, ?, ?, ?)",
     );
@@ -298,9 +374,10 @@ export class Store {
     return {
       tasks: this.db
         .prepare(
-          "SELECT tasks.*, task_teams.teamId AS teamConfigId FROM tasks LEFT JOIN task_teams ON task_teams.taskId=tasks.id ORDER BY tasks.createdAt DESC, tasks.rowid DESC",
+          "SELECT tasks.*, task_teams.teamId AS teamConfigId FROM tasks LEFT JOIN task_teams ON task_teams.taskId=tasks.id WHERE NOT EXISTS (SELECT 1 FROM task_archive WHERE taskId=tasks.id) ORDER BY tasks.createdAt DESC, tasks.rowid DESC",
         )
         .all() as Task[],
+      archivedTasks: this.archivedTasks(),
       teammates: defaultTeam.members,
       savedTeams: this.savedTeams(),
       defaultTeamId: defaultTeam.id,
@@ -312,6 +389,70 @@ export class Store {
           .iterate() as Iterable<{ data: string | null }>,
       ),
     };
+  }
+  activityForTask(id: unknown): Workspace["activity"] {
+    if (
+      typeof id !== "string" ||
+      id.length > 100 ||
+      !this.db.prepare("SELECT 1 FROM tasks WHERE id=?").get(id)
+    )
+      throw new Error("Task not found");
+    return summarizeTeamActivity(
+      this.db
+        .prepare(
+          "SELECT CASE WHEN length(CAST(data AS BLOB)) <= 2000000 THEN data ELSE NULL END AS data FROM runs WHERE taskId=? ORDER BY rowid DESC LIMIT 2001",
+        )
+        .iterate(id) as Iterable<{ data: string | null }>,
+    );
+  }
+  messageRoutingSettings(): MessageRoutingSettings {
+    const row = this.db
+      .prepare(
+        "SELECT unclear,specialistConsultation FROM message_routing_settings WHERE singleton=1",
+      )
+      .get() as MessageRoutingSettings | undefined;
+    return row
+      ? parseMessageRoutingSettings(row)
+      : defaultMessageRoutingSettings;
+  }
+  planningSettings(): PlanningSettings {
+    const row = this.db
+      .prepare("SELECT temperature FROM planning_settings WHERE singleton=1")
+      .get() as PlanningSettings | undefined;
+    return row ? parsePlanningSettings(row) : defaultPlanningSettings;
+  }
+  roleModelSettings(): RoleModelSettings {
+    const row = this.db
+      .prepare("SELECT data FROM role_model_settings WHERE singleton=1")
+      .get() as { data: string } | undefined;
+    return row
+      ? parseRoleModelSettings(JSON.parse(row.data))
+      : structuredClone(defaultRoleModelSettings);
+  }
+  setRoleModelSettings(value: unknown): RoleModelSettings {
+    const settings = parseRoleModelSettings(value);
+    this.db
+      .prepare(
+        "INSERT INTO role_model_settings (singleton,data) VALUES (1,?) ON CONFLICT(singleton) DO UPDATE SET data=excluded.data",
+      )
+      .run(JSON.stringify(settings));
+    return settings;
+  }
+  setPlanningSettings(value: unknown): PlanningSettings {
+    const settings = parsePlanningSettings(value);
+    this.db
+      .prepare("UPDATE planning_settings SET temperature=? WHERE singleton=1")
+      .run(settings.temperature);
+    return settings;
+  }
+  setMessageRoutingSettings(value: unknown): MessageRoutingSettings {
+    const settings = parseMessageRoutingSettings(value);
+    this.db
+      .prepare(
+        "UPDATE message_routing_settings SET unclear=?,specialistConsultation=? WHERE singleton=1",
+      )
+      .run(settings.unclear, settings.specialistConsultation);
+    return settings;
   }
   createTask(value: unknown): Task {
     const input = parseTask(value);
@@ -346,6 +487,8 @@ export class Store {
       .prepare("SELECT * FROM tasks WHERE id=?")
       .get(id) as Task | undefined;
     if (!current) throw new Error("Task not found");
+    if (this.isTaskArchived(id))
+      throw new Error("Restore this task before editing it");
     const runs = this.runs(id);
     if (runs.some((run) => this.runIsInFlight(run)))
       throw new Error("Stop in-flight work before editing this task");
@@ -379,6 +522,9 @@ export class Store {
       !!run.replies?.some((reply) => reply.status === "answering") ||
       !!run.consultations?.some((consult) => consult.status === "consulting") ||
       !!run.executions?.some((execution) => execution.status === "running") ||
+      !!run.applications?.some(
+        (application) => application.status === "applying",
+      ) ||
       !!run.cloudExecutions?.some((execution) =>
         ["uploading", "submission_unknown", "submitted"].includes(
           execution.status,
@@ -391,24 +537,145 @@ export class Store {
         .get(run.id)
     );
   }
-  deleteTask(id: unknown): { deletedRuns: number } {
+  private isTaskArchived(id: string): boolean {
+    return !!this.db
+      .prepare("SELECT 1 FROM task_archive WHERE taskId=?")
+      .get(id);
+  }
+  archivedTasks(): (Task & { archivedAt: string })[] {
+    return this.db
+      .prepare(
+        "SELECT tasks.*, task_teams.teamId AS teamConfigId, task_archive.archivedAt FROM task_archive JOIN tasks ON tasks.id=task_archive.taskId LEFT JOIN task_teams ON task_teams.taskId=tasks.id ORDER BY task_archive.archivedAt DESC",
+      )
+      .all() as (Task & { archivedAt: string })[];
+  }
+  taskDisposition(id: unknown): {
+    canDelete: boolean;
+    canArchive: boolean;
+    reason: "in_flight" | "saved_work" | "archived" | null;
+    runCount: number;
+    requestCount: number;
+  } {
     if (typeof id !== "string" || id.length > 100)
       throw new Error("Invalid task ID");
     if (!this.db.prepare("SELECT 1 FROM tasks WHERE id=?").get(id))
       throw new Error("Task not found");
     const runs = this.runs(id);
-    if (runs.some((run) => this.runIsInFlight(run)))
-      throw new Error("Stop in-flight work before deleting this task");
-    if (
-      runs.some(
-        (run) =>
-          run.status !== "prepared" ||
-          run.calls !== 0 ||
-          this.usageForRun(run.id).requests !== 0,
-      )
-    )
+    const requestCount = runs.reduce(
+      (sum, run) => sum + this.usageForRun(run.id).requests,
+      0,
+    );
+    const reason = this.isTaskArchived(id)
+      ? "archived"
+      : runs.some((run) => this.runIsInFlight(run))
+        ? "in_flight"
+        : runs.some((run) => run.status !== "prepared" || run.calls !== 0) ||
+            requestCount !== 0
+          ? "saved_work"
+          : null;
+    return {
+      canDelete: reason === null,
+      canArchive: reason !== "in_flight" && reason !== "archived",
+      reason,
+      runCount: runs.length,
+      requestCount,
+    };
+  }
+  archiveTask(id: unknown): Task & { archivedAt: string } {
+    const disposition = this.taskDisposition(id);
+    if (!disposition.canArchive)
       throw new Error(
-        "This task has saved work. Keep its run and recovery records until archive support is available.",
+        disposition.reason === "in_flight"
+          ? "Stop in-flight work before archiving this task"
+          : "Task is already archived",
+      );
+    const archivedAt = this.now().toISOString();
+    this.db
+      .prepare("INSERT INTO task_archive (taskId,archivedAt) VALUES (?,?)")
+      .run(id as string, archivedAt);
+    const task = this.db
+      .prepare("SELECT * FROM tasks WHERE id=?")
+      .get(id as string) as Task;
+    return { ...task, archivedAt };
+  }
+  restoreTask(id: unknown): Task {
+    if (typeof id !== "string" || id.length > 100)
+      throw new Error("Invalid task ID");
+    const result = this.db
+      .prepare("DELETE FROM task_archive WHERE taskId=?")
+      .run(id);
+    if (result.changes !== 1) throw new Error("Archived task not found");
+    return this.db.prepare("SELECT * FROM tasks WHERE id=?").get(id) as Task;
+  }
+  permanentlyDeleteArchivedTask(
+    id: unknown,
+    confirmationTitle: unknown,
+  ): { deletedRuns: number } {
+    const disposition = this.taskDisposition(id);
+    if (disposition.reason !== "archived")
+      throw new Error("Only archived tasks can be permanently deleted");
+    const taskId = id as string;
+    const task = this.db
+      .prepare("SELECT title FROM tasks WHERE id=?")
+      .get(taskId) as {
+      title: string;
+    };
+    if (
+      typeof confirmationTitle !== "string" ||
+      confirmationTitle !== task.title
+    )
+      throw new Error("Task title confirmation does not match");
+    const runs = this.runs(taskId);
+    if (runs.some((run) => this.runIsInFlight(run)))
+      throw new Error(
+        "Stop in-flight work before permanently deleting this task",
+      );
+    const team = this.db
+      .prepare("SELECT teamId FROM task_teams WHERE taskId=?")
+      .get(taskId) as { teamId: string } | undefined;
+    this.db.exec("BEGIN");
+    try {
+      for (const run of runs) {
+        for (const table of [
+          "usage_requests",
+          "usage_totals",
+          "usage_alerts",
+          "usage_cost_settings",
+          "usage_cost_totals",
+        ])
+          this.db.prepare(`DELETE FROM ${table} WHERE runId=?`).run(run.id);
+      }
+      this.db.prepare("DELETE FROM runs WHERE taskId=?").run(taskId);
+      this.db.prepare("DELETE FROM task_teams WHERE taskId=?").run(taskId);
+      if (team)
+        this.db
+          .prepare(
+            "DELETE FROM saved_teams WHERE id=? AND NOT EXISTS (SELECT 1 FROM task_teams WHERE teamId=?)",
+          )
+          .run(team.teamId, team.teamId);
+      this.db.prepare("DELETE FROM task_archive WHERE taskId=?").run(taskId);
+      this.db.prepare("DELETE FROM tasks WHERE id=?").run(taskId);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return { deletedRuns: runs.length };
+  }
+  deleteTask(id: unknown): { deletedRuns: number } {
+    const disposition = this.taskDisposition(id);
+    const taskId = id as string;
+    const runs = this.runs(id);
+    const team = this.db
+      .prepare("SELECT teamId FROM task_teams WHERE taskId=?")
+      .get(taskId) as { teamId: string } | undefined;
+    if (disposition.reason === "in_flight")
+      throw new Error("Stop in-flight work before deleting this task");
+    if (disposition.reason === "archived")
+      throw new Error("Restore this task before deleting it");
+    if (!disposition.canDelete)
+      throw new Error(
+        "This task has saved work. Archive it to keep its run and usage records.",
       );
     this.db.exec("BEGIN");
     try {
@@ -422,9 +689,15 @@ export class Store {
         ])
           this.db.prepare(`DELETE FROM ${table} WHERE runId=?`).run(run.id);
       }
-      this.db.prepare("DELETE FROM runs WHERE taskId=?").run(id);
-      this.db.prepare("DELETE FROM task_teams WHERE taskId=?").run(id);
-      this.db.prepare("DELETE FROM tasks WHERE id=?").run(id);
+      this.db.prepare("DELETE FROM runs WHERE taskId=?").run(taskId);
+      this.db.prepare("DELETE FROM task_teams WHERE taskId=?").run(taskId);
+      if (team)
+        this.db
+          .prepare(
+            "DELETE FROM saved_teams WHERE id=? AND NOT EXISTS (SELECT 1 FROM task_teams WHERE teamId=?)",
+          )
+          .run(team.teamId, team.teamId);
+      this.db.prepare("DELETE FROM tasks WHERE id=?").run(taskId);
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");
@@ -457,11 +730,7 @@ export class Store {
         members: string;
         familyId: string;
       }[]
-    ).map((row) => ({
-      ...row,
-      kind: "snapshot" as const,
-      members: this.snapshotMembers(row.members),
-    }));
+    ).map((row) => this.savedSnapshot(row));
     return [...library, ...snapshots];
   }
   private snapshotMembers(json: string): Teammate[] {
@@ -472,6 +741,57 @@ export class Store {
     if (new Set(members.map(({ id }) => id)).size !== members.length)
       throw new Error("Saved team snapshot has duplicate members");
     return members;
+  }
+  private fixedSnapshotRoster(members: Teammate[]) {
+    const active = (role: "builder" | "auditor" | "tester") =>
+      members.filter((member) => runRole(member) === role);
+    const builders = active("builder");
+    const auditors = active("auditor");
+    const testers = active("tester");
+    if (builders.length !== 1 || auditors.length !== 1 || testers.length > 1)
+      return undefined;
+    try {
+      const roster = parseFixedRoster({
+        memberIds: members.map((member) => member.id),
+        activeBuilderId: builders[0].id,
+        activeAuditorId: auditors[0].id,
+        activeTesterId: testers[0]?.id || null,
+      });
+      const catalog = rosterMembers(roster);
+      if (
+        members.some((member, index) => {
+          const expected = catalog[index];
+          return (
+            !characterById(member.id) ||
+            member.name !== expected.name ||
+            member.role !== expected.role ||
+            member.portraitId !== expected.portraitId ||
+            runRole(member) !== expected.runRole
+          );
+        })
+      )
+        return undefined;
+      return roster;
+    } catch {
+      return undefined;
+    }
+  }
+  private savedSnapshot(row: {
+    id: string;
+    name: string;
+    version: number;
+    createdAt: string;
+    members: string;
+    familyId: string;
+  }): SavedTeam {
+    const members = this.snapshotMembers(row.members);
+    const roster = this.fixedSnapshotRoster(members);
+    return {
+      ...row,
+      kind: "snapshot",
+      members,
+      ...(roster ? { roster } : {}),
+    };
   }
   private libraryTeam(row: LibraryTeamRow): SavedTeam {
     const roster = parseFixedRoster({
@@ -527,10 +847,7 @@ export class Store {
         }
       | undefined;
     if (!row) throw new Error("Saved team not found");
-    return {
-      ...row,
-      members: this.snapshotMembers(row.members),
-    };
+    return this.savedSnapshot(row);
   }
   defaultTeam(): SavedTeam {
     const row = this.db
@@ -1241,6 +1558,8 @@ export class Store {
       run.approvedAdvice = existing.approvedAdvice;
       run.reviewedSuggestionIds = existing.reviewedSuggestionIds;
       run.cloudExecutions = existing.cloudExecutions;
+      run.requestPause = existing.requestPause;
+      run.diagnostics = existing.diagnostics;
       if (existing.redirectedTo) {
         run.redirectedTo = existing.redirectedTo;
         run.status = "stopped";
@@ -1275,6 +1594,14 @@ export class Store {
       ...(run.replies || []).filter((r) => r.id !== reply.id),
       reply,
     ];
+    this.db
+      .prepare("UPDATE runs SET data=? WHERE id=?")
+      .run(JSON.stringify(run), id);
+    return run;
+  }
+  updateRequestPause(id: string, pause: Run["requestPause"]) {
+    const run = this.getRun(id);
+    run.requestPause = pause;
     this.db
       .prepare("UPDATE runs SET data=? WHERE id=?")
       .run(JSON.stringify(run), id);
@@ -1421,6 +1748,14 @@ export class Store {
         }
       }
       if (["planning", "building", "auditing"].includes(run.status)) {
+        if (
+          run.requestPause?.status === "requested" ||
+          run.requestPause?.status === "paused" ||
+          run.requestPause?.status === "resuming"
+        ) {
+          run.requestPause.status = "interrupted";
+          run.requestPause.resolvedAt = new Date().toISOString();
+        }
         run.status = "interrupted";
         run.inFlightRequests = [];
         interruptAudits(run);

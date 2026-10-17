@@ -8,10 +8,12 @@ export function ConsultationPanel({
   api,
   run,
   onUpdated,
+  phase: requestedPhase,
 }: {
   api: DesktopAPI;
   run: Run;
   onUpdated: (run: Run) => void;
+  phase?: "planning" | "building" | "verification";
 }) {
   const [review, setReview] = useState<ConsultationReview | null>(null);
   const [approved, setApproved] = useState(false);
@@ -25,10 +27,15 @@ export function ConsultationPanel({
     run.status,
     run.approvedLineup?.planRevision,
     run.coordination?.auditedRevision,
+    requestedPhase,
   ]);
-  const phase = run.status === "planned" ? "planning" : "verification";
+  const phase =
+    requestedPhase || (run.status === "planned" ? "planning" : "verification");
   if (
     (run.status !== "planned" && run.status !== "complete") ||
+    (phase === "verification"
+      ? run.status !== "complete"
+      : run.status !== "planned") ||
     !run.approvedLineup ||
     run.approvedLineup.planRevision !== run.lineupProposal?.planRevision
   )
@@ -55,14 +62,22 @@ export function ConsultationPanel({
   return (
     <section
       className="consultation-panel"
-      aria-label={`${phase === "planning" ? "Planning" : "Draft verification"} consultations`}
+      aria-label={`${phase === "planning" ? "Planning" : phase === "building" ? "Pre-build" : "Draft verification"} consultations`}
     >
       <h4>
-        Ask a {phase === "planning" ? "planning" : "verification"} specialist
+        Ask a{" "}
+        {phase === "planning"
+          ? "planning"
+          : phase === "building"
+            ? "pre-build"
+            : "verification"}{" "}
+        specialist
       </h4>
       <p>
         Each consultation is one additional model request. Advice appears here
         for your review; it does not change the plan, draft or audit decision.
+        {phase === "building" &&
+          " This briefing uses the task and plan before writers start. It does not include source files or interrupt active work."}
       </p>
       {entries.map((entry) => {
         const existing = run.consultations?.find(
@@ -156,7 +171,7 @@ export function ConsultationPanel({
           </p>
           <details open>
             <summary>
-              {phase === "planning"
+              {phase !== "verification"
                 ? "Exact task, purpose and plan sent to the model"
                 : "Exact task, plan, draft and audit notes sent to the model"}
             </summary>
