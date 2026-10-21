@@ -1,9 +1,12 @@
 .pearl-shell {
+  --pearl-teal: #46dfcc;
   display: flex;
   width: 100%;
   height: 100vh;
-  background: #121820;
-  color: #e7eaf0;
+  height: 100dvh;
+  overflow: hidden;
+  background: #11171d;
+  color: #e7edf3;
   font-family:
     Inter,
     -apple-system,
@@ -19,49 +22,67 @@
 .pearl-shell button {
   cursor: pointer;
 }
+.pearl-shell button:focus-visible,
+.pearl-shell input:focus-visible,
+.pearl-shell textarea:focus-visible,
+.pearl-shell summary:focus-visible {
+  outline: 2px solid var(--pearl-teal);
+  outline-offset: 3px;
+}
 .pearl-sidebar {
-  width: 258px;
-  min-width: 220px;
-  background: #181f28;
-  border-right: 1px solid #303945;
+  width: 250px;
+  min-width: 210px;
+  background: #151a1f;
+  border-right: 1px solid #29363a;
   display: flex;
   flex-direction: column;
-  padding: 22px 13px 13px;
-  gap: 16px;
+  padding: 18px 12px 14px;
+  gap: 12px;
 }
 .pearl-brand {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 20px;
-  padding: 0 10px;
+  gap: 5px;
+  padding: 0 9px 10px;
 }
-.pearl-mark,
-.pearl-welcome-mark {
-  color: #b5a0ff;
-  font-size: 26px;
+.pearl-brand img {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+  flex: none;
+}
+.pearl-brand strong {
+  font:
+    400 21px "Chelsea Market",
+    cursive;
+  letter-spacing: -0.02em;
+  color: #f0f8f5;
 }
 .pearl-new {
-  border: 1px solid #56617a;
-  border-radius: 10px;
-  background: #252d3a;
-  color: #f4f2ff;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #d9e8e5;
   text-align: left;
-  padding: 12px;
+  padding: 9px 11px;
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 9px;
+  width: 100%;
+  font-weight: 500;
 }
-.pearl-new:hover,
-.pearl-project-button:hover {
-  background: #354050;
+.pearl-new:hover {
+  background: #25343a;
+  border-color: #334b4a;
 }
 .pearl-sidebar-heading {
-  color: #95a0b0;
-  font-size: 12px;
+  color: #8a9ba3;
+  font-size: 10px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
-  padding: 3px 10px;
+  letter-spacing: 0.14em;
+  padding: 12px 10px 0;
 }
 .pearl-chat-list {
   display: flex;
@@ -69,11 +90,14 @@
   gap: 3px;
   overflow: auto;
   flex: 1;
+  min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: #365851 #141b22;
 }
 .pearl-chat-list button,
 .pearl-settings-link {
   border: 0;
-  color: #cbd3de;
+  color: #afbec9;
   background: transparent;
   border-radius: 8px;
   text-align: left;
@@ -84,63 +108,87 @@
 }
 .pearl-shell .pearl-chat-list button {
   display: block;
+  width: 100%;
 }
 .pearl-chat-list button:hover,
 .pearl-chat-list button.selected,
 .pearl-settings-link:hover {
-  background: #2b3542;
+  background: #22333a;
   color: #fff;
+}
+.pearl-chat-list button.selected {
+  box-shadow: inset 2px 0 #46dfcc;
 }
 .pearl-settings-link {
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
+  justify-content: flex-start;
+  border-top: 1px solid #29363a;
+  border-radius: 0;
+  padding-top: 16px;
 }
 .pearl-main {
   display: flex;
   flex-direction: column;
   min-width: 0;
   flex: 1;
+  background:
+    radial-gradient(ellipse at 50% 0%, #1a2a2b66, transparent 48%), #11171d;
 }
 .pearl-header {
-  height: 72px;
-  border-bottom: 1px solid #303945;
-  padding: 0 28px;
+  min-height: 56px;
+  flex: none;
+  border-bottom: 1px solid #29363a;
+  padding: 9px 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
+  background: #151a1f;
 }
-.pearl-header > div {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.pearl-header-context {
+  min-width: 0;
+  flex: 1;
 }
-.pearl-name {
-  font-size: 18px;
-  font-weight: 650;
-}
-.pearl-header small {
-  color: #9ca9b8;
+.pearl-header-context h2 {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #dce8e6;
+  font-size: 14px;
+  font-weight: 600;
 }
 .pearl-project-button {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #d8e2ec;
-  border: 1px solid #404b59;
+  color: #b8cfca;
+  border: 1px solid #344947;
   border-radius: 8px;
-  background: #252d38;
-  padding: 9px 12px;
+  background: #1b272b;
+  padding: 7px 10px;
   max-width: 260px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.pearl-project-button:hover {
+  background: #24423d;
+  border-color: #5da99c;
+}
+.pearl-project-button svg {
+  flex: none;
+  color: var(--pearl-teal);
+}
 .pearl-scroll {
   flex: 1;
   overflow: auto;
   min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: #365851 transparent;
 }
 .pearl-messages {
   max-width: 850px;
@@ -149,40 +197,99 @@
 }
 .pearl-welcome {
   max-width: 700px;
-  margin: 18vh auto 0;
+  margin: min(17vh, 150px) auto 0;
   text-align: center;
   padding: 0 20px;
 }
+.pearl-welcome-mark {
+  display: block;
+  width: 74px;
+  height: 74px;
+  margin: 0 auto 20px;
+  border: 2px solid #5cae9f;
+  border-radius: 18px;
+  object-fit: cover;
+  object-position: center 20%;
+  box-shadow: 0 12px 36px #05121188;
+}
 .pearl-welcome h1 {
-  font-size: 31px;
-  font-weight: 600;
+  font-size: clamp(27px, 3vw, 36px);
+  font-weight: 700;
+  letter-spacing: -0.04em;
   margin: 8px 0;
 }
 .pearl-welcome p {
-  color: #aab5c3;
+  color: #a9c0c6;
+}
+.pearl-welcome .pearl-project-button {
+  margin: 20px auto 0;
 }
 .pearl-message {
-  margin: 0 0 24px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 100%;
+  margin: 0 0 20px;
+  line-height: 1.55;
+}
+.pearl-message-avatar {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  object-fit: cover;
+  object-position: center 20%;
+  border: 1px solid #77a4bd;
+  border-radius: 50%;
+}
+.pearl-message-content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+  min-width: 0;
+  max-width: min(100%, 720px);
+}
+.pearl-message-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding-inline: 3px;
+}
+.pearl-message-meta time {
+  color: #92a9b1;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.pearl-message-bubble {
+  width: fit-content;
+  max-width: 100%;
+  padding: 17px 20px;
+  border: 1px solid #4c7892;
+  border-radius: 4px 16px 16px 16px;
+  background: #1d3040;
+  overflow-wrap: anywhere;
 }
 .pearl-speaker {
-  display: block;
-  color: #a8b6c8;
+  color: #cce4f5;
   font-weight: 700;
-  font-size: 12px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  margin-bottom: 8px;
+  font-size: 13px;
 }
 .pearl-message.user {
   margin-left: auto;
-  background: #283343;
-  padding: 15px 19px;
-  border-radius: 16px;
-  max-width: 80%;
-  width: fit-content;
+  justify-content: flex-end;
+  max-width: min(88%, 720px);
+}
+.pearl-message.user .pearl-message-content {
+  align-items: flex-end;
+}
+.pearl-message.user .pearl-message-bubble {
+  background: #25433f;
+  border-color: #41766d;
+  border-radius: 16px 16px 5px 16px;
+  color: #e2f8f0;
 }
 .pearl-message.user .pearl-speaker {
-  color: #c2cbda;
+  color: #b5e9de;
 }
 .pearl-message .rich-text > *:first-child {
   margin-top: 0;
@@ -190,63 +297,235 @@
 .pearl-message .rich-text > *:last-child {
   margin-bottom: 0;
 }
+.pearl-message.assistant .rich-text {
+  max-width: 72ch;
+  line-height: 1.75;
+}
+.pearl-message.assistant .rich-text h1,
+.pearl-message.assistant .rich-text h2,
+.pearl-message.assistant .rich-text h3 {
+  color: #edf9f5;
+  line-height: 1.3;
+  margin: 1.25em 0 0.55em;
+}
+.pearl-message.assistant .rich-text h1 {
+  font-size: 22px;
+}
+.pearl-message.assistant .rich-text h2 {
+  font-size: 18px;
+}
+.pearl-message.assistant .rich-text h3 {
+  font-size: 15px;
+}
+.pearl-message.assistant .rich-text p {
+  margin: 0 0 1em;
+}
+.pearl-message.assistant .rich-text blockquote {
+  margin: 14px 0;
+  padding: 2px 15px;
+  border-left: 3px solid #58c9b8;
+  color: #b5d3ce;
+  background: #172b2c;
+}
+.pearl-message.assistant .rich-text table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 16px 0;
+}
+.pearl-message.assistant .rich-text th,
+.pearl-message.assistant .rich-text td {
+  padding: 8px 11px;
+  border: 1px solid #3a5b56;
+  text-align: left;
+}
+.pearl-message.assistant .rich-text th {
+  background: #203b38;
+}
+.pearl-message.assistant .rich-text pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.pearl-progress {
+  color: #bdd0ce;
+  font-size: 13px;
+  margin-bottom: 14px;
+}
+.pearl-progress .pearl-message-avatar {
+  width: 28px;
+  height: 28px;
+  margin: 3px;
+}
+.pearl-progress .pearl-message-bubble {
+  padding: 10px 14px;
+  background: #182834;
+  border-color: #3c6177;
+}
+.pearl-progress .rich-text > :last-child {
+  margin-bottom: 0;
+}
 .pearl-evidence {
   margin-top: 12px;
-  padding: 9px 11px;
-  border-left: 3px solid #bcafff;
-  color: #c7d1de;
-  background: #202a37;
+  padding: 10px 12px;
+  border-left: 3px solid #5bdccc;
+  color: #bbd3d2;
+  background: #1b2b30;
+  border-radius: 0 7px 7px 0;
   font-size: 12px;
 }
-.pearl-tool,
-.pearl-action {
-  font-size: 12px;
-  color: #9aabbc;
-  margin: 10px 0;
-}
-.pearl-tool summary {
+.pearl-card summary {
   cursor: pointer;
 }
-.pearl-tool pre,
 .pearl-card pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   max-height: 270px;
   overflow: auto;
-  background: #151c26;
+  background: #102026;
+  border: 1px solid #304947;
   padding: 12px;
   border-radius: 7px;
 }
+.pearl-activity {
+  margin: 8px 0 22px 44px;
+  border: 1px solid #355651;
+  border-radius: 11px;
+  background: #18282c;
+  color: #b8d5d0;
+  font-size: 12px;
+}
+.pearl-activity > summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 13px;
+  cursor: pointer;
+  list-style: none;
+}
+.pearl-activity > summary::-webkit-details-marker,
+.pearl-activity-action > summary::-webkit-details-marker,
+.pearl-activity-detail > summary::-webkit-details-marker {
+  display: none;
+}
+.pearl-activity > summary::before,
+.pearl-activity-action > summary::before,
+.pearl-activity-detail > summary::before {
+  content: "▸";
+  color: #6bd5c4;
+  font-size: 12px;
+}
+.pearl-activity[open] > summary::before,
+.pearl-activity-action[open] > summary::before,
+.pearl-activity-detail[open] > summary::before {
+  content: "▾";
+}
+.pearl-activity > summary > span {
+  color: #e6f7f1;
+  font-weight: 700;
+}
+.pearl-activity > summary > small {
+  color: #a4c0bd;
+  font-size: 12px;
+}
+.pearl-activity > summary > strong {
+  color: #f1baaa;
+  font-size: 12px;
+}
+.pearl-activity.has-issues {
+  border-color: #936d61;
+}
+.pearl-activity-list {
+  border-top: 1px solid #355651;
+  padding: 7px 13px 11px 22px;
+}
+.pearl-activity-action {
+  border-bottom: 1px solid #29413f;
+}
+.pearl-activity-action:last-child {
+  border-bottom: 0;
+}
+.pearl-activity-action > summary,
+.pearl-activity-detail > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 3px;
+  cursor: pointer;
+  list-style: none;
+}
+.pearl-activity-action.has-issues > summary {
+  color: #f1baaa;
+}
+.pearl-activity-detail {
+  margin: 0 0 8px 19px;
+  color: #9fbab8;
+}
+.pearl-activity-detail pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 270px;
+  overflow: auto;
+  margin: 0 0 6px;
+  padding: 12px;
+  border: 1px solid #304947;
+  border-radius: 7px;
+  background: #102026;
+  color: #d2e6e0;
+}
 .pearl-working {
-  color: #b5a0ff;
+  color: #46dfcc;
   padding: 10px 0;
 }
 .pearl-working .pearl-stop {
   margin-left: 12px;
-  border: 1px solid #667388;
+  border: 1px solid #50786f;
   border-radius: 7px;
-  background: #303a49;
-  color: #f1f3f7;
+  background: #27443f;
+  color: #e8fff8;
   padding: 5px 10px;
 }
 .pearl-card {
   display: flex;
   gap: 14px;
-  border: 1px solid #4d5a70;
-  background: #202a37;
+  border: 1px solid #3a5b56;
+  background: #1b2b30;
   border-radius: 13px;
   padding: 18px;
   margin: 18px 0;
+  box-shadow: 0 10px 30px #07121655;
+}
+.pearl-card > svg {
+  flex: none;
+  color: var(--pearl-teal);
 }
 .pearl-card > div {
   flex: 1;
   min-width: 0;
 }
+.pearl-card[aria-label="Working plan"] {
+  display: block;
+}
+.pearl-card[aria-label="Working plan"] summary {
+  color: #c9f4e9;
+  font-weight: 700;
+}
+.pearl-card[aria-label="Working plan"] ul {
+  padding-left: 22px;
+  line-height: 1.6;
+}
+.pearl-card.error {
+  border-color: #8d625e;
+}
+.pearl-card.error strong {
+  color: #ffc5b8;
+}
 .pearl-card strong {
   font-size: 15px;
 }
 .pearl-card p {
-  color: #bbc5d1;
+  color: #adc3c7;
   line-height: 1.5;
 }
 .pearl-card code {
@@ -254,18 +533,19 @@
 }
 .pearl-card button,
 .pearl-modal button {
-  border: 0;
+  border: 1px solid #57b4a5;
   border-radius: 8px;
-  color: #181d26;
-  background: #bcafff;
+  color: #072521;
+  background: #5bdccc;
   font-weight: 650;
   padding: 8px 13px;
   margin-right: 9px;
 }
 .pearl-card button.quiet,
 .pearl-modal button.quiet {
-  color: #e6eaf0;
-  background: #3a4554;
+  color: #d9e8e5;
+  background: #283a40;
+  border-color: #425f5d;
 }
 .pearl-card button:disabled {
   opacity: 0.5;
@@ -284,14 +564,14 @@
 .pearl-card input {
   flex: 1;
   min-width: 0;
-  border: 1px solid #526074;
+  border: 1px solid #4a6d68;
   border-radius: 8px;
-  background: #171f2a;
-  color: #f2f5f8;
+  background: #112127;
+  color: #f2faf7;
   padding: 9px;
 }
 .pearl-error {
-  color: #ffb8b8;
+  color: #ffc5b8;
   padding: 8px 30px;
 }
 .pearl-composer {
@@ -300,29 +580,46 @@
   gap: 10px;
   width: min(850px, calc(100% - 48px));
   margin: 0 auto;
-  border: 1px solid #4b5669;
+  border: 1px solid #416961;
   border-radius: 17px;
-  background: #212b38;
+  background: #16262b;
   padding: 10px 12px;
+  box-shadow: 0 8px 28px #07121888;
+}
+.pearl-composer:focus-within {
+  border-color: #69cbb9;
+  box-shadow:
+    0 0 0 1px #69cbb955,
+    0 8px 28px #07121888;
 }
 .pearl-composer textarea {
-  resize: vertical;
+  resize: none;
   min-height: 48px;
   max-height: 210px;
+  overflow-y: auto;
+  scrollbar-width: none;
   flex: 1;
+  min-width: 0;
   border: 0;
   outline: 0;
   background: transparent;
-  color: #f1f4f7;
+  color: #f1f9f6;
   padding: 8px;
+}
+.pearl-composer textarea::-webkit-scrollbar {
+  display: none;
+}
+.pearl-composer textarea:focus-visible {
+  outline: none;
 }
 .pearl-composer button {
   border: 0;
   border-radius: 9px;
-  background: #bcafff;
-  color: #161a22;
+  background: #5bdccc;
+  color: #092923;
   width: 37px;
   height: 37px;
+  flex: none;
   display: grid;
   place-items: center;
 }
@@ -332,33 +629,34 @@
 }
 .pearl-footer {
   text-align: center;
-  color: #8491a0;
+  color: #859ba4;
   font-size: 11px;
   padding: 11px;
 }
 .pearl-modal-backdrop {
   position: fixed;
   inset: 0;
-  background: #000a;
+  background: #040d11c9;
   display: grid;
   place-items: center;
   z-index: 100;
 }
 .pearl-modal {
-  background: #222c39;
-  border: 1px solid #4c5868;
+  background: #1b2b30;
+  border: 1px solid #4a726b;
   border-radius: 16px;
   padding: 24px;
   width: min(430px, calc(100% - 35px));
   display: flex;
   flex-direction: column;
   gap: 14px;
+  box-shadow: 0 28px 75px #030d11ad;
 }
 .pearl-modal h2 {
   margin: 0;
 }
 .pearl-modal p {
-  color: #aebbc8;
+  color: #acc3c6;
   margin: 0;
 }
 .pearl-modal label {
@@ -367,9 +665,9 @@
   gap: 5px;
 }
 .pearl-modal input {
-  border: 1px solid #596579;
+  border: 1px solid #4a6d68;
   border-radius: 7px;
-  background: #141b25;
+  background: #102026;
   color: white;
   padding: 10px;
 }
@@ -381,12 +679,16 @@
   .pearl-sidebar {
     width: 180px;
     min-width: 180px;
+    padding-inline: 9px;
   }
   .pearl-messages {
     padding: 20px 15px;
   }
   .pearl-header {
-    padding: 0 14px;
+    padding: 10px 14px;
+  }
+  .pearl-project-button {
+    max-width: 155px;
   }
   .pearl-composer {
     width: calc(100% - 25px);

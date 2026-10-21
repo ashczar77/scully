@@ -292,6 +292,32 @@ try {
   chat = await send("What is a pineapple?");
   assert.equal(chat.questions[0].status, "pending");
   assert.equal(chat.messages.at(-1).text, "A pineapple is a tropical fruit.");
+  const pineappleReply = page
+    .locator(".pearl-message.assistant")
+    .filter({ hasText: "A pineapple is a tropical fruit." });
+  await pineappleReply.locator(".pearl-message-bubble").waitFor();
+  assert.equal(
+    await pineappleReply.locator(".pearl-message-avatar").count(),
+    1,
+  );
+  assert.equal(await pineappleReply.locator("time[datetime]").count(), 1);
+  const colors = await pineappleReply.evaluate((reply) => {
+    const user = document.querySelector(".pearl-message.user");
+    return {
+      pearlBubble: getComputedStyle(
+        reply.querySelector(".pearl-message-bubble"),
+      ).backgroundColor,
+      userBubble: getComputedStyle(user.querySelector(".pearl-message-bubble"))
+        .backgroundColor,
+      pearlOutline: getComputedStyle(
+        reply.querySelector(".pearl-message-avatar"),
+      ).borderTopColor,
+      userOutline: getComputedStyle(user.querySelector(".pearl-message-bubble"))
+        .borderTopColor,
+    };
+  });
+  assert.notEqual(colors.pearlBubble, colors.userBubble);
+  assert.notEqual(colors.pearlOutline, colors.userOutline);
   chat = await send("Friends should see it.");
   assert.equal(chat.questions[0].status, "answered");
   assert.equal(chat.questions[0].answer, "Friends should see it.");
@@ -386,11 +412,23 @@ try {
     await readFile(join(project, "README.md"), "utf8"),
     "Pearl project\n",
   );
-  await page.getByText("apply_patch result").click();
+  const activity = page.locator("details.pearl-activity").last();
+  await activity.locator("summary").first().click();
+  const patchAction = activity
+    .locator("details.pearl-activity-action")
+    .filter({ hasText: "Apply patch" })
+    .last();
+  await patchAction.locator("summary").first().click();
+  await patchAction.getByText("Result", { exact: true }).click();
   assert.match(
-    await page.locator("details.pearl-tool[open] pre").last().textContent(),
+    await patchAction
+      .locator("details.pearl-activity-detail[open] pre")
+      .last()
+      .textContent(),
     /-Disposable project[\s\S]*\+Pearl project/,
   );
+  await mkdir("test-results", { recursive: true });
+  await page.screenshot({ path: "test-results/pearl-activity.png" });
   const beforeCommand = (await current()).messages.length;
   await page
     .getByRole("textbox", { name: "Message Pearl" })
@@ -470,6 +508,16 @@ try {
     .getByRole("button", { name: "Help me plan a small reading list." })
     .click();
   assert((await current()).project.approved);
+  const restoredActivity = page
+    .locator("details.pearl-activity")
+    .filter({ hasText: "Apply patch" })
+    .last();
+  await restoredActivity.waitFor();
+  assert.equal(await restoredActivity.count(), 1);
+  assert.equal(
+    await restoredActivity.evaluate((element) => element.open),
+    false,
+  );
   chat = await send("Are we still in the same project?");
   assert.equal(chat.status, "idle");
   assert.equal(requests.length, responses.length);

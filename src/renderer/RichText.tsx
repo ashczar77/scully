@@ -13,6 +13,24 @@ type MarkdownNode = {
 };
 const parser = unified().use(remarkParse).use(remarkGfm);
 
+/** Add reading breaks to long plain replies without rewriting their content. */
+export function readablePearlMarkdown(text: string): string {
+  if (text.length < 500 || /\r?\n/u.test(text) || /[`*_\[\]]/u.test(text))
+    return text;
+  const sentences = text.trim().split(/(?<=[.!?])\s+(?=[A-Z“"])/u);
+  if (sentences.length < 3) return text;
+  const paragraphs: string[] = [];
+  let current = "";
+  for (const sentence of sentences) {
+    if (current && current.length + sentence.length > 320) {
+      paragraphs.push(current);
+      current = sentence;
+    } else current = current ? `${current} ${sentence}` : sentence;
+  }
+  if (current) paragraphs.push(current);
+  return paragraphs.join("\n\n");
+}
+
 export function plainTextFromMarkdown(markdown: string): string {
   function text(node: MarkdownNode): string {
     if (node.type === "image") return node.alt || "";
@@ -46,7 +64,13 @@ export function plainTextFromMarkdown(markdown: string): string {
   return text(parser.parse(markdown) as MarkdownNode).trim();
 }
 
-export function RichText({ text }: { text: string }) {
+export function RichText({
+  text,
+  readableProse = false,
+}: {
+  text: string;
+  readableProse?: boolean;
+}) {
   return (
     <div className="rich-text">
       <Markdown
@@ -67,7 +91,7 @@ export function RichText({ text }: { text: string }) {
           },
         }}
       >
-        {text}
+        {readableProse ? readablePearlMarkdown(text) : text}
       </Markdown>
     </div>
   );

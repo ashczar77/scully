@@ -23,6 +23,33 @@ try {
   await page
     .getByRole("heading", { name: "What can I help you with?" })
     .waitFor();
+  await page.waitForFunction(() =>
+    [
+      ...document.querySelectorAll(".pearl-brand img, .pearl-welcome-mark"),
+    ].every((image) => image.complete && image.naturalWidth > 0),
+  );
+  const branding = await page.evaluate(async () => {
+    await document.fonts.load('21px "Chelsea Market"');
+    const logo = document.querySelector(".pearl-brand img");
+    const portrait = document.querySelector(".pearl-welcome-mark");
+    return {
+      logoLoaded: logo?.complete && logo.naturalWidth > 0,
+      portraitLoaded: portrait?.complete && portrait.naturalWidth > 0,
+      headerHasPortrait: Boolean(document.querySelector(".pearl-header img")),
+      wordmarkFont: getComputedStyle(
+        document.querySelector(".pearl-brand strong"),
+      ).fontFamily,
+      brandFontLoaded: document.fonts.check('21px "Chelsea Market"'),
+      newChatColor: getComputedStyle(document.querySelector(".pearl-new"))
+        .backgroundColor,
+    };
+  });
+  assert.equal(branding.logoLoaded, true);
+  assert.equal(branding.portraitLoaded, true);
+  assert.equal(branding.headerHasPortrait, false);
+  assert.match(branding.wordmarkFont, /Chelsea Market/);
+  assert.equal(branding.brandFontLoaded, true);
+  assert.equal(branding.newChatColor, "rgba(0, 0, 0, 0)");
   const exposed = await page.evaluate(() => Object.keys(window.scully).sort());
   assert.deepEqual(exposed, [
     "answerPearlQuestion",
@@ -60,14 +87,52 @@ try {
     0,
   );
   assert.equal(await page.getByText("Manage team").count(), 0);
-  await page
-    .getByRole("textbox", { name: "Message Pearl" })
-    .fill("Help me build a keyboard-usable household expense tracker");
+  const composer = page.getByRole("textbox", { name: "Message Pearl" });
+  const initialHeight = await composer.evaluate(
+    (input) => input.getBoundingClientRect().height,
+  );
+  await composer.fill("One\nTwo\nThree\nFour");
+  assert(
+    (await composer.evaluate((input) => input.getBoundingClientRect().height)) >
+      initialHeight,
+    "Composer should grow with a multiline draft",
+  );
+  assert.equal(
+    await composer.evaluate((input) => getComputedStyle(input).resize),
+    "none",
+  );
+  await composer.fill(
+    Array.from({ length: 24 }, (_, index) => `Draft line ${index + 1}`).join(
+      "\n",
+    ),
+  );
+  const overflow = await composer.evaluate((input) => {
+    input.scrollTop = input.scrollHeight;
+    return {
+      scrollHeight: input.scrollHeight,
+      clientHeight: input.clientHeight,
+      scrollTop: input.scrollTop,
+      scrollbarWidth: getComputedStyle(input).scrollbarWidth,
+    };
+  });
+  assert(overflow.scrollHeight > overflow.clientHeight);
+  assert(overflow.scrollTop > 0, "A long draft must remain scrollable");
+  assert.equal(overflow.scrollbarWidth, "none");
+  await composer.evaluate((input) => {
+    input.scrollTop = 0;
+  });
+  await page.screenshot({ path: "test-results/pearl-composer-overflow.png" });
+  await composer.fill(
+    "Help me build a keyboard-usable household expense tracker",
+  );
   await page.getByRole("button", { name: "Send message" }).click();
   await page
     .getByRole("log", { name: "Pearl conversation" })
     .getByText("Help me build a keyboard-usable household expense tracker")
     .waitFor();
+  const userMessage = page.locator(".pearl-message.user").last();
+  assert.equal(await userMessage.locator(".pearl-message-bubble").count(), 1);
+  assert.equal(await userMessage.locator("time[datetime]").count(), 1);
   await page.getByText("Turn interrupted").waitFor();
   assert.match(
     await page

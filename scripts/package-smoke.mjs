@@ -33,8 +33,7 @@ let app;
 try {
   app = await electron.launch({
     executablePath: `${bundle}/Contents/MacOS/scully`,
-    args: [],
-    env: { ...process.env, SCULLY_TEST_DATA: state },
+    args: [`--user-data-dir=${state}`],
     timeout: 30000,
   });
   const page = await app.firstWindow();
@@ -42,7 +41,25 @@ try {
     .getByRole("heading", { name: "What can I help you with?" })
     .waitFor();
   await page.getByRole("textbox", { name: "Message Pearl" }).waitFor();
+  assert.equal(
+    await page.evaluate(
+      async () => (await window.scully.listPearlChats()).length,
+    ),
+    0,
+  );
   assert.equal(await page.getByRole("button", { name: "New chat" }).count(), 1);
+  await page.waitForFunction(() =>
+    [
+      ...document.querySelectorAll(".pearl-brand img, .pearl-welcome-mark"),
+    ].every((image) => image.complete && image.naturalWidth > 0),
+  );
+  assert.equal(
+    await page.evaluate(async () => {
+      await document.fonts.load('21px "Chelsea Market"');
+      return document.fonts.check('21px "Chelsea Market"');
+    }),
+    true,
+  );
   assert.equal(
     await page.getByRole("button", { name: "Task", exact: true }).count(),
     0,

@@ -1,5 +1,11 @@
 import React from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { PearlApp } from "../src/renderer/PearlApp";
 import type { DesktopAPI } from "../src/shared/contracts";
@@ -38,6 +44,12 @@ it("opens a fresh Room chat without task or team controls", async () => {
     sendPearlMessage,
   } as unknown as DesktopAPI;
   render(<PearlApp api={api} />);
+  expect(screen.getByAltText("Scully alien head")).toHaveAttribute(
+    "src",
+    expect.stringContaining("scully-friendly-nerd-transparent-v1.png"),
+  );
+  expect(screen.getByRole("heading", { name: "Room" })).toBeInTheDocument();
+  expect(document.querySelector(".pearl-header img")).toBeNull();
   expect(screen.getByRole("button", { name: "New chat" })).toBeInTheDocument();
   expect(
     screen.queryByRole("button", { name: "Task" }),
@@ -53,7 +65,100 @@ it("opens a fresh Room chat without task or team controls", async () => {
   await waitFor(() =>
     expect(screen.getByText("Help me code")).toBeInTheDocument(),
   );
+  const userMessage = screen.getByText("Help me code").closest("article")!;
+  expect(userMessage).toHaveClass("user");
+  expect(within(userMessage).getByText("You")).toBeInTheDocument();
+  expect(
+    within(userMessage)
+      .getByText("Help me code")
+      .closest(".pearl-message-bubble"),
+  ).toBeInTheDocument();
+  expect(
+    within(userMessage).getByText("You").closest(".pearl-message-meta"),
+  ).toHaveTextContent(/\d/);
   expect(screen.getByText("Turn interrupted")).toBeInTheDocument();
+});
+
+it("shows Pearl's portrait, sent time and reply inside a chat bubble", async () => {
+  const at = "2026-10-20T12:34:00.000Z";
+  const chat: PearlChat = {
+    id: "12345678-1234-1234-1234-123456789abc",
+    title: "Discuss the project",
+    createdAt: at,
+    updatedAt: at,
+    status: "idle",
+    messages: [
+      { id: "user", role: "user", text: "What changed?", at },
+      { id: "reply", role: "assistant", text: "The catalog is ready.", at },
+    ],
+    questions: [],
+  };
+  const api = {
+    listPearlChats: vi.fn(async () => [chat]),
+    session: vi.fn(async () => ({ configured: true, model: "fixture" })),
+    onPearlChatUpdate: vi.fn(() => () => {}),
+    getPearlChat: vi.fn(async () => chat),
+  } as unknown as DesktopAPI;
+  render(<PearlApp api={api} />);
+  fireEvent.click(await screen.findByRole("button", { name: chat.title }));
+  expect(
+    await screen.findByRole("heading", { name: chat.title }),
+  ).toBeInTheDocument();
+  const reply = screen.getByText("The catalog is ready.").closest("article")!;
+  expect(reply).toHaveClass("assistant");
+  expect(reply.querySelector(".pearl-message-avatar")).toHaveAttribute(
+    "src",
+    expect.stringContaining("team-portrait-coordinator-v1.png"),
+  );
+  expect(within(reply).getByText("Pearl")).toBeInTheDocument();
+  expect(
+    within(reply)
+      .getByText("The catalog is ready.")
+      .closest(".pearl-message-bubble"),
+  ).toBeInTheDocument();
+  expect(reply.querySelector("time")).toHaveAttribute("datetime", at);
+  expect(document.querySelector(".pearl-header img")).toBeNull();
+});
+
+it("grows the composer with a draft and shrinks it after clearing", async () => {
+  const original = Object.getOwnPropertyDescriptor(
+    HTMLTextAreaElement.prototype,
+    "scrollHeight",
+  );
+  Object.defineProperty(HTMLTextAreaElement.prototype, "scrollHeight", {
+    configurable: true,
+    get(this: HTMLTextAreaElement) {
+      return 48 + (this.value.split("\n").length - 1) * 28;
+    },
+  });
+  try {
+    const api = {
+      listPearlChats: vi.fn(async () => []),
+      session: vi.fn(async () => ({ configured: true, model: "fixture" })),
+      onPearlChatUpdate: vi.fn(() => () => {}),
+    } as unknown as DesktopAPI;
+    render(<PearlApp api={api} />);
+    const input = screen.getByRole("textbox", { name: "Message Pearl" });
+    expect(input).toHaveStyle({ height: "48px" });
+    fireEvent.change(input, { target: { value: "One\nTwo\nThree" } });
+    expect(input).toHaveStyle({ height: "104px" });
+    fireEvent.change(input, {
+      target: { value: Array.from({ length: 20 }, (_, i) => i).join("\n") },
+    });
+    expect(input).toHaveStyle({ height: "210px" });
+    fireEvent.change(input, { target: { value: "" } });
+    expect(input).toHaveStyle({ height: "48px" });
+  } finally {
+    if (original)
+      Object.defineProperty(
+        HTMLTextAreaElement.prototype,
+        "scrollHeight",
+        original,
+      );
+    else
+      delete (HTMLTextAreaElement.prototype as { scrollHeight?: number })
+        .scrollHeight;
+  }
 });
 
 it("shows a paused coding turn as resumable work", async () => {
@@ -164,7 +269,11 @@ it("shows an applied patch as a readable diff", async () => {
   } as unknown as DesktopAPI;
   render(<PearlApp api={api} />);
   fireEvent.click(screen.getByRole("button", { name: "New chat" }));
-  fireEvent.click(await screen.findByText("apply_patch result"));
+  const activity = (await screen.findByText("Activity")).closest("details")!;
+  expect(activity).not.toHaveAttribute("open");
+  fireEvent.click(within(activity).getByText("Activity"));
+  fireEvent.click(within(activity).getByText("Apply patch"));
+  fireEvent.click(within(activity).getByText("Result"));
   expect(screen.getByText(/@@ note\.txt:3 @@/)).toHaveTextContent("-old +new");
 });
 
@@ -205,7 +314,11 @@ it("shows browser observations and visibility defects in readable form", async (
   } as unknown as DesktopAPI;
   render(<PearlApp api={api} />);
   fireEvent.click(screen.getByRole("button", { name: "New chat" }));
-  fireEvent.click(await screen.findByText("browser_check result"));
+  const activity = (await screen.findByText("Activity")).closest("details")!;
+  expect(within(activity).getByText("1 issue")).toBeInTheDocument();
+  fireEvent.click(within(activity).getByText("Activity"));
+  fireEvent.click(within(activity).getByText(/Check in browser/));
+  fireEvent.click(within(activity).getByText("Issue details"));
   expect(screen.getByText(/Page: Reading List/)).toHaveTextContent(
     "form #book-form",
   );
@@ -249,10 +362,13 @@ it("does not show an unverified claim attached to a rejected tool request", asyn
   } as unknown as DesktopAPI;
   render(<PearlApp api={api} />);
   fireEvent.click(screen.getByRole("button", { name: "New chat" }));
-  expect(
-    await screen.findByText("Pearl requested complete_work"),
-  ).toBeInTheDocument();
+  const activity = (await screen.findByText("Activity")).closest("details")!;
+  expect(within(activity).getByText("1 issue")).toBeInTheDocument();
   expect(screen.queryByText(/Every test passed/)).not.toBeInTheDocument();
+  fireEvent.click(within(activity).getByText("Activity"));
+  fireEvent.click(within(activity).getByText(/Finish work/));
+  fireEvent.click(within(activity).getByText("Issue details"));
+  expect(screen.getByText(/Completion rejected/)).toBeInTheDocument();
 });
 
 it("shows the explanation accompanying a linked question without internal tool narration", async () => {
@@ -449,9 +565,11 @@ it("shows a structured action batch without presenting it as an empty Pearl repl
   } as unknown as DesktopAPI;
   render(<PearlApp api={api} />);
   fireEvent.click(screen.getByRole("button", { name: "New chat" }));
-  expect(
-    await screen.findByText("Pearl requested read_file and project_map"),
-  ).toBeInTheDocument();
+  const activity = (await screen.findByText("Activity")).closest("details")!;
+  expect(within(activity).getByText("2 other actions")).toBeInTheDocument();
+  expect(within(activity).getByText(/Read file/)).toBeInTheDocument();
+  expect(within(activity).getByText(/Inspect project/)).toBeInTheDocument();
+  expect(screen.queryByText(/Pearl requested/)).not.toBeInTheDocument();
 });
 
 it("shows a running reply draft without treating it as a saved message", async () => {

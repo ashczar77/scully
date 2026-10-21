@@ -1,7 +1,11 @@
 import React from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
-import { CopyTextActions, RichText } from "../src/renderer/RichText";
+import {
+  CopyTextActions,
+  RichText,
+  readablePearlMarkdown,
+} from "../src/renderer/RichText";
 
 it("renders model Markdown without displaying its syntax or executing HTML", () => {
   render(
@@ -64,4 +68,31 @@ it("keeps nested lists, quotes, tables and fenced code as formatted blocks", () 
   expect(screen.getByText("Child").closest("ol")).toBeInTheDocument();
   expect(screen.getByRole("table")).toHaveTextContent("mode");
   expect(screen.getByText("const x = 1;").closest("pre")).toBeInTheDocument();
+});
+
+it("breaks up a long plain Pearl reply for reading without changing its words", () => {
+  const text = [
+    "The project contains a catalog with product pages and a cart.",
+    "The cart keeps quantities in local storage and calculates a running total.",
+    "I opened the catalog and checked that each product is available.",
+    "I then added a product and confirmed that the cart total changed.",
+    "The checkout form collects a name and address for a mock order.",
+    "The browser check showed the confirmation screen after submission.",
+    "To run the project locally, serve its folder with a static server.",
+    "The current version does not send orders to a backend service.",
+    "The remaining work is to connect a real payment and order flow.",
+  ].join(" ");
+  expect(text.length).toBeGreaterThan(500);
+  const readable = readablePearlMarkdown(text);
+  expect(readable).toContain("\n\n");
+  expect(readable.replace(/\n\n/g, " ")).toBe(text);
+  render(<RichText text={text} readableProse />);
+  expect(document.querySelectorAll(".rich-text p").length).toBeGreaterThan(1);
+});
+
+it("preserves existing Markdown and short replies", () => {
+  const markdown =
+    "## Result\n\n- One\n- Two\n\n```sh\nnode --check index.js\n```";
+  expect(readablePearlMarkdown(markdown)).toBe(markdown);
+  expect(readablePearlMarkdown("A short answer.")).toBe("A short answer.");
 });

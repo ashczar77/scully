@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type FormEvent,
@@ -9,88 +10,11 @@ import { FolderOpen, Plus, Send, Settings2, ShieldCheck } from "lucide-react";
 import type { DesktopAPI } from "../shared/contracts";
 import type { PearlChat, PearlChatSummary } from "../shared/pearl-chat";
 import { RichText } from "./RichText";
+import { PearlActivity, roomTimeline } from "./PearlActivity";
+import { PearlMessageFrame } from "./PearlMessageFrame";
+import scullyLogo from "../../assets/branding/scully-friendly-nerd-transparent-v1.png";
+import pearlPortrait from "../../assets/team-portrait-coordinator-v1.png";
 import "./pearl.css";
-
-function patchPreview(value: string): string | null {
-  try {
-    const result = JSON.parse(value) as {
-      path?: unknown;
-      hunks?: { line?: unknown; removed?: unknown; added?: unknown }[];
-    };
-    if (typeof result.path !== "string" || !Array.isArray(result.hunks))
-      return null;
-    const lines = result.hunks.map((hunk) => {
-      if (
-        typeof hunk.line !== "number" ||
-        typeof hunk.removed !== "string" ||
-        typeof hunk.added !== "string"
-      )
-        throw new Error("Invalid patch hunk");
-      return `@@ ${result.path}:${hunk.line} @@\n${hunk.removed.replace(/^/gmu, "-")}\n${hunk.added.replace(/^/gmu, "+")}`;
-    });
-    return lines.join("\n");
-  } catch {
-    return null;
-  }
-}
-
-function browserPreview(value: string): string | null {
-  try {
-    const result = JSON.parse(value) as {
-      title?: unknown;
-      initialVisibleText?: unknown;
-      visibleText?: unknown;
-      controls?: { tag?: unknown; id?: unknown; label?: unknown }[];
-      hiddenViolations?: { tag?: unknown; id?: unknown }[];
-      errors?: unknown[];
-      blockedExternalRequests?: unknown;
-      completedSteps?: unknown;
-    };
-    if (
-      typeof result.title !== "string" ||
-      typeof result.visibleText !== "string" ||
-      !Array.isArray(result.controls) ||
-      !Array.isArray(result.hiddenViolations) ||
-      !Array.isArray(result.errors)
-    )
-      return null;
-    const controls = result.controls
-      .filter(
-        (item) => typeof item.tag === "string" && typeof item.id === "string",
-      )
-      .map(
-        (item) =>
-          `${item.tag}${item.id ? ` #${item.id}` : ""}${typeof item.label === "string" && item.label ? `: ${item.label}` : ""}`,
-      );
-    const hidden = result.hiddenViolations
-      .filter(
-        (item) => typeof item.tag === "string" && typeof item.id === "string",
-      )
-      .map((item) => `${item.tag}${item.id ? ` #${item.id}` : ""}`);
-    const errors = result.errors.filter(
-      (item): item is string => typeof item === "string",
-    );
-    return [
-      `Page: ${result.title}`,
-      `Actions completed: ${typeof result.completedSteps === "number" ? result.completedSteps : "unknown"}`,
-      `Blocked external requests: ${typeof result.blockedExternalRequests === "number" ? result.blockedExternalRequests : "unknown"}`,
-      ...(typeof result.initialVisibleText === "string" &&
-      result.initialVisibleText !== result.visibleText
-        ? ["Initial visible text:", result.initialVisibleText]
-        : []),
-      "Final visible text:",
-      result.visibleText,
-      "Controls:",
-      controls.length ? controls.join("\n") : "None observed",
-      "Hidden-state violations at any observed point:",
-      hidden.length ? hidden.join("\n") : "None observed",
-      "Page errors:",
-      errors.length ? errors.join("\n") : "None observed",
-    ].join("\n");
-  } catch {
-    return null;
-  }
-}
 
 export function PearlApp({
   api: optionalApi = window.scully,
@@ -110,6 +34,7 @@ export function PearlApp({
   const [configured, setConfigured] = useState(false);
   const activeId = useRef<string | null>(null);
   const end = useRef<HTMLDivElement>(null);
+  const composerInput = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     let live = true;
     void Promise.all([api.listPearlChats(), api.session()])
@@ -137,6 +62,12 @@ export function PearlApp({
   useEffect(() => {
     end.current?.scrollIntoView?.({ block: "end" });
   }, [chat?.messages.length, chat?.status, chat?.streamingText?.length]);
+  useLayoutEffect(() => {
+    const input = composerInput.current;
+    if (!input) return;
+    input.style.height = "auto";
+    input.style.height = `${Math.min(input.scrollHeight, 210)}px`;
+  }, [draft]);
   async function action<T>(work: () => Promise<T>): Promise<T | undefined> {
     setError("");
     setBusy(true);
@@ -211,7 +142,7 @@ export function PearlApp({
     <div className="pearl-shell">
       <aside className="pearl-sidebar">
         <div className="pearl-brand">
-          <span className="pearl-mark">✦</span>
+          <img src={scullyLogo} alt="Scully alien head" />
           <strong>Scully</strong>
         </div>
         <button className="pearl-new" onClick={() => void create()}>
@@ -239,9 +170,8 @@ export function PearlApp({
       </aside>
       <main className="pearl-main">
         <header className="pearl-header">
-          <div>
-            <span className="pearl-name">Pearl</span>
-            <small>Chat and coding assistant</small>
+          <div className="pearl-header-context">
+            <h2 title={chat?.title || "Room"}>{chat?.title || "Room"}</h2>
           </div>
           {chat && (
             <button
@@ -267,7 +197,7 @@ export function PearlApp({
         >
           {!chat?.messages.length && (
             <div className="pearl-welcome">
-              <div className="pearl-welcome-mark">✦</div>
+              <img src={pearlPortrait} alt="" className="pearl-welcome-mark" />
               <h1>What can I help you with?</h1>
               <p>
                 Ask a question, discuss an idea, or choose a project and build
@@ -284,127 +214,75 @@ export function PearlApp({
             </div>
           )}
           <div className="pearl-messages">
-            {chat?.messages
-              .filter(
-                (item) =>
-                  !(
-                    item.role === "tool" &&
-                    [
-                      "ask_user",
-                      "answer_question",
-                      "withdraw_question",
-                    ].includes(item.toolName || "")
-                  ) &&
-                  !(
-                    item.role === "assistant" &&
-                    [
-                      "ask_user",
-                      "answer_question",
-                      "withdraw_question",
-                    ].includes(item.toolName || "") &&
-                    !item.text.trim()
-                  ),
-              )
-              .map((item) =>
-                item.role === "tool" ? (
-                  <details className="pearl-tool" key={item.id}>
-                    <summary>{item.toolName} result</summary>
-                    <pre>
-                      {item.toolName === "apply_patch"
-                        ? (patchPreview(item.text) ?? item.text)
-                        : ["browser_check", "preview_app"].includes(
-                              item.toolName || "",
-                            )
-                          ? (browserPreview(item.text) ?? item.text)
-                          : item.text}
-                    </pre>
-                  </details>
-                ) : item.toolCalls?.length ? (
-                  <article key={item.id} className="pearl-message assistant">
-                    {item.text.trim() &&
-                      !item.toolCalls.some(
-                        (call) => call.name === "complete_work",
-                      ) && <RichText text={item.text} />}
-                    <div className="pearl-action">
-                      Pearl requested{" "}
-                      {item.toolCalls.map((call) => call.name).join(" and ")}
-                    </div>
-                  </article>
-                ) : item.toolName ? (
-                  <article key={item.id} className="pearl-message assistant">
-                    {item.text.trim() && item.toolName !== "complete_work" && (
-                      <RichText text={item.text} />
-                    )}
-                    {![
-                      "ask_user",
-                      "answer_question",
-                      "withdraw_question",
-                    ].includes(item.toolName) && (
-                      <div className="pearl-action">
-                        Pearl requested {item.toolName}
-                      </div>
-                    )}
-                  </article>
-                ) : (
-                  <article
+            {roomTimeline(chat?.messages || []).map((entry) => {
+              if (entry.kind === "activity")
+                return (
+                  <PearlActivity key={entry.group.id} group={entry.group} />
+                );
+              const item = entry.message;
+              if (entry.progress)
+                return (
+                  <PearlMessageFrame
                     key={item.id}
-                    className={`pearl-message ${item.role}`}
+                    role="assistant"
+                    at={item.at}
+                    progress
                   >
-                    <span className="pearl-speaker">
-                      {item.role === "user" ? "You" : "Pearl"}
-                    </span>
-                    <RichText text={item.text} />
-                    {item.role === "assistant" && item.completion && (
+                    <RichText text={item.text} readableProse />
+                  </PearlMessageFrame>
+                );
+              return (
+                <PearlMessageFrame key={item.id} role={item.role} at={item.at}>
+                  <RichText
+                    text={item.text}
+                    readableProse={item.role === "assistant"}
+                  />
+                  {item.role === "assistant" && item.completion && (
+                    <div className="pearl-evidence">
+                      Work status: {item.completion.status}.
+                      {item.completion.remaining && (
+                        <> Remaining: {item.completion.remaining}</>
+                      )}
+                    </div>
+                  )}
+                  {item.role === "assistant" &&
+                    item.evidence &&
+                    (item.evidence.projectApproved ||
+                      item.evidence.filesWritten > 0) && (
                       <div className="pearl-evidence">
-                        Work status: {item.completion.status}.
-                        {item.completion.remaining && (
-                          <> Remaining: {item.completion.remaining}</>
+                        {item.evidence.filesWritten > 0 ? (
+                          <>
+                            {item.evidence.filesWritten} file
+                            {item.evidence.filesWritten === 1 ? "" : "s"}{" "}
+                            changed.
+                            {item.evidence.commandsCompleted === 0
+                              ? " No command checks completed for these changes."
+                              : item.evidence
+                                    .successfulCommandAfterLatestWrite === false
+                                ? " No successful command check after the latest edit; the changes remain unverified."
+                                : ` ${item.evidence.commandsCompleted} command check${item.evidence.commandsCompleted === 1 ? "" : "s"} completed; review the result.`}
+                          </>
+                        ) : item.evidence.commandsCompleted > 0 ? (
+                          `No files changed. ${item.evidence.commandsCompleted} command check${item.evidence.commandsCompleted === 1 ? "" : "s"} completed; review the result.`
+                        ) : (
+                          "No files changed or command checks completed in this turn."
+                        )}
+                        {Boolean(item.evidence.uiFilesWritten) && (
+                          <span>
+                            {item.evidence.successfulBrowserAfterLatestUiWrite
+                              ? ` ${item.evidence.browserChecks || 0} browser check${item.evidence.browserChecks === 1 ? "" : "s"} completed after the UI edit; review the result.`
+                              : " No clean browser check after the latest UI edit; the UI remains unverified."}
+                          </span>
                         )}
                       </div>
                     )}
-                    {item.role === "assistant" &&
-                      item.evidence &&
-                      (item.evidence.projectApproved ||
-                        item.evidence.filesWritten > 0) && (
-                        <div className="pearl-evidence">
-                          {item.evidence.filesWritten > 0 ? (
-                            <>
-                              {item.evidence.filesWritten} file
-                              {item.evidence.filesWritten === 1 ? "" : "s"}{" "}
-                              changed.
-                              {item.evidence.commandsCompleted === 0
-                                ? " No command checks completed for these changes."
-                                : item.evidence
-                                      .successfulCommandAfterLatestWrite ===
-                                    false
-                                  ? " No successful command check after the latest edit; the changes remain unverified."
-                                  : ` ${item.evidence.commandsCompleted} command check${item.evidence.commandsCompleted === 1 ? "" : "s"} completed; review the result.`}
-                            </>
-                          ) : item.evidence.commandsCompleted > 0 ? (
-                            `No files changed. ${item.evidence.commandsCompleted} command check${item.evidence.commandsCompleted === 1 ? "" : "s"} completed; review the result.`
-                          ) : (
-                            "No files changed or command checks completed in this turn."
-                          )}
-                          {Boolean(item.evidence.uiFilesWritten) && (
-                            <span>
-                              {item.evidence.successfulBrowserAfterLatestUiWrite
-                                ? ` ${item.evidence.browserChecks || 0} browser check${item.evidence.browserChecks === 1 ? "" : "s"} completed after the UI edit; review the result.`
-                                : " No clean browser check after the latest UI edit; the UI remains unverified."}
-                            </span>
-                          )}
-                        </div>
-                      )}
-                  </article>
-                ),
-              )}
+                </PearlMessageFrame>
+              );
+            })}
             {chat?.status === "running" && chat.streamingText && (
-              <article
-                className="pearl-message assistant"
-                aria-label="Pearl draft"
-              >
-                <span className="pearl-speaker">Pearl</span>
+              <PearlMessageFrame role="assistant" draft>
                 <RichText text={chat.streamingText} />
-              </article>
+              </PearlMessageFrame>
             )}
             {chat?.status === "running" && (
               <div className="pearl-working">
@@ -632,6 +510,7 @@ export function PearlApp({
         )}
         <form className="pearl-composer" onSubmit={(event) => void send(event)}>
           <textarea
+            ref={composerInput}
             aria-label="Message Pearl"
             value={draft}
             onKeyDown={composerKey}
