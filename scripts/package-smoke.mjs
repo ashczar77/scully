@@ -1,5 +1,5 @@
 import { _electron as electron } from "playwright";
-import { listPackage } from "@electron/asar";
+import { extractFile, listPackage } from "@electron/asar";
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { mkdir, readFile, mkdtemp, rm } from "node:fs/promises";
@@ -13,6 +13,12 @@ assert.deepEqual(
 );
 const entries = listPackage(`${bundle}/Contents/Resources/app.asar`);
 assert(entries.some((p) => p.endsWith("/main.cjs")));
+const mainBundle = extractFile(
+  `${bundle}/Contents/Resources/app.asar`,
+  "dist/main.cjs",
+).toString();
+assert(!mainBundle.includes("Live test request budget"));
+assert(!mainBundle.includes("SCULLY_LIVE_MAX_REQUESTS"));
 assert(!entries.some((p) => p.endsWith("/worker.cjs")));
 assert(entries.some((p) => p.endsWith("/branding/scully.png")));
 assert(entries.some((p) => p.endsWith("/fonts/ChelseaMarket-OFL.txt")));

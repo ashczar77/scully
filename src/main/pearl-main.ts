@@ -18,6 +18,8 @@ import { PearlChatStore } from "./pearl-chat-store";
 import { PearlSession } from "./pearl-session";
 import { cappedPearlModel, liveModelRequestLimit } from "./pearl-test-model";
 
+declare const __SCULLY_DEV_HARNESS__: boolean;
+
 protocol.registerSchemesAsPrivileged([
   {
     scheme: "scully",
@@ -133,12 +135,14 @@ app
         throw new Error("Invalid local Pearl test endpoint");
     }
     const baseModel = nebiusPearlModel(fetch, fixtureEndpoint);
-    const liveLimit =
-      !app.isPackaged && process.env.SCULLY_LIVE_TEST === "1"
-        ? liveModelRequestLimit(process.env.SCULLY_LIVE_MAX_REQUESTS)
-        : 0;
-    const model =
-      liveLimit > 0 ? cappedPearlModel(baseModel, liveLimit) : baseModel;
+    const model = __SCULLY_DEV_HARNESS__
+      ? !app.isPackaged && process.env.SCULLY_LIVE_TEST === "1"
+        ? cappedPearlModel(
+            baseModel,
+            liveModelRequestLimit(process.env.SCULLY_LIVE_MAX_REQUESTS),
+          )
+        : baseModel
+      : baseModel;
     pearl = new PearlChatManager(
       chats,
       app.getPath("userData"),
