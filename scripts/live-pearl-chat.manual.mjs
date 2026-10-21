@@ -5,7 +5,11 @@ import { join } from "node:path";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { safeTestCommand } from "./live-test-command.mjs";
-import { liveRequestLimit, liveStallTracker } from "./live-test-budget.mjs";
+import {
+  liveRequestLimit,
+  liveStallTracker,
+  remainingLiveRequests,
+} from "./live-test-budget.mjs";
 import { inspectStaticWebApp } from "./live-browser-sanity.mjs";
 
 if (process.env.SCULLY_LIVE_TEST !== "1" || !process.env.NEBIUS_API_KEY)
@@ -62,13 +66,20 @@ const model =
 const codingModel = process.env.SCULLY_CODING_MODEL || model;
 const outputTokens = 16384;
 const maxRequests = liveRequestLimit(process.env.SCULLY_LIVE_MAX_REQUESTS);
+let priorProcessRequests = 0;
 let app;
 let page;
 let chatId;
 const launch = () =>
   electron.launch({
     args: ["."],
-    env: { ...process.env, SCULLY_TEST_DATA: state },
+    env: {
+      ...process.env,
+      SCULLY_TEST_DATA: state,
+      SCULLY_LIVE_MAX_REQUESTS: String(
+        remainingLiveRequests(maxRequests, priorProcessRequests),
+      ),
+    },
     timeout: 30000,
   });
 
@@ -88,11 +99,14 @@ async function current() {
   return page.evaluate(async (id) => window.scully.getPearlChat(id), chatId);
 }
 async function requestCount() {
-  return page.evaluate(
-    async () =>
-      (await window.scully.metrics()).events.filter(
-        (entry) => entry.operation === "model.request",
-      ).length,
+  return (
+    priorProcessRequests +
+    (await page.evaluate(
+      async () =>
+        (await window.scully.metrics()).events.filter(
+          (entry) => entry.operation === "model.request",
+        ).length,
+    ))
   );
 }
 function toolObservation(message) {
@@ -347,6 +361,9 @@ try {
         "Generated web app could not load in the browser",
       );
     }
+    priorProcessRequests = await requestCount();
+    if (remainingLiveRequests(maxRequests, priorProcessRequests) === 0)
+      throw new Error("Live request cap reached before restart recovery");
     await app.close();
     app = await launch();
     page = await app.firstWindow();

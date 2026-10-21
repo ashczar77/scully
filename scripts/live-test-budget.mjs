@@ -5,6 +5,10 @@ export function liveRequestLimit(value) {
     : 18;
 }
 
+export function remainingLiveRequests(limit, used) {
+  return Math.max(0, limit - used);
+}
+
 export function liveStallTracker(now = Date.now, maxIdleMs = 120_000) {
   let lastProgressAt = now();
   let lastMessageCount = -1;

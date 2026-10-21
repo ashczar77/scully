@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import {
   liveRequestLimit,
   liveStallTracker,
+  remainingLiveRequests,
 } from "../scripts/live-test-budget.mjs";
 
 it("bounds invalid and excessive paid request limits", () => {
@@ -10,6 +11,12 @@ it("bounds invalid and excessive paid request limits", () => {
   expect(liveRequestLimit("0")).toBe(18);
   expect(liveRequestLimit("1000")).toBe(24);
   expect(liveRequestLimit("12")).toBe(12);
+});
+
+it("carries the paid request cap across an app restart", () => {
+  expect(remainingLiveRequests(18, 11)).toBe(7);
+  expect(remainingLiveRequests(18, 18)).toBe(0);
+  expect(remainingLiveRequests(18, 19)).toBe(0);
 });
 
 it("stops a running live turn after no saved progress and resets on action", () => {
