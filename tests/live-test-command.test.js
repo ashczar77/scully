@@ -36,3 +36,18 @@ it("accepts only bounded test commands in the disposable project", () => {
     false,
   );
 });
+
+it("allows a disposable preview entry without shell or traversal arguments", async () => {
+  const { safePreviewCommand } =
+    await import("../scripts/live-test-command.mjs");
+  expect(safePreviewCommand({ command: "node", args: ["src/server.js"] })).toBe(
+    true,
+  );
+  for (const args of [
+    ["../server.js"],
+    ["/tmp/server.js"],
+    ["-e", "bad"],
+    ["server.js", "--extra"],
+  ])
+    expect(safePreviewCommand({ command: "node", args })).toBe(false);
+});

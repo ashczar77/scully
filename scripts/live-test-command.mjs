@@ -21,3 +21,14 @@ export function safeTestCommand(value) {
     ].includes(JSON.stringify(value.args))
   );
 }
+
+export function safePreviewCommand(value) {
+  return (
+    value?.command === "node" &&
+    Array.isArray(value.args) &&
+    value.args.length === 1 &&
+    typeof value.args[0] === "string" &&
+    /^[A-Za-z0-9_-][A-Za-z0-9_./-]*\.(?:cjs|mjs|js)$/.test(value.args[0]) &&
+    !value.args[0].includes("..")
+  );
+}

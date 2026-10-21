@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { PearlModelResult } from "../engine/pearl-model";
 import type {
   PearlChat,
+  PearlProviderContinuation,
   PearlPauseReason,
   PearlToolCall,
 } from "../shared/pearl-chat";
@@ -21,6 +22,7 @@ export type PearlAgentHost = {
     chat: PearlChat,
     calls: PearlToolCall[],
     text: string,
+    continuation?: PearlProviderContinuation,
   ) => void;
   observe: (chat: PearlChat, call: PearlToolCall, observation: string) => void;
   execute: (chat: PearlChat, call: PearlToolCall) => Promise<ActionDisposition>;
@@ -44,12 +46,40 @@ export type AgentRunLimits = {
 };
 
 function failedObservation(value: string | undefined): boolean {
+  if (value) {
+    try {
+      const result = JSON.parse(value);
+      if (result.error || ("exitCode" in result && result.exitCode !== 0))
+        return true;
+      if (Array.isArray(result.errors) && result.errors.length) return true;
+    } catch {
+      /* Text observations are checked below. */
+    }
+  }
   return (
     !value ||
     /^(Action (failed|rejected|not applied)|Question rejected|Withdrawal rejected|Answer link rejected|Completion rejected|Invalid )/u.test(
       value,
     )
   );
+}
+
+function canonicalArguments(value: string): unknown {
+  try {
+    const normalize = (item: unknown): unknown =>
+      Array.isArray(item)
+        ? item.map(normalize)
+        : item && typeof item === "object"
+          ? Object.fromEntries(
+              Object.entries(item)
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([key, child]) => [key, normalize(child)]),
+            )
+          : item;
+    return normalize(JSON.parse(value));
+  } catch {
+    return value;
+  }
 }
 
 function cycleFingerprint(
@@ -61,7 +91,7 @@ function cycleFingerprint(
       JSON.stringify(
         calls.map((call, index) => [
           call.name,
-          call.arguments,
+          canonicalArguments(call.arguments),
           observations[index],
         ]),
       ),
@@ -89,6 +119,7 @@ function successfulWrite(
 
 const controlActions = new Set([
   "run_command",
+  "preview_app",
   "ask_user",
   "answer_question",
   "withdraw_question",
@@ -127,6 +158,45 @@ export async function runPearlAgentTurn(
   let repetitionNudge = "";
   const seenCycles = new Map<string, number>();
   const recentProgress: boolean[] = [];
+  const saved = host.load();
+  const start = saved.messages.findIndex(
+    (message) => message.id === saved.activeUserMessageId,
+  );
+  if (start >= 0) {
+    for (const message of saved.messages.slice(start + 1)) {
+      if (message.role !== "assistant") continue;
+      const calls =
+        message.toolCalls ||
+        (message.toolCallId && message.toolName
+          ? [
+              {
+                id: message.toolCallId,
+                name: message.toolName,
+                arguments: message.arguments || "{}",
+              },
+            ]
+          : []);
+      if (!calls.length) continue;
+      const observations = calls.map(
+        (call) =>
+          saved.messages.find(
+            (item) => item.role === "tool" && item.toolCallId === call.id,
+          )?.text,
+      );
+      if (observations.some((value) => value === undefined)) continue;
+      if (
+        calls.some((call, index) => successfulWrite(call, observations[index]))
+      )
+        seenCycles.clear();
+      for (const [index, call] of calls.entries()) {
+        const fingerprint = cycleFingerprint([call], [observations[index]]);
+        seenCycles.set(fingerprint, (seenCycles.get(fingerprint) || 0) + 1);
+      }
+    }
+    if ([...seenCycles.values()].some((count) => count >= 3))
+      repetitionNudge =
+        "\nAn action already repeated without new results before this continuation. Use a different approach or explain the blocker.";
+  }
   const inspectCycle = (calls: PearlToolCall[]): boolean => {
     const chat = host.load();
     const observations = calls.map(
@@ -146,11 +216,16 @@ export async function runPearlAgentTurn(
       browserRequested = false;
       completionRequested = false;
     }
-    const fingerprint = cycleFingerprint(calls, observations);
-    const count = (seenCycles.get(fingerprint) || 0) + 1;
-    seenCycles.set(fingerprint, count);
-    const progressed =
-      count === 1 && observations.some((value) => !failedObservation(value));
+    const counts = calls.map((call, index) => {
+      const fingerprint = cycleFingerprint([call], [observations[index]]);
+      const count = (seenCycles.get(fingerprint) || 0) + 1;
+      seenCycles.set(fingerprint, count);
+      return count;
+    });
+    const count = Math.min(...counts);
+    const progressed = observations.some(
+      (value, index) => counts[index] === 1 && !failedObservation(value),
+    );
     recentProgress.push(progressed);
     if (recentProgress.length > progressWindowSize) recentProgress.shift();
     if (count === 3)
@@ -181,7 +256,7 @@ export async function runPearlAgentTurn(
         ? "\nFiles changed after the latest successful command check. Request a relevant check through run_command before concluding if one is available. If you cannot check, clearly state that the edits are unverified. Do not claim the task is complete based only on file writes."
         : "") +
       (browserRequested && host.needsBrowserCheck?.(chat)
-        ? "\nA web UI file changed after the latest clean browser observation. Use browser_check on the static HTML entry and inspect rendered behavior, errors, and hidden-state violations before concluding. If the browser check is unavailable or fails, report the UI as unverified."
+        ? "\nBrowser verification is missing, failed, or predates an edit. Use browser_check for static HTML or preview_app for the running application and inspect rendered behavior, errors, and hidden-state violations before concluding. If the browser check is unavailable or fails, report the UI as unverified."
         : "") +
       (completionRequested && host.needsCompletion(chat)
         ? "\nProject files changed in this turn. Call complete_work with a status and summary to finish. State unfinished work and use unverified when no successful check followed the latest edit. Do not finish with plain text."
@@ -221,19 +296,25 @@ export async function runPearlAgentTurn(
     }
     const calls = result.kind === "tool" ? [result.call] : result.calls;
     validateBatch(calls);
-    host.recordActions(chat, calls, result.text);
+    host.recordActions(chat, calls, result.text, result.providerContinuation);
 
-    // A user decision or command approval pauses the turn. Request those
-    // actions alone so no other action can be lost or run around the pause.
+    // A plan is local working state, not authority. It can be saved immediately
+    // before a final decision action. No file work may run around an approval,
+    // and no action may follow a pause or completion.
+    const planBeforeDecision =
+      calls.length === 2 &&
+      calls[0].name === "update_plan" &&
+      controlActions.has(calls[1].name);
     if (
       calls.length > 1 &&
-      calls.some((call) => controlActions.has(call.name))
+      calls.some((call) => controlActions.has(call.name)) &&
+      !planBeforeDecision
     ) {
       for (const call of calls)
         host.observe(
           chat,
           call,
-          "Action not applied. Request approval and question actions individually; then continue with other actions.",
+          "Action not applied. A decision action must be alone or last after one update_plan. Do not combine it with file work or other decisions. No actions in this batch were applied.",
         );
       if (inspectCycle(calls)) return;
       continue;

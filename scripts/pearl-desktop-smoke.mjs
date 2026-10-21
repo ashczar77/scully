@@ -62,11 +62,11 @@ try {
   assert.equal(await page.getByText("Manage team").count(), 0);
   await page
     .getByRole("textbox", { name: "Message Pearl" })
-    .fill("Help me build a small app");
+    .fill("Help me build a keyboard-usable household expense tracker");
   await page.getByRole("button", { name: "Send message" }).click();
   await page
     .getByRole("log", { name: "Pearl conversation" })
-    .getByText("Help me build a small app")
+    .getByText("Help me build a keyboard-usable household expense tracker")
     .waitFor();
   await page.getByText("Turn interrupted").waitFor();
   assert.match(
@@ -78,7 +78,25 @@ try {
   const chat = await page.evaluate(
     async () => (await window.scully.listPearlChats())[0],
   );
-  assert.equal(chat.title, "Help me build a small app");
+  assert.equal(
+    chat.title,
+    "Help me build a keyboard-usable household expense tracker",
+  );
+  const titleLayout = await page
+    .getByRole("button", { name: chat.title })
+    .evaluate((button) => {
+      const range = document.createRange();
+      range.setStart(button.firstChild, 0);
+      range.setEnd(button.firstChild, 1);
+      return {
+        first: range.getBoundingClientRect().left,
+        left: button.getBoundingClientRect().left,
+      };
+    });
+  assert(
+    titleLayout.first >= titleLayout.left,
+    "Long chat titles must preserve their visible beginning",
+  );
   await app.evaluate(
     ({ dialog }, filePaths) => {
       dialog.showOpenDialog = () =>
@@ -120,10 +138,14 @@ try {
   await app.close();
   app = await launch();
   page = await app.firstWindow();
-  await page.getByRole("button", { name: "Help me build a small app" }).click();
+  await page
+    .getByRole("button", {
+      name: "Help me build a keyboard-usable household expense tracker",
+    })
+    .click();
   await page
     .getByRole("log", { name: "Pearl conversation" })
-    .getByText("Help me build a small app")
+    .getByText("Help me build a keyboard-usable household expense tracker")
     .waitFor();
   await page.getByText("Turn interrupted").waitFor();
   const restored = await page.evaluate(

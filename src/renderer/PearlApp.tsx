@@ -106,7 +106,7 @@ export function PearlApp({
   const [error, setError] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [key, setKey] = useState("");
-  const [model, setModel] = useState("deepseek-ai/DeepSeek-V4-Pro-0813");
+  const [model, setModel] = useState("zai-org/GLM-5.3-Flash");
   const [configured, setConfigured] = useState(false);
   const activeId = useRef<string | null>(null);
   const end = useRef<HTMLDivElement>(null);
@@ -287,11 +287,23 @@ export function PearlApp({
             {chat?.messages
               .filter(
                 (item) =>
-                  !["answer_question", "withdraw_question"].includes(
-                    item.toolName || "",
+                  !(
+                    item.role === "tool" &&
+                    [
+                      "ask_user",
+                      "answer_question",
+                      "withdraw_question",
+                    ].includes(item.toolName || "")
                   ) &&
-                  !(item.role === "tool" && item.toolName === "ask_user") &&
-                  !(item.toolName === "ask_user" && item.role === "assistant"),
+                  !(
+                    item.role === "assistant" &&
+                    [
+                      "ask_user",
+                      "answer_question",
+                      "withdraw_question",
+                    ].includes(item.toolName || "") &&
+                    !item.text.trim()
+                  ),
               )
               .map((item) =>
                 item.role === "tool" ? (
@@ -300,22 +312,39 @@ export function PearlApp({
                     <pre>
                       {item.toolName === "apply_patch"
                         ? (patchPreview(item.text) ?? item.text)
-                        : item.toolName === "browser_check"
+                        : ["browser_check", "preview_app"].includes(
+                              item.toolName || "",
+                            )
                           ? (browserPreview(item.text) ?? item.text)
                           : item.text}
                     </pre>
                   </details>
                 ) : item.toolCalls?.length ? (
                   <article key={item.id} className="pearl-message assistant">
+                    {item.text.trim() &&
+                      !item.toolCalls.some(
+                        (call) => call.name === "complete_work",
+                      ) && <RichText text={item.text} />}
                     <div className="pearl-action">
                       Pearl requested{" "}
                       {item.toolCalls.map((call) => call.name).join(" and ")}
                     </div>
                   </article>
                 ) : item.toolName ? (
-                  <div className="pearl-action" key={item.id}>
-                    Pearl requested {item.toolName}
-                  </div>
+                  <article key={item.id} className="pearl-message assistant">
+                    {item.text.trim() && item.toolName !== "complete_work" && (
+                      <RichText text={item.text} />
+                    )}
+                    {![
+                      "ask_user",
+                      "answer_question",
+                      "withdraw_question",
+                    ].includes(item.toolName) && (
+                      <div className="pearl-action">
+                        Pearl requested {item.toolName}
+                      </div>
+                    )}
+                  </article>
                 ) : (
                   <article
                     key={item.id}
@@ -429,18 +458,57 @@ export function PearlApp({
                 </div>
               </section>
             )}
+            {chat?.work && (
+              <details className="pearl-card" aria-label="Working plan">
+                <summary>Working plan: {chat.work.objective}</summary>
+                <p>{chat.work.approach}</p>
+                {chat.work.requirements.length > 0 && (
+                  <div>
+                    Quoted user requirements
+                    <ul>
+                      {chat.work.requirements.map((requirement, index) => (
+                        <li key={index}>{requirement.quote}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                <ul>
+                  {chat.work.steps.map((step, index) => (
+                    <li key={index}>
+                      {step.status === "completed"
+                        ? "✓"
+                        : step.status === "in_progress"
+                          ? "→"
+                          : "○"}{" "}
+                      {step.text}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
             {chat?.pendingTool && (
               <section className="pearl-card" aria-label="Command approval">
                 <ShieldCheck size={20} />
                 <div>
                   <strong>Approve command?</strong>
-                  <p>This runs once inside the selected project.</p>
+                  <p>
+                    {chat.pendingTool.name === "preview_app"
+                      ? "Start the project server and an isolated browser for this turn, up to ten minutes. Pearl can continue interacting with it; form actions can change project data. Stop ends the preview."
+                      : "This runs once inside the selected project."}
+                  </p>
                   <pre>
                     {command
                       ? JSON.stringify(
                           {
                             executable: chat.pendingTool.executable?.path,
                             argv: [command.command, ...(command.args || [])],
+                            ...(chat.pendingTool.name === "preview_app"
+                              ? {
+                                  browser: JSON.parse(
+                                    chat.pendingTool.arguments,
+                                  ),
+                                }
+                              : {}),
                           },
                           null,
                           2,

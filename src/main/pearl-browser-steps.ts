@@ -1,5 +1,5 @@
 export type BrowserStep = {
-  action: "click" | "fill" | "press" | "reload";
+  action: "click" | "fill" | "select" | "wait_for" | "press" | "reload";
   selector?: string;
   value?: string;
   key?: string;
@@ -43,7 +43,11 @@ export function validateBrowserSteps(value: unknown): BrowserStep[] {
     if (!item || typeof item !== "object" || Array.isArray(item))
       throw new Error("Invalid browser action");
     const step = item as Record<string, unknown>;
-    if (!["click", "fill", "press", "reload"].includes(step.action as string))
+    if (
+      !["click", "fill", "select", "wait_for", "press", "reload"].includes(
+        step.action as string,
+      )
+    )
       throw new Error("Invalid browser action");
     if (
       Object.keys(step).some(
@@ -51,7 +55,8 @@ export function validateBrowserSteps(value: unknown): BrowserStep[] {
       ) ||
       (step.action === "click" &&
         (step.value !== undefined || step.key !== undefined)) ||
-      (step.action === "fill" && step.key !== undefined) ||
+      (["fill", "select", "wait_for"].includes(step.action as string) &&
+        step.key !== undefined) ||
       (step.action === "press" && step.value !== undefined)
     )
       throw new Error("Invalid browser action field");
@@ -59,7 +64,7 @@ export function validateBrowserSteps(value: unknown): BrowserStep[] {
       step.selector !== undefined &&
       (typeof step.selector !== "string" ||
         !step.selector.trim() ||
-        step.selector.length > 200)
+        step.selector.length > 1000)
     )
       throw new Error("Invalid browser selector");
     if (
@@ -70,15 +75,20 @@ export function validateBrowserSteps(value: unknown): BrowserStep[] {
     if (
       step.key !== undefined &&
       (typeof step.key !== "string" ||
-        !/^(?:[a-zA-Z0-9? ]|Enter|Escape|Tab|Space|Backspace|ArrowUp|ArrowDown|ArrowLeft|ArrowRight)$/.test(
+        !/^(?:[\x20-\x7e]|Enter|Escape|Tab|Space|Backspace|Delete|ArrowUp|ArrowDown|ArrowLeft|ArrowRight)$/.test(
           step.key,
         ))
     )
-      throw new Error("Invalid browser key");
+      throw new Error(
+        "Invalid browser key. Use one printable ASCII character, Enter, Escape, Tab, Space, Backspace, Delete, ArrowUp, ArrowDown, ArrowLeft or ArrowRight. Modifier combinations are not supported.",
+      );
     if (
-      ((step.action === "click" || step.action === "fill") &&
+      (["click", "fill", "select", "wait_for"].includes(
+        step.action as string,
+      ) &&
         typeof step.selector !== "string") ||
-      (step.action === "fill" && typeof step.value !== "string") ||
+      (["fill", "select"].includes(step.action as string) &&
+        typeof step.value !== "string") ||
       (step.action === "press" && typeof step.key !== "string") ||
       (step.action === "reload" &&
         (step.selector !== undefined ||

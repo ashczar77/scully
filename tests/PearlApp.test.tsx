@@ -255,7 +255,7 @@ it("does not show an unverified claim attached to a rejected tool request", asyn
   expect(screen.queryByText(/Every test passed/)).not.toBeInTheDocument();
 });
 
-it("shows a linked question without internal question-tool narration", async () => {
+it("shows the explanation accompanying a linked question without internal tool narration", async () => {
   const chat: PearlChat = {
     id: "12345678-1234-1234-1234-123456789abc",
     title: "New chat",
@@ -266,7 +266,7 @@ it("shows a linked question without internal question-tool narration", async () 
       {
         id: "call",
         role: "assistant",
-        text: "",
+        text: "I recommend shared storage because everyone needs the same list.",
         at: "2026-10-20T00:00:00.000Z",
         toolName: "ask_user",
         toolCallId: "question-call",
@@ -302,6 +302,11 @@ it("shows a linked question without internal question-tool narration", async () 
   await waitFor(() =>
     expect(screen.getByText("Who can see the list?")).toBeInTheDocument(),
   );
+  expect(
+    screen.getByText(
+      "I recommend shared storage because everyone needs the same list.",
+    ),
+  ).toBeInTheDocument();
   expect(
     screen.queryByText(/Pearl requested ask_user/),
   ).not.toBeInTheDocument();
@@ -493,6 +498,6 @@ it("prefills the model used by the connected Room gate for a new connection", as
   render(<PearlApp api={api} />);
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
   expect(screen.getByRole("textbox", { name: "Model" })).toHaveValue(
-    "deepseek-ai/DeepSeek-V4-Pro-0813",
+    "zai-org/GLM-5.3-Flash",
   );
 });

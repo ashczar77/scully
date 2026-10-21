@@ -15,6 +15,7 @@ import { LocalMetrics, measured, type Operation } from "../shared/telemetry";
 import { PearlChatManager } from "./pearl-chat-manager";
 import { IsolatedPearlBrowser } from "./pearl-browser";
 import { PearlChatStore } from "./pearl-chat-store";
+import { roomChat, roomResult } from "./pearl-chat-view";
 import { PearlSession } from "./pearl-session";
 import { cappedPearlModel, liveModelRequestLimit } from "./pearl-test-model";
 
@@ -83,7 +84,7 @@ function handle<T extends unknown[]>(
     trusted(event);
     return measured(
       channel,
-      () => listener(event, ...(args as T)),
+      async () => roomResult(await listener(event, ...(args as T))),
       metrics.record,
     );
   });
@@ -147,7 +148,7 @@ app
       chats,
       app.getPath("userData"),
       () => settings.current(),
-      (chat) => win?.webContents.send("pearl:update", chat),
+      (chat) => win?.webContents.send("pearl:update", roomChat(chat)),
       model,
       metrics.record,
       new IsolatedPearlBrowser(),
@@ -160,7 +161,7 @@ app
     handle("pearl:create", () => pearl!.create());
     ipcMain.handle("pearl:get", (event, id) => {
       trusted(event);
-      return pearl!.get(id);
+      return roomChat(pearl!.get(id));
     });
     handle("pearl:send", (_event, id, text) => pearl!.send(id, text));
     handle("pearl:project:choose", async (_event, id) => {
@@ -207,6 +208,13 @@ app
   });
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
+});
+let previewsClosed = false;
+app.on("before-quit", (event) => {
+  if (previewsClosed || !pearl) return;
+  event.preventDefault();
+  previewsClosed = true;
+  void pearl.closePreviews().finally(() => app.quit());
 });
 app.on("will-quit", () => {
   settings.close();

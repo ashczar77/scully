@@ -14,10 +14,10 @@ const input: Parameters<PearlModel["complete"]>[0] = {
 
 describe("connected test request cap", () => {
   it("caps configured requests before any paid model call", () => {
-    expect(liveModelRequestLimit(undefined)).toBe(18);
+    expect(liveModelRequestLimit(undefined)).toBe(200);
     expect(liveModelRequestLimit("7")).toBe(7);
-    expect(liveModelRequestLimit("999")).toBe(24);
-    expect(liveModelRequestLimit("invalid")).toBe(18);
+    expect(liveModelRequestLimit("999")).toBe(999);
+    expect(liveModelRequestLimit("invalid")).toBe(200);
   });
   it("allows exactly the configured number of calls and leaves the next call unsent", async () => {
     const complete = vi.fn(async () => ({

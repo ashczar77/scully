@@ -4,12 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { safeTestCommand } from "./live-test-command.mjs";
+import { safeTestCommand, safePreviewCommand } from "./live-test-command.mjs";
 import {
   liveRequestLimit,
   liveStallTracker,
   remainingLiveRequests,
 } from "./live-test-budget.mjs";
+import { inspectLiveWebApp } from "./live-preview-inspection.mjs";
 import { inspectStaticWebApp } from "./live-browser-sanity.mjs";
 
 if (process.env.SCULLY_LIVE_TEST !== "1" || !process.env.NEBIUS_API_KEY)
@@ -31,15 +32,25 @@ const scenario =
         browser:
           "Check the generated page in Pearl's browser. Try adding an expense with Enter and inspect its initial state. Fix any behavior or display problem you observe, then check the repair and report what remains unfinished.",
       }
-    : {
-        name: "reading-list",
-        initial:
-          "Help me build a keyboard-usable reading list with persistent books, read status, and tests. Discuss important product choices before coding.",
-        change:
-          "Now include sign-in from separate devices, viewing friends' lists, and sharing in the first release. Please revise your recommendation.",
-        browser:
-          "Check the generated page in Pearl's browser. Try adding a book with Enter and inspect its initial state. Fix any behavior or display problem you observe, then check the repair and report what remains unfinished.",
-      };
+    : process.env.SCULLY_LIVE_SCENARIO === "inventory"
+      ? {
+          name: "inventory",
+          initial:
+            "Help me build a keyboard-usable stock room tracker with persistent item quantities and tests. Ask me whether quantities represent whole units or weights before choosing the data model.",
+          change:
+            "Change the first release to support fractional weights in kilograms with three decimal places, a low-stock threshold per item, and a visible history of stock adjustments. Negative resulting quantities must be rejected.",
+          browser:
+            "Verify the stock tracker in the browser. Add an item with Enter, make a fractional stock adjustment, check its history and low-stock state, and reload to verify persistence. Repair any problems and report observed results.",
+        }
+      : {
+          name: "reading-list",
+          initial:
+            "Help me build a keyboard-usable reading list with persistent books, read status, and tests. Discuss important product choices before coding.",
+          change:
+            "Now include sign-in from separate devices, viewing friends' lists, and sharing in the first release. Please revise your recommendation.",
+          browser:
+            "Check the generated page in Pearl's browser. Try adding a book with Enter and inspect its initial state. Fix any behavior or display problem you observe, then check the repair and report what remains unfinished.",
+        };
 await mkdir(state, { mode: 0o700 });
 await mkdir(project, { mode: 0o700 });
 await writeFile(
@@ -61,9 +72,8 @@ const gitHead = execFileSync("git", ["rev-parse", "HEAD"], {
 const dirty = Boolean(
   execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim(),
 );
-const model =
-  process.env.SCULLY_TEST_MODEL || "deepseek-ai/DeepSeek-V4-Pro-0813";
-const codingModel = process.env.SCULLY_CODING_MODEL || model;
+const model = process.env.SCULLY_TEST_MODEL || "zai-org/GLM-5.3-Flash";
+const codingModel = model;
 const outputTokens = 16384;
 const maxRequests = liveRequestLimit(process.env.SCULLY_LIVE_MAX_REQUESTS);
 let priorProcessRequests = 0;
@@ -121,11 +131,34 @@ async function waitTurn(label) {
   const turnStartedAt = Date.now();
   const deadline =
     Date.now() +
-    (label === "coding" || label === "browser repair" ? 600_000 : 240_000);
+    (label === "coding" || label === "browser repair" ? 1_800_000 : 240_000);
   let budgetContinues = 0;
+  let reportedCount = -1;
   const stalled = liveStallTracker();
   while (Date.now() < deadline) {
     let chat = await current();
+    if (chat.messages.length !== reportedCount) {
+      reportedCount = chat.messages.length;
+      await writeFile(
+        "test-results/live-pearl-progress.json",
+        JSON.stringify(
+          {
+            project,
+            state,
+            chat,
+            model,
+            label,
+            requests: await requestCount(),
+          },
+          null,
+          2,
+        ),
+        { mode: 0o600 },
+      );
+      process.stdout.write(
+        `${label}: ${chat.status}, ${chat.messages.at(-1)?.toolName || chat.messages.at(-1)?.role}, ${await requestCount()} requests\n`,
+      );
+    }
     if (stalled(chat.status, chat.messages.length)) {
       await page.evaluate(
         async (id) => window.scully.stopPearlChat(id),
@@ -136,13 +169,23 @@ async function waitTurn(label) {
     if (chat.status === "awaiting_approval") {
       const call = chat.pendingTool;
       const proposed = JSON.parse(call.arguments);
-      const safeCheck = safeTestCommand(proposed);
+      process.stdout.write(
+        `review ${call.name}: ${proposed.command} ${JSON.stringify(proposed.args)}\n`,
+      );
+      const safeCheck =
+        call.name === "preview_app"
+          ? safePreviewCommand(proposed)
+          : safeTestCommand(proposed) || safePreviewCommand(proposed);
       await page
         .getByRole("button", { name: safeCheck ? "Run once" : "Deny" })
         .click();
       continue;
     }
-    if (chat.status === "paused" && budgetContinues < 2) {
+    if (
+      chat.status === "paused" &&
+      !["repeated_action", "no_progress"].includes(chat.pauseKind) &&
+      budgetContinues < 2
+    ) {
       budgetContinues++;
       transcript.push({
         label: `${label} budget continuation ${budgetContinues}`,
@@ -182,6 +225,11 @@ async function waitTurn(label) {
           }),
         ),
         questions: chat.questions,
+        roomText: (
+          await page
+            .getByRole("log", { name: "Pearl conversation" })
+            .innerText()
+        ).slice(-20000),
         requests: await requestCount(),
       });
       process.stdout.write(
@@ -243,19 +291,33 @@ try {
   chatId = (
     await page.evaluate(async () => (await window.scully.listPearlChats())[0])
   ).id;
-  const initial = await send("initial", scenario.initial);
+  const initial = await send(
+    "initial",
+    scenario.initial +
+      " Use a browser interface and Node built-in modules, with no external packages. Keep those technical constraints throughout planning and implementation. The server must read PORT and HOST from its environment for local preview. This disposable test controller approves Node test commands and a single project-local JavaScript entry point; shell commands are not automatically approved. Use isolated test data and preserve existing project data.",
+  );
   const firstQuestion = initial.questions.find(
     (item) => item.status === "pending",
   );
   if (!firstQuestion)
     structuralFailures.push("No linked product question in the initial turn");
-  const digression = await send("digression", "What is a pineapple?");
-  if (
-    firstQuestion &&
-    digression.questions.find((item) => item.id === firstQuestion.id)
-      ?.status !== "pending"
-  )
-    structuralFailures.push("Pending question changed during the digression");
+  for (const [index, prompt] of [
+    process.env.SCULLY_LIVE_DIGRESSION || "What is a pineapple?",
+    process.env.SCULLY_LIVE_EXTRA_DIGRESSION,
+  ]
+    .filter(Boolean)
+    .entries()) {
+    const digression = await send(
+      index ? "additional digression" : "digression",
+      prompt,
+    );
+    if (
+      firstQuestion &&
+      digression.questions.find((item) => item.id === firstQuestion.id)
+        ?.status !== "pending"
+    )
+      structuralFailures.push("Pending question changed during the digression");
+  }
   await answerIfPending("linked answer");
   await send("changed requirement", scenario.change);
   await answerIfPending("changed requirement answer");
@@ -286,9 +348,20 @@ try {
     await configure(codingModel);
     await send(
       "coding",
-      "Start the implementation in this disposable project. First inspect what exists, then create a small working web app and automated tests that exercise the production code and run with Node's built-in tools. Use no external packages. Request approval to run the tests, report only observed results, and explicitly list which earlier first-release requirements remain unfinished.",
+      "Start the implementation in this disposable project. Follow the current plan and all first-release requirements we discussed. Inspect what exists, implement in small increments, run tests that exercise production code, repair failures, and verify the running application in the browser. Continue until the requested app works or explain a specific blocker. Request command approvals through the tools.",
     );
     await answerIfPending("coding answer");
+    const implemented = await current();
+    const implementationCompletion = [...implemented.messages]
+      .reverse()
+      .find(
+        (message) => message.role === "assistant" && message.completion,
+      )?.completion;
+    assert.equal(
+      implementationCompletion?.status,
+      "done",
+      "Coding stopped before the requested app was completed and checked",
+    );
     await send("browser repair", scenario.browser);
     await answerIfPending("browser repair answer");
     const coded = await current();
@@ -336,7 +409,7 @@ try {
       !codingMessages.some(
         (message) =>
           message.role === "tool" &&
-          message.toolName === "browser_check" &&
+          ["browser_check", "preview_app"].includes(message.toolName) &&
           typeof toolObservation(message)?.visibleText === "string",
       )
     )
@@ -344,11 +417,36 @@ try {
     if (completion?.status === "done" && completion.remaining)
       structuralFailures.push("Done completion listed unfinished requirements");
     try {
-      const browser = await inspectStaticWebApp(
-        app,
-        project,
-        "test-results/live-pearl-browser.png",
-      );
+      const livePreview = [...coded.messages]
+        .reverse()
+        .find(
+          (message) =>
+            message.role === "tool" &&
+            message.toolName === "preview_app" &&
+            toolObservation(message)?.visibleText,
+        );
+      const previewCall =
+        livePreview &&
+        coded.messages.find(
+          (message) =>
+            message.role === "assistant" &&
+            message.toolCallId === livePreview.toolCallId,
+        );
+      const previewArgs =
+        previewCall?.arguments && JSON.parse(previewCall.arguments);
+      const browser =
+        previewArgs && safePreviewCommand(previewArgs)
+          ? await inspectLiveWebApp(
+              app,
+              project,
+              previewArgs.args[0],
+              "test-results/live-pearl-browser.png",
+            )
+          : await inspectStaticWebApp(
+              app,
+              project,
+              "test-results/live-pearl-browser.png",
+            );
       transcript.push({ label: "browser sanity", ...browser });
       if (!browser.passed)
         structuralFailures.push("Generated web app failed browser sanity");
@@ -479,6 +577,14 @@ try {
     ),
     { mode: 0o600 },
   );
+  await cp(
+    "test-results/live-pearl-chat.json",
+    `test-results/live-pearl-chat-${startedAt}.json`,
+  );
+  if (page)
+    await page
+      .screenshot({ path: "test-results/live-pearl-room.png" })
+      .catch(() => {});
   if (app) await app.close().catch(() => {});
   await cp(project, projectSnapshot, { recursive: true });
   await cp(join(state, "workspace.sqlite"), stateSnapshot);

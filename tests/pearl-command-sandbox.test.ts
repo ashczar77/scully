@@ -2,6 +2,7 @@
 import { expect, it } from "vitest";
 import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
+import { dirname } from "node:path";
 import { isolatedCommand } from "../src/main/pearl-command-sandbox";
 
 it("binds an approved executable and project to a constrained macOS process", () => {
@@ -34,4 +35,20 @@ it("fails closed when command isolation is unavailable", () => {
       platform: "linux",
     }),
   ).toThrow("unavailable");
+});
+
+it("does not expand runtime dependencies to the filesystem or home root", () => {
+  const root = realpathSync(process.cwd());
+  const shell = isolatedCommand("/bin/sh", [], root, root, {
+    platform: "darwin",
+  });
+  expect(shell.args).not.toContain("EXEC_ROOT=/");
+  const command = realpathSync(process.execPath);
+  const home = dirname(dirname(command));
+  const local = isolatedCommand(command, [], root, root, {
+    platform: "darwin",
+    home,
+  });
+  expect(local.args).not.toContain(`EXEC_ROOT=${home}`);
+  expect(local.args).not.toContain(`NODE_ROOT=${home}`);
 });

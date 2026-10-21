@@ -391,3 +391,178 @@ it("reassembles streamed tool arguments and preserves parallel actions", async (
     ],
   });
 });
+
+it("retains streamed provider continuation exactly and replays it only to the same model", async () => {
+  const continuation = "opaque first block\nsecond block";
+  const visible = vi.fn();
+  const events = [
+    { choices: [{ delta: { reasoning_content: "opaque first block\n" } }] },
+    {
+      choices: [
+        {
+          delta: { reasoning_content: "second block", content: "Inspecting." },
+        },
+      ],
+    },
+    {
+      choices: [
+        {
+          delta: {
+            tool_calls: [
+              {
+                index: 0,
+                id: "next",
+                function: { name: "read_file", arguments: '{"path":"a.txt"}' },
+              },
+            ],
+          },
+          finish_reason: "tool_calls",
+        },
+      ],
+    },
+  ];
+  const model = nebiusPearlModel(
+    async () =>
+      new Response(
+        events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("") +
+          "data: [DONE]\n\n",
+      ),
+  );
+  const result = await model.complete({ ...input, onDelta: visible });
+  expect(result).toMatchObject({
+    providerContinuation: {
+      model: input.model,
+      reasoningContent: continuation,
+    },
+  });
+  expect(visible.mock.calls).toEqual([["Inspecting."]]);
+  const fetcher = vi.fn(async (_url: string, request: RequestInit) => {
+    const body = JSON.parse(String(request.body));
+    return new Response(
+      JSON.stringify({
+        choices: [
+          {
+            finish_reason: "stop",
+            message: { content: JSON.stringify(body.messages[2]) },
+          },
+        ],
+      }),
+    );
+  });
+  const replay = nebiusPearlModel(fetcher as typeof fetch);
+  const messages = input.messages.map((m) =>
+    m.id === "a1"
+      ? {
+          ...m,
+          providerContinuation: {
+            model: input.model,
+            reasoningContent: continuation,
+          },
+        }
+      : m,
+  );
+  const same = await replay.complete({ ...input, messages });
+  expect(JSON.parse(same.text).reasoning_content).toBe(continuation);
+  const other = await replay.complete({
+    ...input,
+    messages,
+    model: "another-model",
+  });
+  expect(JSON.parse(other.text).reasoning_content).toBeUndefined();
+});
+
+it("preserves non-streamed continuation and rejects oversized state instead of truncating it", async () => {
+  const response = (reasoning_content: string) =>
+    new Response(
+      JSON.stringify({
+        choices: [
+          {
+            finish_reason: "tool_calls",
+            message: {
+              reasoning_content,
+              content: null,
+              tool_calls: [
+                {
+                  id: "next",
+                  function: {
+                    name: "read_file",
+                    arguments: '{"path":"a.txt"}',
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    );
+  const result = await nebiusPearlModel(async () =>
+    response("unaltered\ncontinuation"),
+  ).complete(input);
+  expect(result.providerContinuation?.reasoningContent).toBe(
+    "unaltered\ncontinuation",
+  );
+  await expect(
+    nebiusPearlModel(async () => response("x".repeat(1_000_001))).complete(
+      input,
+    ),
+  ).rejects.toThrow("continuation exceeded");
+});
+
+it("uses the selected model's explicit reasoning and sampling settings", async () => {
+  let body: Record<string, unknown> = {};
+  const model = nebiusPearlModel((async (
+    _url: string,
+    request: RequestInit,
+  ) => {
+    body = JSON.parse(String(request.body));
+    return new Response(
+      JSON.stringify({
+        choices: [{ finish_reason: "stop", message: { content: "Ready" } }],
+      }),
+    );
+  }) as typeof fetch);
+  await model.complete({ ...input, model: "zai-org/GLM-5.3-Flash" });
+  expect(body).toMatchObject({
+    temperature: 1,
+    top_p: 0.95,
+    reasoning_effort: "high",
+  });
+});
+it("does not replay completed-turn continuation after a new user message", async () => {
+  const model = nebiusPearlModel((async (
+    _url: string,
+    request: RequestInit,
+  ) => {
+    const body = JSON.parse(String(request.body));
+    expect(body.messages[2].reasoning_content).toBeUndefined();
+    return new Response(
+      JSON.stringify({
+        choices: [
+          { finish_reason: "stop", message: { content: "New direction" } },
+        ],
+      }),
+    );
+  }) as typeof fetch);
+  await model.complete({
+    ...input,
+    messages: [
+      ...input.messages.map((m) =>
+        m.id === "a1"
+          ? {
+              ...m,
+              providerContinuation: {
+                model: input.model,
+                reasoningContent: "old state",
+              },
+            }
+          : m,
+      ),
+      {
+        id: "next-user",
+        role: "user",
+        text: "Change the direction",
+        at: "now",
+      },
+    ],
+  });
+});

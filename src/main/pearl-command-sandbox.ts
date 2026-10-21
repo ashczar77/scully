@@ -7,7 +7,7 @@ import {
   rmSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 
 const execute = promisify(execFile);
@@ -30,18 +30,32 @@ const macProfile = `(version 1)
 (deny file-write*)
 (allow file-write* (subpath (param "PROJECT")))`;
 
-function nodeRoot(pathValue: string): string {
+function runtimeRoot(executable: string, home: string): string {
+  // Runtime libraries can live beside bin/, but an executable near the root
+  // or home must never turn that dependency allowance into private-file access.
+  const containsHome = (candidate: string) =>
+    candidate === sep || candidate === home || home.startsWith(candidate + sep);
+  const directory = dirname(executable);
+  const parent = dirname(directory);
+  return containsHome(parent)
+    ? containsHome(directory)
+      ? executable
+      : directory
+    : parent;
+}
+
+function nodeRoot(pathValue: string, home: string): string {
   for (const directory of pathValue.split(delimiter)) {
     if (!directory) continue;
     try {
       const candidate = realpathSync(resolve(directory, "node"));
       accessSync(candidate, constants.X_OK);
-      return dirname(dirname(candidate));
+      return runtimeRoot(candidate, home);
     } catch {
       // Try the next installed Node executable.
     }
   }
-  return dirname(dirname(realpathSync(process.execPath)));
+  return runtimeRoot(realpathSync(process.execPath), home);
 }
 
 export type IsolatedCommand = {
@@ -65,6 +79,7 @@ export function isolatedCommand(
     throw new Error("Command isolation is unavailable on this platform");
   const projectRoot = realpathSync(project);
   const commandPath = realpathSync(command);
+  const home = realpathSync(options.home || homedir());
   const pathValue = options.path ?? process.env.PATH ?? "/usr/bin:/bin";
   return {
     executable: "/usr/bin/sandbox-exec",
@@ -72,13 +87,13 @@ export function isolatedCommand(
       "-p",
       macProfile,
       "-D",
-      `HOME_ROOT=${realpathSync(options.home || homedir())}`,
+      `HOME_ROOT=${home}`,
       "-D",
       `PROJECT=${projectRoot}`,
       "-D",
-      `EXEC_ROOT=${dirname(dirname(commandPath))}`,
+      `EXEC_ROOT=${runtimeRoot(commandPath, home)}`,
       "-D",
-      `NODE_ROOT=${nodeRoot(pathValue)}`,
+      `NODE_ROOT=${nodeRoot(pathValue, home)}`,
       commandPath,
       ...args,
     ],

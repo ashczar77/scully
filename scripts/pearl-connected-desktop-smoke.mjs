@@ -60,7 +60,7 @@ const responses = [
       {
         path: "index.html",
         content:
-          "<!doctype html><title>Reading list</title><h1>Reading list</h1><form id=entry hidden style='display:block'><input id=title></form><p id=result>Waiting</p><button id=mark>Mark</button><button id=covered style='position:absolute;left:20px;top:250px;width:100px;height:30px'>Covered</button><div style='position:absolute;left:20px;top:250px;width:100px;height:30px;background:black'></div><script>document.querySelector('#title').addEventListener('keydown',event=>{if(event.key==='Enter'){document.querySelector('#entry').hidden=false;document.querySelector('#result').textContent=event.target.value}});document.querySelector('#mark').addEventListener('click',()=>document.querySelector('#result').textContent+=' clicked')</script><script src=https://example.com/blocked.js></script>\n",
+          "<!doctype html><title>Reading list</title><h1>Reading list</h1><form id=entry hidden style='display:block'><input id=title></form><p id=result>Waiting</p><button id=mark>Mark</button><button id=covered style='position:absolute;left:20px;top:250px;width:100px;height:30px'>Covered</button><div style='position:absolute;left:20px;top:250px;width:100px;height:30px;background:black'></div><script>document.querySelector('#title').addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();document.querySelector('#entry').hidden=false;document.querySelector('#result').textContent=event.target.value}});document.querySelector('#mark').addEventListener('click',()=>document.querySelector('#result').textContent+=' clicked')</script><script src=https://example.com/blocked.js></script>\n",
       },
     ],
   },
@@ -89,7 +89,18 @@ const responses = [
       },
     ],
   },
-  { content: "The browser displayed Dune after Enter." },
+  {
+    content:
+      "The browser displayed Dune after Enter, but verification found defects.",
+    tool: [
+      "complete_work",
+      {
+        status: "unverified",
+        summary:
+          "Enter and clicking worked, but hidden-state and external-request checks failed.",
+      },
+    ],
+  },
   {
     content: "I will check whether the covered control is reachable.",
     tool: [
@@ -100,12 +111,27 @@ const responses = [
       },
     ],
   },
-  { content: "The covered control could not be clicked." },
+  {
+    content: "The covered control could not be clicked.",
+    tool: [
+      "complete_work",
+      {
+        status: "unverified",
+        summary: "The covered control could not be clicked.",
+      },
+    ],
+  },
   {
     content: "I will inspect the page after its script changed.",
     tool: ["browser_check", { path: "index.html" }],
   },
-  { content: "The browser reported a page error." },
+  {
+    content: "The browser reported a page error.",
+    tool: [
+      "complete_work",
+      { status: "unverified", summary: "The browser reported a page error." },
+    ],
+  },
   {
     content: "I will check the linked file.",
     tool: ["browser_check", { path: "linked.html" }],
@@ -299,6 +325,7 @@ try {
   );
   chat = await send("Check the page in the browser using the keyboard.");
   assert.equal(chat.status, "idle");
+  assert.equal(chat.messages.at(-1).completion.status, "unverified");
   const browserObservation = [...chat.messages]
     .reverse()
     .find(
@@ -313,6 +340,7 @@ try {
   ]);
   assert(JSON.parse(browserObservation.text).blockedExternalRequests > 0);
   chat = await send("Check whether the covered control is reachable.");
+  assert.equal(chat.messages.at(-1).completion.status, "unverified");
   const coveredObservation = [...chat.messages]
     .reverse()
     .find(
@@ -322,13 +350,14 @@ try {
   assert(coveredObservation);
   assert.match(
     coveredObservation.text,
-    /Action failed: Browser target is covered/,
+    /Step 1 failed: Browser target is covered/,
   );
   await writeFile(
     join(project, "index.html"),
     `${await readFile(join(project, "index.html"), "utf8")}<script>throw new Error('broken page')</script>`,
   );
   chat = await send("Check the page for script errors.");
+  assert.equal(chat.messages.at(-1).completion.status, "unverified");
   const errorObservation = [...chat.messages]
     .reverse()
     .find(

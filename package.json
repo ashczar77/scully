@@ -12,7 +12,7 @@
     "build": "tsc --noEmit && node scripts/build.mjs",
     "start": "npm run build && electron .",
     "test": "vitest run",
-    "test:desktop": "npm run build && node scripts/pearl-command-sandbox-smoke.mjs && node scripts/pearl-desktop-smoke.mjs && node scripts/pearl-connected-desktop-smoke.mjs && node scripts/pearl-browser-sanity-smoke.mjs",
+    "test:desktop": "npm run build && node scripts/pearl-command-sandbox-smoke.mjs && node scripts/pearl-desktop-smoke.mjs && node scripts/pearl-connected-desktop-smoke.mjs && node scripts/pearl-browser-sanity-smoke.mjs && node scripts/pearl-preview-smoke.mjs && node scripts/pearl-keyboard-smoke.mjs",
     "test:live:pearl": "SCULLY_DEV_HARNESS=1 npm run build && node scripts/live-pearl-chat.manual.mjs",
     "test:package:mac": "node scripts/package-smoke.mjs",
     "format:check": "prettier --check src scripts tests index.html package.json tsconfig.json vite.config.ts vitest.config.ts forge.config.cjs",

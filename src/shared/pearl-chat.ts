@@ -1,4 +1,20 @@
+export type PearlProviderContinuation = {
+  model: string;
+  reasoningContent: string;
+};
+
+export type PearlWorkState = {
+  revision: number;
+  sourceUserMessageId: string;
+  objective: string;
+  approach: string;
+  requirements: { quote: string; sourceUserMessageId: string }[];
+  steps: { text: string; status: "pending" | "in_progress" | "completed" }[];
+};
+
 export type PearlMessage = {
+  /** Backend-only provider protocol state; never render or use as authority. */
+  providerContinuation?: PearlProviderContinuation;
   id: string;
   role: "user" | "assistant" | "tool";
   text: string;
@@ -30,6 +46,7 @@ export type PearlQuestion = {
   options: string[];
   recommendation?: string;
   askedAt: string;
+  askedByToolCallId?: string;
   status: "pending" | "answered" | "superseded" | "withdrawn";
   answer?: string;
   answeredByMessageId?: string;
@@ -67,6 +84,7 @@ export type PearlChat = {
   activeUserMessageId?: string;
   questions: PearlQuestion[];
   readRevisions?: Record<string, string>;
+  work?: PearlWorkState;
   project?: {
     path: string;
     dev: number;
@@ -125,7 +143,6 @@ export function currentTurnEvidence(chat: PearlChat): {
   let commandsCompleted = 0;
   let browserChecks = 0;
   let latestWrite = -1;
-  let latestUiWrite = -1;
   let latestSuccessfulCommand = -1;
   let latestSuccessfulBrowser = -1;
   for (const [index, message] of messages.entries()) {
@@ -135,17 +152,23 @@ export function currentTurnEvidence(chat: PearlChat): {
         message.toolName || "",
       ) &&
       message.toolName !== "run_command" &&
-      message.toolName !== "browser_check"
+      message.toolName !== "browser_check" &&
+      message.toolName !== "preview_app"
     )
       continue;
+    if (message.toolName === "run_command") latestSuccessfulCommand = -1;
+    if (["browser_check", "preview_app"].includes(message.toolName || ""))
+      latestSuccessfulBrowser = -1;
     try {
       const result = JSON.parse(message.text) as Record<string, unknown>;
       if (message.toolName === "run_command") {
         if (typeof result.exitCode === "number") {
           commandsCompleted++;
-          if (result.exitCode === 0) latestSuccessfulCommand = index;
+          latestSuccessfulCommand = result.exitCode === 0 ? index : -1;
         }
-      } else if (message.toolName === "browser_check") {
+      } else if (
+        ["browser_check", "preview_app"].includes(message.toolName || "")
+      ) {
         if (
           typeof result.visibleText === "string" &&
           Array.isArray(result.errors) &&
@@ -153,6 +176,7 @@ export function currentTurnEvidence(chat: PearlChat): {
           typeof result.blockedExternalRequests === "number"
         ) {
           browserChecks++;
+          latestSuccessfulBrowser = -1;
           if (
             result.visibleText.trim() &&
             result.errors.length === 0 &&
@@ -166,7 +190,6 @@ export function currentTurnEvidence(chat: PearlChat): {
         latestWrite = index;
         if (/\.(?:html|css|jsx|tsx|vue|svelte)$/iu.test(result.path)) {
           uiFilesWritten++;
-          latestUiWrite = index;
         }
       }
     } catch {
@@ -180,16 +203,17 @@ export function currentTurnEvidence(chat: PearlChat): {
     commandsCompleted,
     browserChecks,
     successfulCommandAfterLatestWrite:
-      latestWrite >= 0 && latestSuccessfulCommand > latestWrite,
+      latestSuccessfulCommand >= 0 && latestSuccessfulCommand > latestWrite,
     successfulBrowserAfterLatestUiWrite:
-      latestUiWrite >= 0 && latestSuccessfulBrowser > latestUiWrite,
+      latestSuccessfulBrowser >= 0 && latestSuccessfulBrowser > latestWrite,
   };
 }
 
 export function needsPostEditBrowserCheck(chat: PearlChat): boolean {
   const evidence = currentTurnEvidence(chat);
   return (
-    evidence.uiFilesWritten > 0 && !evidence.successfulBrowserAfterLatestUiWrite
+    (evidence.uiFilesWritten > 0 || evidence.browserChecks > 0) &&
+    !evidence.successfulBrowserAfterLatestUiWrite
   );
 }
 
@@ -221,8 +245,8 @@ export function needsPostEditCheck(chat: PearlChat): boolean {
       continue;
     }
     try {
-      if (JSON.parse(message.text).exitCode === 0)
-        latestSuccessfulCommand = index;
+      latestSuccessfulCommand =
+        JSON.parse(message.text).exitCode === 0 ? index : -1;
     } catch {
       /* An unavailable command is not a successful check. */
     }

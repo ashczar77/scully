@@ -5,11 +5,11 @@ import {
   remainingLiveRequests,
 } from "../scripts/live-test-budget.mjs";
 
-it("bounds invalid and excessive paid request limits", () => {
-  expect(liveRequestLimit()).toBe(18);
-  expect(liveRequestLimit("not-a-number")).toBe(18);
-  expect(liveRequestLimit("0")).toBe(18);
-  expect(liveRequestLimit("1000")).toBe(24);
+it("honors an explicit development budget large enough for implementation and repair", () => {
+  expect(liveRequestLimit()).toBe(200);
+  expect(liveRequestLimit("not-a-number")).toBe(200);
+  expect(liveRequestLimit("0")).toBe(200);
+  expect(liveRequestLimit("1000")).toBe(1000);
   expect(liveRequestLimit("12")).toBe(12);
 });
 

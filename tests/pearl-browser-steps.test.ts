@@ -30,7 +30,7 @@ it("rejects unbounded, incomplete, and script-like browser actions", () => {
     validateBrowserSteps([{ action: "evaluate", value: "alert(1)" }]),
   ).toThrow("Invalid browser action");
   expect(() =>
-    validateBrowserSteps([{ action: "click", selector: "x".repeat(201) }]),
+    validateBrowserSteps([{ action: "click", selector: "x".repeat(1001) }]),
   ).toThrow("Invalid browser selector");
   expect(() =>
     validateBrowserSteps([
@@ -54,4 +54,28 @@ it("stops a pending browser operation when the user stops the turn", async () =>
   );
   controller.abort();
   await expect(pending).rejects.toThrow("Browser check stopped");
+});
+
+it("supports dropdown selection and waiting for an asynchronous visible result", () => {
+  expect(
+    validateBrowserSteps([
+      { action: "select", selector: "#category", value: "groceries" },
+      { action: "wait_for", selector: "#receipt", value: "Saved" },
+    ]),
+  ).toHaveLength(2);
+  expect(() =>
+    validateBrowserSteps([{ action: "select", selector: "#category" }]),
+  ).toThrow("Incomplete");
+  expect(() => validateBrowserSteps([{ action: "wait_for" }])).toThrow(
+    "Incomplete",
+  );
+});
+
+it("supports printable punctuation shortcuts without accepting browser accelerators", () => {
+  for (const key of ["+", "-", "/", "=", "?", "!", "Delete"])
+    expect(validateBrowserSteps([{ action: "press", key }])).toHaveLength(1);
+  for (const key of ["Control+O", "Meta+R", "\\n", "DeleteAll", "\t"])
+    expect(() => validateBrowserSteps([{ action: "press", key }])).toThrow(
+      "Invalid browser key",
+    );
 });

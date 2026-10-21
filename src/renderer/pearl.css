@@ -82,6 +82,9 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.pearl-shell .pearl-chat-list button {
+  display: block;
+}
 .pearl-chat-list button:hover,
 .pearl-chat-list button.selected,
 .pearl-settings-link:hover {

@@ -70,6 +70,11 @@ try {
     "EPERM",
   );
   assert.equal(await readFile(outside, "utf8"), "private");
+  await assert.rejects(
+    runIsolatedCommand("/bin/sh", ["-c", "cat ../outside.txt"], project),
+    /Operation not permitted|Permission denied/,
+    "A system shell must not widen the filesystem read boundary",
+  );
 
   assert.equal(
     await run(

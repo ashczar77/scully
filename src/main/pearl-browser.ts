@@ -11,14 +11,43 @@ export type BrowserCheckResult = {
   title: string;
   initialVisibleText: string;
   visibleText: string;
-  controls: { tag: string; id: string; label: string; type: string }[];
+  controls: {
+    tag: string;
+    id: string;
+    label: string;
+    type: string;
+    name?: string;
+    selector?: string;
+    options?: { value: string; text: string }[];
+  }[];
   hiddenViolations: { tag: string; id: string }[];
   errors: string[];
   blockedExternalRequests: number;
   completedSteps: number;
+  observations?: { step: number; visibleText: string }[];
 };
 
 export type PearlBrowser = {
+  openLive?: (
+    id: string,
+    origin: string,
+    path: string,
+    steps: BrowserStep[],
+    signal?: AbortSignal,
+  ) => Promise<BrowserCheckResult>;
+  continueLive?: (
+    id: string,
+    path: string | undefined,
+    steps: BrowserStep[],
+    signal?: AbortSignal,
+  ) => Promise<BrowserCheckResult>;
+  closeLive?: (id: string) => void;
+  checkLive?: (
+    origin: string,
+    path: string,
+    steps: BrowserStep[],
+    signal?: AbortSignal,
+  ) => Promise<BrowserCheckResult>;
   check: (
     project: ProjectWorkspace,
     entryPath: string,
@@ -55,6 +84,19 @@ async function snapshot(
       const style = getComputedStyle(element);
       return style.display !== "none" && style.visibility !== "hidden" && element.getClientRects().length > 0;
     };
+    const selectorFor = (element) => {
+      const path = [];
+      for (let current = element; current; current = current.parentElement) {
+        if (current.id && document.querySelectorAll("#" + CSS.escape(current.id)).length === 1) {
+          path.unshift("#" + CSS.escape(current.id));
+          break;
+        }
+        const tag = current.tagName.toLowerCase();
+        const siblings = current.parentElement ? [...current.parentElement.children].filter(sibling => sibling.tagName === current.tagName) : [current];
+        path.unshift(tag + ":nth-of-type(" + (siblings.indexOf(current) + 1) + ")");
+      }
+      return path.join(" > ");
+    };
     return {
       title: document.title.slice(0, 200),
       visibleText: (document.body?.innerText || "").slice(0, 10000),
@@ -62,8 +104,11 @@ async function snapshot(
         .filter(visible).slice(0, 60).map((element) => ({
           tag: element.tagName.toLowerCase(),
           id: element.id.slice(0, 100),
-          label: (element.getAttribute("aria-label") || element.textContent || "").trim().slice(0, 100),
+          name: (element.getAttribute("name") || "").slice(0, 100),
+          selector: selectorFor(element),
+          label: (element.getAttribute("aria-label") || element.labels?.[0]?.innerText || element.textContent || "").trim().slice(0, 100),
           type: (element.getAttribute("type") || "").slice(0, 40),
+          ...(element instanceof HTMLSelectElement ? { options: [...element.options].slice(0, 30).map(option => ({ value: option.value, text: option.text })) } : {}),
         })),
       hiddenViolations: [...document.querySelectorAll("[hidden]")]
         .filter(visible).slice(0, 20).map((element) => ({
@@ -75,8 +120,19 @@ async function snapshot(
 }
 
 async function perform(win: BrowserWindow, step: BrowserStep, url: string) {
+  if (step.action === "wait_for") {
+    const deadline = Date.now() + 4000;
+    do {
+      const found = await win.webContents.executeJavaScript(
+        `(() => { const e = document.querySelector(${JSON.stringify(step.selector)}); return Boolean(e && e.getClientRects().length && getComputedStyle(e).visibility !== "hidden" && (!${JSON.stringify(step.value || "")} || e.textContent.includes(${JSON.stringify(step.value || "")}))); })()`,
+      );
+      if (found) return;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } while (Date.now() < deadline);
+    throw new Error("Browser target did not become visible");
+  }
   if (step.action === "reload") {
-    await win.loadURL(url);
+    await win.loadURL(win.webContents.getURL());
     return;
   }
   if (step.selector) {
@@ -95,6 +151,12 @@ async function perform(win: BrowserWindow, step: BrowserStep, url: string) {
         return { x, y };
       }
       element.focus();
+      if (${JSON.stringify(step.action)} === "select") {
+        if (!(element instanceof HTMLSelectElement) || ![...element.options].some(option => option.value === ${JSON.stringify(step.value || "")})) return "unsupported option";
+        element.value = ${JSON.stringify(step.value || "")};
+        element.dispatchEvent(new Event("input", { bubbles: true }));
+        element.dispatchEvent(new Event("change", { bubbles: true }));
+      }
       if (${JSON.stringify(step.action)} === "fill") {
         if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) return "unsupported";
         const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), "value")?.set;
@@ -137,19 +199,71 @@ async function perform(win: BrowserWindow, step: BrowserStep, url: string) {
     } else if (target !== "ok") throw new Error(`Browser target is ${target}`);
   }
   if (step.action === "press") {
+    const keyCode =
+      step.key === "Space" ? " " : step.key!.replace(/^Arrow/, "");
     win.webContents.sendInputEvent({
       type: "keyDown",
-      keyCode: step.key === "Space" ? " " : step.key!,
+      keyCode,
     });
+    if (step.key === "Enter" || step.key === "Space" || step.key?.length === 1)
+      win.webContents.sendInputEvent({
+        type: "char",
+        keyCode:
+          step.key === "Enter" ? "\r" : step.key === "Space" ? " " : step.key!,
+      });
     win.webContents.sendInputEvent({
       type: "keyUp",
-      keyCode: step.key === "Space" ? " " : step.key!,
+      keyCode,
     });
   }
-  await new Promise((done) => setTimeout(done, 80));
+  await new Promise((done) => setTimeout(done, 150));
+  const deadline = Date.now() + 4000;
+  while (win.webContents.isLoadingMainFrame() && Date.now() < deadline)
+    await new Promise((done) => setTimeout(done, 50));
 }
 
+type ObservationSession = {
+  win: BrowserWindow;
+  origin: string;
+  errors: string[];
+  blocked: number;
+};
+
 export class IsolatedPearlBrowser implements PearlBrowser {
+  private live = new Map<string, ObservationSession>();
+  closeLive(id: string) {
+    const state = this.live.get(id);
+    if (state && !state.win.isDestroyed()) state.win.destroy();
+    this.live.delete(id);
+  }
+  async openLive(
+    id: string,
+    origin: string,
+    path: string,
+    steps: BrowserStep[],
+    signal?: AbortSignal,
+  ) {
+    if (!/^http:\/\/127\.0\.0\.1:[0-9]+$/.test(origin))
+      throw new Error("Invalid preview origin");
+    const url = new URL(path, origin);
+    if (url.origin !== origin || url.username || url.password)
+      throw new Error("Invalid preview path");
+    return this.observe(origin, url.href, steps, signal, id);
+  }
+  async continueLive(
+    id: string,
+    path: string | undefined,
+    steps: BrowserStep[],
+    signal?: AbortSignal,
+  ) {
+    const state = this.live.get(id);
+    if (!state || state.win.isDestroyed())
+      throw new Error("Preview session ended. Start a new preview.");
+    const url = path === undefined ? undefined : new URL(path, state.origin);
+    if (url && (url.origin !== state.origin || url.username || url.password))
+      throw new Error("Invalid preview path");
+    return this.observe(state.origin, url?.href, steps, signal, id);
+  }
   async check(
     project: ProjectWorkspace,
     entryPath: string,
@@ -164,7 +278,6 @@ export class IsolatedPearlBrowser implements PearlBrowser {
     if (inspectProjectFile(project, entryPath) === null)
       throw new Error("Browser entry file does not exist");
     const token = randomBytes(24).toString("hex");
-    let blockedExternalRequests = 0;
     const server = createServer((request, response) => {
       try {
         if (request.method !== "GET") throw new Error("Unavailable request");
@@ -190,43 +303,87 @@ export class IsolatedPearlBrowser implements PearlBrowser {
       }
     });
     await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
-    let win: BrowserWindow | undefined;
     try {
       const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}/${token}`;
-      const url = `${origin}/${entryPath}`;
-      const isolated = session.fromPartition(`pearl-browser-${token}`);
-      isolated.setPermissionRequestHandler((_contents, _permission, callback) =>
-        callback(false),
+      return await this.observe(
+        origin,
+        `${origin}/${entryPath}`,
+        steps,
+        signal,
       );
-      isolated.setPermissionCheckHandler(() => false);
-      isolated.webRequest.onBeforeRequest((details, callback) => {
-        const allowed = details.url.startsWith(origin + "/");
-        if (!allowed) blockedExternalRequests++;
-        callback({ cancel: !allowed });
-      });
-      win = new BrowserWindow({
-        show: false,
-        webPreferences: {
-          partition: `pearl-browser-${token}`,
-          contextIsolation: true,
-          nodeIntegration: false,
-          sandbox: true,
-        },
-      });
-      win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-      win.webContents.on("will-navigate", (event, target) => {
-        if (!target.startsWith(origin + "/")) event.preventDefault();
-      });
-      const errors: string[] = [];
-      win.webContents.on("console-message", (details) => {
-        if (details.level === "error" && errors.length < 10)
-          errors.push(details.message.slice(0, 300));
-      });
-      win.webContents.on("did-fail-load", (_event, code, description) => {
-        if (errors.length < 10)
-          errors.push(`${code}: ${description}`.slice(0, 300));
-      });
-      await boundedBrowserWork(win.loadURL(url), 15_000, signal);
+    } finally {
+      await new Promise<void>((done) => server.close(() => done()));
+    }
+  }
+
+  async checkLive(
+    origin: string,
+    path: string,
+    steps: BrowserStep[],
+    signal?: AbortSignal,
+  ) {
+    if (!/^http:\/\/127\.0\.0\.1:[0-9]+$/.test(origin))
+      throw new Error("Invalid preview origin");
+    const url = new URL(path, origin);
+    if (url.origin !== origin || url.username || url.password)
+      throw new Error("Invalid preview path");
+    return this.observe(origin, url.href, steps, signal);
+  }
+
+  private createObservation(origin: string): ObservationSession {
+    const token = randomBytes(24).toString("hex");
+    const isolated = session.fromPartition(`pearl-browser-${token}`);
+    isolated.setPermissionRequestHandler((_contents, _permission, callback) =>
+      callback(false),
+    );
+    isolated.setPermissionCheckHandler(() => false);
+    const win = new BrowserWindow({
+      show: false,
+      webPreferences: {
+        partition: `pearl-browser-${token}`,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    });
+    const state: ObservationSession = { win, origin, errors: [], blocked: 0 };
+    isolated.webRequest.onBeforeRequest((details, callback) => {
+      const allowed = details.url.startsWith(origin + "/");
+      if (!allowed) state.blocked++;
+      callback({ cancel: !allowed });
+    });
+    win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    win.webContents.on("will-navigate", (event, target) => {
+      if (!target.startsWith(origin + "/")) event.preventDefault();
+    });
+    win.webContents.on("console-message", (details) => {
+      if (details.level === "error" && state.errors.length < 10)
+        state.errors.push(details.message.slice(0, 300));
+    });
+    win.webContents.on("did-fail-load", (_event, code, description) => {
+      if (state.errors.length < 10 && code !== -3)
+        state.errors.push(`${code}: ${description}`.slice(0, 300));
+    });
+    return state;
+  }
+
+  private async observe(
+    origin: string,
+    url: string | undefined,
+    steps: BrowserStep[],
+    signal?: AbortSignal,
+    sessionId?: string,
+  ): Promise<BrowserCheckResult> {
+    signal?.throwIfAborted();
+    const state =
+      (sessionId && this.live.get(sessionId)) || this.createObservation(origin);
+    if (sessionId) this.live.set(sessionId, state);
+    const win = state.win;
+    const errors = state.errors;
+    errors.length = 0;
+    state.blocked = 0;
+    try {
+      if (url) await boundedBrowserWork(win.loadURL(url), 15_000, signal);
       const initial = await boundedBrowserWork(snapshot(win), 5_000, signal);
       const hiddenViolations = new Map<string, { tag: string; id: string }>();
       const rememberViolations = (
@@ -237,24 +394,43 @@ export class IsolatedPearlBrowser implements PearlBrowser {
       };
       rememberViolations(initial);
       let completedSteps = 0;
+      const observations: { step: number; visibleText: string }[] = [];
       let final = initial;
       for (const step of steps) {
-        await boundedBrowserWork(perform(win, step, url), 5_000, signal);
-        completedSteps++;
-        final = await boundedBrowserWork(snapshot(win), 5_000, signal);
-        rememberViolations(final);
+        try {
+          await boundedBrowserWork(
+            perform(win, step, win.webContents.getURL()),
+            5_000,
+            signal,
+          );
+          completedSteps++;
+          final = await boundedBrowserWork(snapshot(win), 5_000, signal);
+          rememberViolations(final);
+          observations.push({
+            step: completedSteps,
+            visibleText: final.visibleText.slice(0, 3000),
+          });
+        } catch (error) {
+          if (signal?.aborted) throw error;
+          errors.push(
+            `Step ${completedSteps + 1} failed: ${error instanceof Error ? error.message : "Browser interaction failed"}. Earlier steps may have changed application data.`,
+          );
+          final = await boundedBrowserWork(snapshot(win), 5_000, signal);
+          rememberViolations(final);
+          break;
+        }
       }
       return {
         ...final,
         initialVisibleText: initial.visibleText.slice(0, 3000),
         hiddenViolations: [...hiddenViolations.values()].slice(0, 20),
         errors: errors.slice(0, 10),
-        blockedExternalRequests,
+        blockedExternalRequests: state.blocked,
         completedSteps,
+        observations,
       };
     } finally {
-      if (win && !win.isDestroyed()) win.destroy();
-      await new Promise<void>((done) => server.close(() => done()));
+      if (!sessionId && !win.isDestroyed()) win.destroy();
     }
   }
 }

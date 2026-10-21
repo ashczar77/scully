@@ -14,8 +14,10 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { roomChat } from "../src/main/pearl-chat-view";
 import { PearlChatStore } from "../src/main/pearl-chat-store";
 import { PearlChatManager } from "../src/main/pearl-chat-manager";
+import type { startProjectPreview } from "../src/main/pearl-preview";
 import type { PearlBrowser } from "../src/main/pearl-browser";
 import type { CommandRunner } from "../src/main/pearl-command-sandbox";
 import type { PearlModel, PearlModelResult } from "../src/engine/pearl-model";
@@ -34,7 +36,11 @@ afterEach(() => {
   for (const root of roots.splice(0))
     rmSync(root, { recursive: true, force: true });
 });
-function fixture(responses: PearlModelResult[], browser?: PearlBrowser) {
+function fixture(
+  responses: PearlModelResult[],
+  browser?: PearlBrowser,
+  previewStarter?: typeof startProjectPreview,
+) {
   const root = mkdtempSync(join(tmpdir(), "scully-pearl-"));
   roots.push(root);
   const data = join(root, "data");
@@ -66,6 +72,7 @@ function fixture(responses: PearlModelResult[], browser?: PearlBrowser) {
         maxBuffer: 200_000,
         env: { PATH: process.env.PATH || "/usr/bin:/bin", HOME: cwd },
       })) satisfies CommandRunner,
+    previewStarter,
   );
   return { root, data, project, store, manager, complete };
 }
@@ -519,6 +526,96 @@ it("rejects a batch containing a command without applying its file edit or grant
   ]);
 });
 
+it.each(["ask_user", "run_command"])(
+  "saves a plan before a final %s action without crossing its decision boundary",
+  async (name) => {
+    const f = fixture([
+      {
+        kind: "actions",
+        text: "",
+        calls: [
+          {
+            id: "plan",
+            name: "update_plan",
+            arguments: JSON.stringify({
+              expectedRevision: 0,
+              objective: "Plan the workspace",
+              approach: "Confirm the audience before implementation",
+              requirements: ["Plan the workspace"],
+              steps: [{ text: "Confirm the audience", status: "in_progress" }],
+            }),
+          },
+          {
+            id: "decision",
+            name,
+            arguments: JSON.stringify(
+              name === "ask_user"
+                ? { topic: "audience", question: "Who should have access?" }
+                : { command: "node", args: ["--version"] },
+            ),
+          },
+        ],
+      },
+    ]);
+    const chat = f.manager.create();
+    if (name === "run_command") {
+      f.manager.chooseProject(chat.id, f.project);
+      f.manager.approveProject(chat.id, true);
+    }
+    f.manager.send(chat.id, "Plan the workspace");
+    const saved = await settled(f.store, chat.id);
+    expect(saved.work?.revision).toBe(1);
+    expect(f.complete).toHaveBeenCalledTimes(1);
+    if (name === "ask_user") {
+      expect(saved.status).toBe("idle");
+      expect(saved.questions[0].status).toBe("pending");
+      expect(
+        saved.messages.filter((message) => message.role === "tool"),
+      ).toHaveLength(2);
+    } else {
+      expect(saved.status).toBe("awaiting_approval");
+      expect(saved.pendingTool?.id).toBe("decision");
+      expect(currentTurnEvidence(saved).commandsCompleted).toBe(0);
+      expect(
+        saved.messages.filter((message) => message.role === "tool"),
+      ).toHaveLength(1);
+    }
+  },
+);
+
+it("rejects a plan after a pausing action so no trailing action can be lost", async () => {
+  const f = fixture([
+    {
+      kind: "actions",
+      text: "",
+      calls: [
+        {
+          id: "question",
+          name: "ask_user",
+          arguments:
+            '{"topic":"audience","question":"Who should have access?"}',
+        },
+        {
+          id: "plan",
+          name: "update_plan",
+          arguments: '{"expectedRevision":0}',
+        },
+      ],
+    },
+    reply("I need to ask the question separately."),
+  ]);
+  const chat = f.manager.create();
+  f.manager.send(chat.id, "Plan the workspace");
+  const saved = await settled(f.store, chat.id);
+  expect(saved.questions).toHaveLength(0);
+  expect(saved.work).toBeUndefined();
+  expect(
+    saved.messages
+      .filter((message) => message.role === "tool")
+      .every((message) => message.text.startsWith("Action not applied")),
+  ).toBe(true);
+});
+
 it("rejects duplicate action IDs before any batch side effect", async () => {
   const f = fixture([
     {
@@ -695,6 +792,59 @@ it("binds a linked answer to its pending question and rejects duplicates", async
   stores.push(reopened);
   expect(reopened.get(chat.id).questions[0].status).toBe("answered");
 });
+
+it.each(["current", "legacy"])(
+  "retains a %s pending question once in context and restores it only after native history is trimmed",
+  async (version) => {
+    const f = fixture([
+      tool("ask_user", {
+        topic: "audience",
+        question: "Who may use this workspace?",
+      }),
+      reply(
+        "A rainbow comes from light refracting and reflecting in droplets.",
+      ),
+      reply("The pending audience decision remains available."),
+    ]);
+    const chat = f.manager.create();
+    f.manager.send(chat.id, "Plan a workspace");
+    const asked = await settled(f.store, chat.id);
+    const question = asked.questions[0];
+    if (version === "legacy") {
+      delete question.askedByToolCallId;
+      f.store.save(asked);
+    }
+    f.manager.send(chat.id, "How does a rainbow form?");
+    await settled(f.store, chat.id);
+    const input = f.complete.mock.calls[1][0];
+    expect(
+      input.messages.some((message) =>
+        message.id.startsWith("history-question-"),
+      ),
+    ).toBe(false);
+    expect(JSON.stringify(input.messages).split(question.text)).toHaveLength(2);
+    expect(f.store.get(chat.id).questions[0].status).toBe("pending");
+
+    const saved = f.store.get(chat.id);
+    for (let index = 0; index < 6; index++)
+      saved.messages.push({
+        id: `filler-${index}`,
+        role: "assistant",
+        text: "x".repeat(18_000),
+        at: new Date().toISOString(),
+      });
+    f.store.save(saved);
+    f.manager.send(chat.id, "Return to the workspace discussion");
+    await settled(f.store, chat.id);
+    const truncated = f.complete.mock.calls[2][0];
+    expect(
+      truncated.messages.filter(
+        (message) => message.id === `history-question-${question.id}`,
+      ),
+    ).toHaveLength(1);
+    expect(truncated.system).toContain(question.id);
+  },
+);
 
 it("carries a durable linked answer through restart and context truncation without raising its authority", async () => {
   const f = fixture([
@@ -1010,35 +1160,61 @@ it("writes a revision-bound file with a backup and pauses commands for one-use r
   ).toContain("denied");
 });
 
-it("does not re-offer the same command after a denial until a new user message", async () => {
-  const responses: PearlModelResult[] = [
-    tool("run_command", { command: "node", args: ["--version"] }),
-    tool("run_command", { command: "node", args: ["--version"] }, "call-2"),
-    reply("The command was denied; I will wait for a new request."),
-  ];
-  const f = fixture(responses);
-  const chat = f.manager.create();
-  f.manager.chooseProject(chat.id, f.project);
-  f.manager.approveProject(chat.id, true);
-  f.manager.send(chat.id, "Check Node");
-  const pending = await settled(f.store, chat.id);
-  expect(pending.status).toBe("awaiting_approval");
-  f.manager.decideTool(chat.id, pending.pendingTool!.id, false);
-  const done = await settled(f.store, chat.id);
-  expect(done.status).toBe("idle");
-  expect(done.pendingTool).toBeUndefined();
-  expect(
-    done.messages.find(
-      (message) => message.role === "tool" && message.toolCallId === "call-2",
-    )?.text,
-  ).toContain("same denied command");
-  responses.push(
-    tool("run_command", { command: "node", args: ["--version"] }, "call-3"),
-  );
-  f.manager.send(chat.id, "Please check Node now");
-  const reopened = await settled(f.store, chat.id);
-  expect(reopened.status).toBe("awaiting_approval");
-});
+it.each([false, true])(
+  "does not re-offer the same command after a denial until a new user message (batched: %s)",
+  async (batched) => {
+    const responses: PearlModelResult[] = [
+      batched
+        ? {
+            kind: "actions",
+            text: "",
+            calls: [
+              {
+                id: "plan",
+                name: "update_plan",
+                arguments: JSON.stringify({
+                  expectedRevision: 0,
+                  objective: "Check Node",
+                  approach: "Review the version command",
+                  requirements: ["Check Node"],
+                  steps: [{ text: "Check version", status: "in_progress" }],
+                }),
+              },
+              {
+                id: "call-1",
+                name: "run_command",
+                arguments: '{"command":"node","args":["--version"]}',
+              },
+            ],
+          }
+        : tool("run_command", { command: "node", args: ["--version"] }),
+      tool("run_command", { command: "node", args: ["--version"] }, "call-2"),
+      reply("The command was denied; I will wait for a new request."),
+    ];
+    const f = fixture(responses);
+    const chat = f.manager.create();
+    f.manager.chooseProject(chat.id, f.project);
+    f.manager.approveProject(chat.id, true);
+    f.manager.send(chat.id, "Check Node");
+    const pending = await settled(f.store, chat.id);
+    expect(pending.status).toBe("awaiting_approval");
+    f.manager.decideTool(chat.id, pending.pendingTool!.id, false);
+    const done = await settled(f.store, chat.id);
+    expect(done.status).toBe("idle");
+    expect(done.pendingTool).toBeUndefined();
+    expect(
+      done.messages.find(
+        (message) => message.role === "tool" && message.toolCallId === "call-2",
+      )?.text,
+    ).toContain("same denied command");
+    responses.push(
+      tool("run_command", { command: "node", args: ["--version"] }, "call-3"),
+    );
+    f.manager.send(chat.id, "Please check Node now");
+    const reopened = await settled(f.store, chat.id);
+    expect(reopened.status).toBe("awaiting_approval");
+  },
+);
 
 it("can review a different safe check after denying preliminary commands", async () => {
   const f = fixture([
@@ -1273,61 +1449,112 @@ it("distinguishes a successful command before an edit from one after it", () => 
   );
 });
 
-it("requires a clean browser observation after the latest UI file change", () => {
-  const f = fixture([]);
+it.each(["style.css", "app.js", "server.js"])(
+  "invalidates browser evidence after a subsequent %s change",
+  (path) => {
+    const f = fixture([]);
+    const chat = f.manager.create();
+    chat.activeUserMessageId = "user";
+    chat.messages.push({
+      id: "user",
+      role: "user",
+      text: "Build the UI",
+      at: "now",
+    });
+    chat.messages.push({
+      id: "html-write",
+      role: "tool",
+      toolName: "create_file",
+      text: '{"path":"index.html","written":true}',
+      at: "now",
+    });
+    chat.messages.push({
+      id: "command-check",
+      role: "tool",
+      toolName: "run_command",
+      text: '{"exitCode":0}',
+      at: "now",
+    });
+    expect(needsPostEditBrowserCheck(chat)).toBe(true);
+    expect(currentTurnEvidence(chat).successfulBrowserAfterLatestUiWrite).toBe(
+      false,
+    );
+    chat.messages.push({
+      id: "broken-browser",
+      role: "tool",
+      toolName: "browser_check",
+      text: '{"visibleText":"Page","errors":[],"hiddenViolations":[{"tag":"form","id":"book-form"}],"blockedExternalRequests":0}',
+      at: "now",
+    });
+    expect(needsPostEditBrowserCheck(chat)).toBe(true);
+    chat.messages.push({
+      id: "clean-browser",
+      role: "tool",
+      toolName: "browser_check",
+      text: '{"visibleText":"Page","errors":[],"hiddenViolations":[],"blockedExternalRequests":0}',
+      at: "now",
+    });
+    expect(needsPostEditBrowserCheck(chat)).toBe(false);
+    expect(currentTurnEvidence(chat).successfulBrowserAfterLatestUiWrite).toBe(
+      true,
+    );
+    chat.messages.push({
+      id: "css-write",
+      role: "tool",
+      toolName: "create_file",
+      text: JSON.stringify({ path, written: true }),
+      at: "now",
+    });
+    expect(needsPostEditBrowserCheck(chat)).toBe(true);
+  },
+);
+
+it("does not call a failed browser verification done just because command tests passed without edits", async () => {
+  const check = vi.fn(async () => ({
+    title: "App",
+    visibleText: "Broken app",
+    initialVisibleText: "Broken app",
+    controls: [],
+    hiddenViolations: [],
+    errors: ["Submission failed"],
+    blockedExternalRequests: 0,
+    completedSteps: 0,
+  }));
+  const f = fixture(
+    [
+      tool("browser_check", { path: "index.html" }, "browser"),
+      tool("run_command", { command: "node", args: ["--version"] }, "check"),
+      tool(
+        "complete_work",
+        { status: "done", summary: "Everything passed." },
+        "false-done",
+      ),
+      tool(
+        "complete_work",
+        {
+          status: "unverified",
+          summary: "The command ran, but browser submission failed.",
+        },
+        "honest-result",
+      ),
+    ],
+    { check },
+  );
+  writeFileSync(join(f.project, "index.html"), "<!doctype html><p>App</p>");
   const chat = f.manager.create();
-  chat.activeUserMessageId = "user";
-  chat.messages.push({
-    id: "user",
-    role: "user",
-    text: "Build the UI",
-    at: "now",
-  });
-  chat.messages.push({
-    id: "html-write",
-    role: "tool",
-    toolName: "create_file",
-    text: '{"path":"index.html","written":true}',
-    at: "now",
-  });
-  chat.messages.push({
-    id: "command-check",
-    role: "tool",
-    toolName: "run_command",
-    text: '{"exitCode":0}',
-    at: "now",
-  });
-  expect(needsPostEditBrowserCheck(chat)).toBe(true);
-  expect(currentTurnEvidence(chat).successfulBrowserAfterLatestUiWrite).toBe(
-    false,
-  );
-  chat.messages.push({
-    id: "broken-browser",
-    role: "tool",
-    toolName: "browser_check",
-    text: '{"visibleText":"Page","errors":[],"hiddenViolations":[{"tag":"form","id":"book-form"}],"blockedExternalRequests":0}',
-    at: "now",
-  });
-  expect(needsPostEditBrowserCheck(chat)).toBe(true);
-  chat.messages.push({
-    id: "clean-browser",
-    role: "tool",
-    toolName: "browser_check",
-    text: '{"visibleText":"Page","errors":[],"hiddenViolations":[],"blockedExternalRequests":0}',
-    at: "now",
-  });
-  expect(needsPostEditBrowserCheck(chat)).toBe(false);
-  expect(currentTurnEvidence(chat).successfulBrowserAfterLatestUiWrite).toBe(
-    true,
-  );
-  chat.messages.push({
-    id: "css-write",
-    role: "tool",
-    toolName: "create_file",
-    text: '{"path":"style.css","written":true}',
-    at: "now",
-  });
-  expect(needsPostEditBrowserCheck(chat)).toBe(true);
+  f.manager.chooseProject(chat.id, f.project);
+  f.manager.approveProject(chat.id, true);
+  f.manager.send(chat.id, "Verify submission in the existing app");
+  await settled(f.store, chat.id);
+  f.manager.decideTool(chat.id, "check", true);
+  const done = await settled(f.store, chat.id);
+  expect(done.messages.at(-1)?.completion?.status).toBe("unverified");
+  expect(
+    done.messages.find(
+      (message) =>
+        message.role === "tool" && message.toolCallId === "false-done",
+    )?.text,
+  ).toContain("Completion rejected");
 });
 
 it("explains a missing file path and can recover on the next action", async () => {
@@ -1818,6 +2045,43 @@ it("rejects done when the completion action lists unfinished requirements", asyn
   expect(done.messages.at(-1)?.completion?.remaining).toContain("sharing");
 });
 
+it("explains completion field errors without inventing unfinished product work", async () => {
+  const f = fixture([
+    tool("run_command", { command: "node", args: ["--version"] }, "check"),
+    tool(
+      "complete_work",
+      {
+        status: "done",
+        summary: "Verified.",
+        remaining: "None. All requested work is verified.",
+      },
+      "invalid",
+    ),
+    tool(
+      "complete_work",
+      { status: "done", summary: "Verified." },
+      "corrected",
+    ),
+  ]);
+  const chat = f.manager.create();
+  f.manager.chooseProject(chat.id, f.project);
+  f.manager.approveProject(chat.id, true);
+  f.manager.send(chat.id, "Verify the installed runtime");
+  await vi.waitFor(() =>
+    expect(f.store.get(chat.id).pendingTool?.id).toBe("check"),
+  );
+  f.manager.decideTool(chat.id, "check", true);
+  const done = await settled(f.store, chat.id);
+  const rejection = done.messages.find(
+    (m) => m.role === "tool" && m.toolCallId === "invalid",
+  );
+  expect(rejection?.text).toContain("omit the remaining field");
+  expect(rejection?.text).toContain(
+    "not an assessment of missing product features",
+  );
+  expect(done.messages.at(-1)?.completion?.status).toBe("done");
+});
+
 it("rejects a forged completion before project approval", async () => {
   const f = fixture([
     tool("complete_work", {
@@ -2209,4 +2473,457 @@ it("recovers once when the provider returns no visible reply", async () => {
   expect(
     done.messages.filter((message) => message.role === "user"),
   ).toHaveLength(1);
+});
+
+it("does not retain success when a subsequent check fails", () => {
+  const f = fixture([]);
+  const chat = f.manager.create();
+  chat.activeUserMessageId = "request";
+  chat.messages = [
+    { id: "request", role: "user", text: "Build it", at: "now" },
+    {
+      id: "write",
+      role: "tool",
+      toolName: "create_file",
+      text: '{"written":true,"path":"app.js"}',
+      at: "now",
+    },
+    {
+      id: "pass",
+      role: "tool",
+      toolName: "run_command",
+      text: '{"exitCode":0}',
+      at: "now",
+    },
+    {
+      id: "fail",
+      role: "tool",
+      toolName: "run_command",
+      text: '{"exitCode":1}',
+      at: "now",
+    },
+  ];
+  expect(currentTurnEvidence(chat).successfulCommandAfterLatestWrite).toBe(
+    false,
+  );
+});
+
+it("requires exact one-use approval for a live browser preview and validates its boundary", async () => {
+  const checkLive = vi.fn();
+  const check = vi.fn();
+  const f = fixture(
+    [
+      tool("preview_app", {
+        command: "node",
+        args: ["server.js"],
+        path: "//example.com/",
+      }),
+      tool(
+        "preview_app",
+        { command: "node", args: ["server.js"], path: "/" },
+        "valid-preview",
+      ),
+      reply(
+        "The preview was denied. I have not tested the application in a browser.",
+      ),
+    ],
+    { check, checkLive },
+  );
+  const chat = f.manager.create();
+  f.manager.chooseProject(chat.id, f.project);
+  f.manager.approveProject(chat.id, true);
+  f.manager.send(chat.id, "Preview the app");
+  const pending = await settled(f.store, chat.id);
+  expect(pending.status).toBe("awaiting_approval");
+  expect(pending.pendingTool?.id).toBe("valid-preview");
+  expect(
+    pending.messages.some((m) => m.text.includes("Invalid preview path")),
+  ).toBe(true);
+  expect(checkLive).not.toHaveBeenCalled();
+  f.manager.decideTool(chat.id, "valid-preview", false);
+  const done = await settled(f.store, chat.id);
+  expect(done.status).toBe("idle");
+  expect(checkLive).not.toHaveBeenCalled();
+  expect(() => f.manager.decideTool(chat.id, "valid-preview", true)).toThrow(
+    "no longer current",
+  );
+});
+
+it("retains a sourced working plan through restart and a long tool trajectory", async () => {
+  const f = fixture([
+    tool("update_plan", {
+      expectedRevision: 0,
+      objective: "Build the app",
+      approach: "Serve it locally",
+      requirements: ["Keep keyboard support."],
+      steps: [{ text: "Verify keyboard behavior", status: "pending" }],
+    }),
+    reply("I have recorded the working plan."),
+    reply("Keyboard support remains in scope."),
+  ]);
+  const chat = f.manager.create();
+  f.manager.send(chat.id, "Keep keyboard support.");
+  const planned = await settled(f.store, chat.id);
+  expect(planned.work?.requirements[0].sourceUserMessageId).toBe(
+    planned.activeUserMessageId,
+  );
+  const reopened = new PearlChatStore(join(f.data, "workspace.sqlite"));
+  stores.push(reopened);
+  expect(reopened.get(chat.id).work).toEqual(planned.work);
+  for (let i = 0; i < 120; i++)
+    planned.messages.push({
+      id: `past-${i}`,
+      role: "assistant",
+      text: "Inspection output ".repeat(1000),
+      at: "now",
+    });
+  f.store.save(planned);
+  f.manager.send(chat.id, "What requirement are you retaining?");
+  await settled(f.store, chat.id);
+  expect(f.complete.mock.calls.at(-1)?.[0].system).toContain(
+    "Keep keyboard support.",
+  );
+  expect(f.complete.mock.calls.at(-1)?.[0].system).toContain("not an approval");
+});
+
+it("retains repeated-action detection across a resumed stretch of the same request", async () => {
+  const f = fixture([
+    tool("list_files", { path: "" }, "again"),
+    reply("This should not run"),
+  ]);
+  const chat = f.manager.create();
+  f.manager.chooseProject(chat.id, f.project);
+  f.manager.approveProject(chat.id, true);
+  const saved = f.store.get(chat.id);
+  saved.status = "paused";
+  saved.activeUserMessageId = "user";
+  saved.messages.push({
+    id: "user",
+    role: "user",
+    text: "Inspect this directory",
+    at: "now",
+  });
+  for (let i = 0; i < 3; i++)
+    saved.messages.push(
+      {
+        id: `a${i}`,
+        role: "assistant",
+        text: "",
+        toolName: "list_files",
+        toolCallId: `c${i}`,
+        arguments: '{"path":""}',
+        at: "now",
+      },
+      {
+        id: `t${i}`,
+        role: "tool",
+        text: "[]",
+        toolName: "list_files",
+        toolCallId: `c${i}`,
+        at: "now",
+      },
+    );
+  f.store.save(saved);
+  f.manager.retry(chat.id);
+  const paused = await settled(f.store, chat.id);
+  expect(paused.pauseKind).toBe("repeated_action");
+  expect(f.complete).toHaveBeenCalledTimes(1);
+});
+
+it("can verify existing work without manufacturing an unnecessary edit", async () => {
+  const f = fixture([
+    tool(
+      "run_command",
+      { command: "node", args: ["--test", "test.js"] },
+      "check-only",
+    ),
+    tool(
+      "complete_work",
+      {
+        status: "done",
+        summary:
+          "The existing implementation passed its checks. No files needed changing.",
+      },
+      "finish-check",
+    ),
+  ]);
+  writeFileSync(
+    join(f.project, "test.js"),
+    "require('node:test')('existing behavior',()=>require('node:assert/strict').equal(2+2,4));",
+  );
+  const chat = f.manager.create();
+  f.manager.chooseProject(chat.id, f.project);
+  f.manager.approveProject(chat.id, true);
+  f.manager.send(chat.id, "Verify the existing behavior");
+  await settled(f.store, chat.id);
+  f.manager.decideTool(chat.id, "check-only", true);
+  const done = await settled(f.store, chat.id);
+  expect(done.messages.at(-1)?.completion?.status).toBe("done");
+  expect(done.messages.at(-1)?.evidence?.filesWritten).toBe(0);
+  expect(done.messages.at(-1)?.evidence?.commandsCompleted).toBe(1);
+});
+
+it("uses one reviewed preview session for subsequent browser actions and closes it on completion", async () => {
+  const observation = {
+    title: "Preview",
+    initialVisibleText: "Sign in",
+    visibleText: "Signed in",
+    controls: [],
+    hiddenViolations: [],
+    errors: [],
+    blockedExternalRequests: 0,
+    completedSteps: 1,
+  };
+  const close = vi.fn(async () => {});
+  const start = vi.fn(async () => ({
+    origin: "http://127.0.0.1:12345",
+    active: () => true,
+    close,
+  }));
+  const browser = {
+    check: vi.fn(),
+    checkLive: vi.fn(),
+    openLive: vi.fn(async () => observation),
+    continueLive: vi.fn(async () => ({
+      ...observation,
+      visibleText: "Saved entry",
+    })),
+    closeLive: vi.fn(),
+  };
+  const f = fixture(
+    [
+      tool(
+        "preview_app",
+        { command: "node", args: ["server.js"], path: "/" },
+        "start-preview",
+      ),
+    ],
+    browser,
+    start,
+  );
+  const chat = f.manager.create();
+  f.manager.chooseProject(chat.id, f.project);
+  f.manager.approveProject(chat.id, true);
+  f.manager.send(chat.id, "Check the real app");
+  await settled(f.store, chat.id);
+  expect(start).not.toHaveBeenCalled();
+  let previewId = "";
+  f.complete
+    .mockImplementationOnce(async ({ messages }) => {
+      previewId = JSON.parse(
+        messages.find(
+          (m) => m.role === "tool" && m.toolCallId === "start-preview",
+        )!.text,
+      ).previewId;
+      return tool(
+        "browser_check",
+        { previewId, steps: [{ action: "click", selector: "#save" }] },
+        "continue-preview",
+      );
+    })
+    .mockImplementationOnce(async () => reply("I observed the saved entry."));
+  f.manager.decideTool(chat.id, "start-preview", true);
+  const done = await settled(f.store, chat.id);
+  expect(start).toHaveBeenCalledTimes(1);
+  expect(browser.openLive).toHaveBeenCalledTimes(1);
+  expect(browser.continueLive).toHaveBeenCalledWith(
+    previewId,
+    undefined,
+    [{ action: "click", selector: "#save" }],
+    expect.any(AbortSignal),
+  );
+  expect(done.status).toBe("idle");
+  expect(close).toHaveBeenCalledTimes(1);
+  expect(browser.closeLive).toHaveBeenCalledWith(previewId);
+});
+
+it("refuses an unknown preview capability instead of accessing a local service", async () => {
+  const continueLive = vi.fn();
+  const f = fixture(
+    [
+      tool("browser_check", { previewId: "foreign-session" }),
+      reply("That preview is unavailable."),
+    ],
+    { check: vi.fn(), continueLive },
+  );
+  const chat = f.manager.create();
+  f.manager.chooseProject(chat.id, f.project);
+  f.manager.approveProject(chat.id, true);
+  f.manager.send(chat.id, "Continue preview");
+  const done = await settled(f.store, chat.id);
+  expect(continueLive).not.toHaveBeenCalled();
+  expect(
+    done.messages.some((m) => m.text.includes("does not belong to this chat")),
+  ).toBe(true);
+});
+
+it("invalidates a running preview after source changes so stale server code cannot count as verification", async () => {
+  const observation = {
+    title: "App",
+    initialVisibleText: "Old",
+    visibleText: "Old",
+    controls: [],
+    hiddenViolations: [],
+    errors: [],
+    blockedExternalRequests: 0,
+    completedSteps: 0,
+  };
+  const close = vi.fn(async () => {});
+  const browser = {
+    check: vi.fn(),
+    checkLive: vi.fn(),
+    openLive: vi.fn(async () => observation),
+    continueLive: vi.fn(async () => observation),
+    closeLive: vi.fn(),
+  };
+  const f = fixture(
+    [
+      tool(
+        "preview_app",
+        { command: "node", args: ["server.js"], path: "/" },
+        "preview",
+      ),
+    ],
+    browser,
+    async () => ({
+      origin: "http://127.0.0.1:12345",
+      active: () => true,
+      close,
+    }),
+  );
+  const chat = f.manager.create();
+  f.manager.chooseProject(chat.id, f.project);
+  f.manager.approveProject(chat.id, true);
+  f.manager.send(chat.id, "Repair the server");
+  await settled(f.store, chat.id);
+  let previewId = "";
+  f.complete
+    .mockImplementationOnce(async ({ messages }) => {
+      previewId = JSON.parse(
+        messages.find((m) => m.role === "tool" && m.toolCallId === "preview")!
+          .text,
+      ).previewId;
+      return tool(
+        "create_file",
+        { path: "server.js", content: "// changed server" },
+        "write-server",
+      );
+    })
+    .mockImplementationOnce(async () =>
+      tool("browser_check", { previewId }, "stale-preview"),
+    )
+    .mockImplementationOnce(async () =>
+      tool(
+        "complete_work",
+        {
+          status: "unverified",
+          summary: "The server changed and needs a new preview.",
+          remaining: "Verification",
+        },
+        "finish",
+      ),
+    );
+  f.manager.decideTool(chat.id, "preview", true);
+  const done = await settled(f.store, chat.id);
+  expect(browser.continueLive).not.toHaveBeenCalled();
+  expect(close).toHaveBeenCalledOnce();
+  expect(
+    done.messages.some(
+      (m) =>
+        m.toolCallId === "stale-preview" &&
+        m.text.includes("Preview session ended"),
+    ),
+  ).toBe(true);
+});
+
+it("recognizes repeated reads when argument key ordering changes", async () => {
+  const f = fixture([
+    ...Array.from({ length: 4 }, (_, i) =>
+      tool(
+        "read_file",
+        i % 2
+          ? { lineCount: 1, startLine: 1, path: "note.txt" }
+          : { path: "note.txt", startLine: 1, lineCount: 1 },
+        `read-${i}`,
+      ),
+    ),
+    reply("Finished reading"),
+  ]);
+  writeFileSync(join(f.project, "note.txt"), "unchanged\n");
+  const chat = f.manager.create();
+  f.manager.chooseProject(chat.id, f.project);
+  f.manager.approveProject(chat.id, true);
+  f.manager.send(chat.id, "Inspect the note");
+  const done = await settled(f.store, chat.id);
+  expect(done.status).toBe("paused");
+  expect(done.pauseKind).toBe("repeated_action");
+  expect(f.complete).toHaveBeenCalledTimes(4);
+});
+
+it("persists provider continuation through command approval and restart without exposing it to the Room", async () => {
+  const continuation = {
+    model: "fixture-model",
+    reasoningContent: "opaque continuation\nunchanged",
+  };
+  const result = {
+    ...tool(
+      "run_command",
+      { command: "node", args: ["--version"] },
+      "reviewed",
+    ),
+    providerContinuation: continuation,
+  };
+  const f = fixture([result, reply("Version checked.")]);
+  const chat = f.manager.create();
+  f.manager.chooseProject(chat.id, f.project);
+  f.manager.approveProject(chat.id, true);
+  f.manager.send(chat.id, "Check the version");
+  const waiting = await settled(f.store, chat.id);
+  expect(
+    waiting.messages.find((m) => m.toolCallId === "reviewed")
+      ?.providerContinuation,
+  ).toEqual(continuation);
+  const reopened = new PearlChatStore(join(f.data, "workspace.sqlite"));
+  stores.push(reopened);
+  const recovered = reopened.get(chat.id);
+  expect(
+    recovered.messages.find((m) => m.toolCallId === "reviewed")
+      ?.providerContinuation,
+  ).toEqual(continuation);
+  expect(JSON.stringify(roomChat(recovered))).not.toContain(
+    "opaque continuation",
+  );
+  expect(JSON.stringify(roomChat(recovered))).not.toContain(
+    "providerContinuation",
+  );
+  f.manager.decideTool(chat.id, "reviewed", true);
+  await settled(f.store, chat.id);
+  expect(
+    f.complete.mock.calls[1][0].messages.find(
+      (m) => m.toolCallId === "reviewed",
+    )?.providerContinuation,
+  ).toEqual(continuation);
+});
+
+it("identifies a missing patch revision and leaves the file untouched", async () => {
+  const f = fixture([
+    tool("read_file", { path: "note.txt" }, "read"),
+    tool(
+      "apply_patch",
+      { path: "note.txt", edits: [{ oldText: "before", newText: "after" }] },
+      "patch",
+    ),
+    reply("The patch was not applied."),
+  ]);
+  writeFileSync(join(f.project, "note.txt"), "before");
+  const chat = f.manager.create();
+  f.manager.chooseProject(chat.id, f.project);
+  f.manager.approveProject(chat.id, true);
+  f.manager.send(chat.id, "Edit the note");
+  const done = await settled(f.store, chat.id);
+  expect(readFileSync(join(f.project, "note.txt"), "utf8")).toBe("before");
+  expect(
+    done.messages.find((m) => m.role === "tool" && m.toolCallId === "patch")
+      ?.text,
+  ).toContain("expectedSha256");
 });
