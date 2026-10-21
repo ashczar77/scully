@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { PearlModel } from "../src/engine/pearl-model";
-import { cappedPearlModel } from "../src/main/pearl-test-model";
+import {
+  cappedPearlModel,
+  liveModelRequestLimit,
+} from "../src/main/pearl-test-model";
 
 const input: Parameters<PearlModel["complete"]>[0] = {
   key: "test",
@@ -10,6 +13,12 @@ const input: Parameters<PearlModel["complete"]>[0] = {
 };
 
 describe("connected test request cap", () => {
+  it("caps configured requests before any paid model call", () => {
+    expect(liveModelRequestLimit(undefined)).toBe(18);
+    expect(liveModelRequestLimit("7")).toBe(7);
+    expect(liveModelRequestLimit("999")).toBe(24);
+    expect(liveModelRequestLimit("invalid")).toBe(18);
+  });
   it("allows exactly the configured number of calls and leaves the next call unsent", async () => {
     const complete = vi.fn(async () => ({
       kind: "reply" as const,

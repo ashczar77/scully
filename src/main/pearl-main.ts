@@ -16,7 +16,7 @@ import { PearlChatManager } from "./pearl-chat-manager";
 import { IsolatedPearlBrowser } from "./pearl-browser";
 import { PearlChatStore } from "./pearl-chat-store";
 import { PearlSession } from "./pearl-session";
-import { cappedPearlModel } from "./pearl-test-model";
+import { cappedPearlModel, liveModelRequestLimit } from "./pearl-test-model";
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -135,7 +135,7 @@ app
     const baseModel = nebiusPearlModel(fetch, fixtureEndpoint);
     const liveLimit =
       !app.isPackaged && process.env.SCULLY_LIVE_TEST === "1"
-        ? Number(process.env.SCULLY_LIVE_MAX_REQUESTS ?? 18)
+        ? liveModelRequestLimit(process.env.SCULLY_LIVE_MAX_REQUESTS)
         : 0;
     const model =
       liveLimit > 0 ? cappedPearlModel(baseModel, liveLimit) : baseModel;

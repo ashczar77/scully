@@ -332,6 +332,57 @@ it("retains earlier user requirements and later corrections across a long action
   ).toBeLessThanOrEqual(24_000);
 });
 
+it("retains Pearl's earlier stated approach after long coding tool output", () => {
+  const f = fixture([]);
+  const chat = f.manager.create();
+  chat.messages.push(
+    {
+      id: "scope",
+      role: "user",
+      text: "Build a shared app across devices.",
+      at: "now",
+    },
+    {
+      id: "approach",
+      role: "assistant",
+      text: "I recommend a hosted web server with a relational database, because members need access from separate devices.",
+      at: "now",
+    },
+    {
+      id: "go",
+      role: "user",
+      text: "Implement the approach you just described.",
+      at: "now",
+    },
+  );
+  chat.activeUserMessageId = "go";
+  for (let index = 0; index < 40; index++)
+    chat.messages.push({
+      id: `output-${index}`,
+      role: "tool",
+      text: `${index}: ${"source ".repeat(500)}`,
+      at: "now",
+      toolCallId: `call-${index}`,
+      toolName: "read_file",
+    });
+  const context = (
+    f.manager as unknown as {
+      context: (chat: PearlChat, maxChars: number) => PearlMessage[];
+    }
+  ).context(chat, 24_000);
+  const body = context.map((message) => message.text).join("\n");
+  expect(body).toContain("hosted web server with a relational database");
+  expect(body).toContain("not user approval");
+  expect(body).toContain("Implement the approach you just described");
+  expect(
+    context.reduce(
+      (total, message) =>
+        total + message.text.length + (message.arguments?.length || 0),
+      0,
+    ),
+  ).toBeLessThanOrEqual(24_000);
+});
+
 it("keeps anchored requirements within the retry context budget", () => {
   const f = fixture([]);
   const chat = f.manager.create();
