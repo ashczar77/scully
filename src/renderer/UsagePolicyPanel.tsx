@@ -83,6 +83,77 @@ export function UsagePolicyPanel({
   } catch {
     /* Form validation appears on save. */
   }
+  if (run.planning) {
+    if (compact)
+      return (
+        <button className="run-setting-card" onClick={onOpenSettings}>
+          <span>Run usage</span>
+          <strong>Automatic model allowance</strong>
+          <small>
+            {current.requestCeiling
+              ? `${current.requestCeiling} request cap`
+              : "No lifetime request cap"}{" "}
+            · Change in Settings
+          </small>
+        </button>
+      );
+    return (
+      <section className="settings-card" aria-label="Run usage policy">
+        <h3>Run usage</h3>
+        <p>
+          Each teammate gets an output allowance suited to its model. Truncated
+          responses can be retried with a larger allowance. Repeated actions and
+          spending alerts still pause a teammate when needed.
+        </p>
+        <p>
+          {current.requestCeiling
+            ? `User-set cap: ${current.requestCeiling} model requests for this run.`
+            : "No lifetime request cap is set for this run."}
+        </p>
+        <label className="usage-optional-cap">
+          Optional request cap
+          <input
+            type="number"
+            min={0}
+            max={10000}
+            step={1}
+            value={requestCeiling}
+            disabled={!enabled}
+            onChange={(event) => setRequestCeiling(Number(event.target.value))}
+          />
+          <small>
+            Use 0 for no cap. The no-progress and spending safeguards still
+            apply.
+          </small>
+        </label>
+        {error && (
+          <p role="alert" className="error">
+            {error}
+          </p>
+        )}
+        <button
+          type="button"
+          className="secondary"
+          disabled={!enabled || requestCeiling === current.requestCeiling}
+          onClick={() =>
+            void apply(
+              {
+                preset: "custom",
+                outputTokens: current.outputTokens,
+                requestCeiling,
+                earlyReviews: false,
+              },
+              current.requestCeiling > 0 &&
+                (requestCeiling === 0 ||
+                  requestCeiling > current.requestCeiling),
+            )
+          }
+        >
+          Save usage limit
+        </button>
+      </section>
+    );
+  }
   if (compact)
     return (
       <button className="run-setting-card" onClick={onOpenSettings}>

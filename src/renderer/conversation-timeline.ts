@@ -1,6 +1,7 @@
 import type { Task, Teammate } from "../shared/contracts";
 import type { Run } from "../shared/runs";
 import { planQuestions } from "../shared/plan-conversation";
+import { pendingPlanningQuestions } from "../shared/planning-state";
 
 export type ConversationEntry =
   | { kind: "user"; key: string; text: string; at: string }
@@ -16,6 +17,16 @@ export type ConversationEntry =
       key: string;
       plan: string;
       reply?: string;
+      questions?: string[];
+      questionItems?: {
+        id: string;
+        askedAt: string;
+        status: "pending" | "answered" | "withdrawn" | "superseded";
+        answer?: string;
+        text: string;
+        recommendation: string;
+        options?: string[];
+      }[];
       draft: boolean;
       at: string;
       person?: Teammate;
@@ -36,6 +47,12 @@ export function conversationTimeline(
     value || fallback;
   const seenMessages = new Set<string>();
   const seenReplies = new Set<string>();
+  const seenQuestions = new Set<string>();
+  const currentQuestions = new Map(
+    (
+      runsNewestFirst.find((run) => run.planning)?.planning?.questions || []
+    ).map((question) => [question.id, question]),
+  );
   const entries: ConversationEntry[] = [];
   for (const run of [...runsNewestFirst].reverse()) {
     const local: (ConversationEntry & { order: number })[] = [];
@@ -79,8 +96,15 @@ export function conversationTimeline(
         order: local.length,
       });
     }
-    const planEvent = run.events.find((event) => event.text === run.plan);
-    if (run.plan) {
+    const planEvent = run.events.find(
+      (event) => event.text === (run.planReply || run.plan),
+    );
+    if (run.plan || run.planReply) {
+      const newlyAsked = (run.planning?.questions || []).filter((question) => {
+        if (seenQuestions.has(question.id)) return false;
+        seenQuestions.add(question.id);
+        return true;
+      });
       const lastNonRedirect = [...messages]
         .reverse()
         .find((message) => message.intent !== "replan");
@@ -94,7 +118,27 @@ export function conversationTimeline(
         key: `plan:${run.id}`,
         plan: run.plan,
         reply: run.planReply,
-        draft: planQuestions(run.plan).length > 0 || !run.approvedLineup,
+        questions: run.planning
+          ? newlyAsked.map((question) => question.text)
+          : undefined,
+        questionItems: run.planning
+          ? newlyAsked.map((asked) => {
+              const question = currentQuestions.get(asked.id) || asked;
+              return {
+                id: question.id,
+                askedAt: question.askedAt,
+                status: question.status,
+                answer: question.answer,
+                text: question.text,
+                recommendation: question.recommendation,
+                options: question.options,
+              };
+            })
+          : undefined,
+        draft: run.planning
+          ? pendingPlanningQuestions(run.planning).length > 0 ||
+            !run.planning.planReview
+          : planQuestions(run.plan).length > 0 || !run.approvedLineup,
         person: run.teamSnapshot?.members.find(
           (member) => member.id === "pearl",
         ),
@@ -103,7 +147,12 @@ export function conversationTimeline(
       });
     }
     for (const [index, event] of run.events.entries()) {
-      if (event.actor === "system" || event.text === run.plan) continue;
+      if (
+        event.actor === "system" ||
+        event.text === run.plan ||
+        event.text === run.planReply
+      )
+        continue;
       local.push({
         kind: "progress",
         key: `progress:${run.id}:${index}`,

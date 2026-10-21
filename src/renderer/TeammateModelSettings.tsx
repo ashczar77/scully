@@ -11,6 +11,9 @@ import {
 import { ModelPicker } from "./ModelPicker";
 
 const pinnedModels = starterModelOptions.slice(0, 2);
+function canThink(model: string) {
+  return /nemotron[-_]?3(?:[._-]?5[-_]?lightning|[-_]?super)/i.test(model);
+}
 
 export function TeammateModelSettings({ api }: { api: DesktopAPI }) {
   const [settings, setSettings] = useState<RoleModelSettings>(
@@ -20,9 +23,34 @@ export function TeammateModelSettings({ api }: { api: DesktopAPI }) {
     pinnedModels.map((option) => ({ ...option })),
   );
   const [busy, setBusy] = useState(false);
+  const [catalogStatus, setCatalogStatus] = useState<
+    "loading" | "ready" | "unavailable" | "disconnected"
+  >("loading");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  async function loadCatalog(active = () => true) {
+    setCatalogStatus("loading");
+    try {
+      const session = await api.session();
+      if (!active()) return;
+      if (!session.configured) {
+        setCatalogStatus("disconnected");
+        return;
+      }
+      const catalog = await api.listModels();
+      if (!active()) return;
+      setOptions([
+        ...pinnedModels,
+        ...catalog.filter(
+          (item) => !pinnedModels.some((starter) => starter.id === item.id),
+        ),
+      ]);
+      setCatalogStatus("ready");
+    } catch {
+      if (active()) setCatalogStatus("unavailable");
+    }
+  }
   useEffect(() => {
     let live = true;
     void api
@@ -33,26 +61,7 @@ export function TeammateModelSettings({ api }: { api: DesktopAPI }) {
       .catch(() => {
         if (live) setError("Could not load teammate models.");
       });
-    void api
-      .session()
-      .then((session) => {
-        if (!session.configured) return;
-        return api.listModels().then((catalog) => {
-          if (!live) return;
-          setOptions([
-            ...pinnedModels,
-            ...catalog.filter(
-              (item) => !pinnedModels.some((starter) => starter.id === item.id),
-            ),
-          ]);
-        });
-      })
-      .catch(() => {
-        if (live)
-          setError(
-            "Could not load the Nebius model list. Default models remain available.",
-          );
-      });
+    void loadCatalog(() => live);
     return () => {
       live = false;
       if (timer.current) clearTimeout(timer.current);
@@ -105,10 +114,47 @@ export function TeammateModelSettings({ api }: { api: DesktopAPI }) {
               value={settings[key]}
               options={options}
               disabled={busy}
+              catalogStatus={catalogStatus}
+              onRetry={() => void loadCatalog()}
               onChange={(model) =>
-                void save({ ...settings, [key]: model }, label)
+                void save(
+                  {
+                    ...settings,
+                    [key]: model,
+                    thinking: {
+                      ...settings.thinking,
+                      [key]: canThink(model)
+                        ? settings.thinking?.[key] || "off"
+                        : "off",
+                    },
+                  },
+                  label,
+                )
               }
             />
+            <label className="thinking-control">
+              <span>Thinking</span>
+              <select
+                aria-label={`${label} thinking`}
+                value={settings.thinking?.[key] || "off"}
+                disabled={busy || !canThink(settings[key])}
+                onChange={(event) =>
+                  void save(
+                    {
+                      ...settings,
+                      thinking: {
+                        ...settings.thinking,
+                        [key]: event.target.value as "off" | "on",
+                      },
+                    },
+                    label,
+                  )
+                }
+              >
+                <option value="off">Off</option>
+                <option value="on">On</option>
+              </select>
+            </label>
           </div>
         ))}
       </div>
@@ -127,6 +173,8 @@ export function TeammateModelSettings({ api }: { api: DesktopAPI }) {
                 value={settings.specialists[member.id]}
                 options={options}
                 disabled={busy}
+                catalogStatus={catalogStatus}
+                onRetry={() => void loadCatalog()}
                 onChange={(model) =>
                   void save(
                     {
@@ -135,14 +183,49 @@ export function TeammateModelSettings({ api }: { api: DesktopAPI }) {
                         ...settings.specialists,
                         [member.id]: model,
                       },
+                      thinking: {
+                        ...settings.thinking,
+                        [member.id]: canThink(model)
+                          ? settings.thinking?.[member.id] || "off"
+                          : "off",
+                      },
                     },
                     member.name,
                   )
                 }
               />
+              <label className="thinking-control">
+                <span>Thinking</span>
+                <select
+                  aria-label={`${member.name} thinking`}
+                  value={settings.thinking?.[member.id] || "off"}
+                  disabled={busy || !canThink(settings.specialists[member.id])}
+                  onChange={(event) =>
+                    void save(
+                      {
+                        ...settings,
+                        thinking: {
+                          ...settings.thinking,
+                          [member.id]: event.target.value as "off" | "on",
+                        },
+                      },
+                      member.name,
+                    )
+                  }
+                >
+                  <option value="off">Off</option>
+                  <option value="on">On</option>
+                </select>
+              </label>
             </div>
           ))}
       </div>
+      <p className="thinking-explanation">
+        Thinking lets supported Nemotron models use additional internal
+        reasoning before replying. It can improve difficult planning or review,
+        but may take longer and use more output tokens. Unsupported models keep
+        it off.
+      </p>
       {notice && (
         <div className="settings-save-banner" role="status">
           <CheckCircle2 size={18} aria-hidden="true" />

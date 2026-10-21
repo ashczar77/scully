@@ -2,6 +2,7 @@ import { measured, noopSink, type MetricSink } from "../shared/telemetry";
 import { createHash } from "node:crypto";
 import type { CloudImageCatalog } from "../shared/cloud";
 import { posix } from "node:path";
+import { safePath } from "../shared/runs";
 
 const endpoint = "https://api.tokenfactory.nebius.com/sandboxes/v1";
 const uuidPattern =
@@ -64,7 +65,8 @@ export function sandboxBody(value: SandboxCommand) {
     { uuid: string; uid: number; gid: number; mode: string }
   >;
   const entries = Object.entries(value.files || {});
-  if (entries.length > 112) throw new Error("Too many sandbox files");
+  if (entries.length > 128)
+    throw new Error("Too many files in one sandbox transfer");
   for (const [path, file] of entries) {
     if (
       !/^\/workspace\/[A-Za-z0-9_./+-]{1,240}$/.test(path) ||
@@ -154,12 +156,15 @@ export function parseSandboxStatus(
   for (const key of ["exit_code", "signal"])
     if (state[key] != null && !Number.isSafeInteger(state[key]))
       throw new Error("Invalid process state");
+  if (typeof state.signal === "number" && state.signal < -1)
+    throw new Error("Invalid process state");
   if (state.timed_out !== undefined && typeof state.timed_out !== "boolean")
     throw new Error("Invalid process timeout");
   const out = stream(r.stdout),
     err = stream(r.stderr);
   const exitCode = typeof state.exit_code === "number" ? state.exit_code : null;
-  const signal = typeof state.signal === "number" ? state.signal : null;
+  const signal =
+    typeof state.signal === "number" && state.signal > 0 ? state.signal : null;
   const timedOut = state.timed_out === true;
   return {
     id: expectedId,
@@ -173,10 +178,7 @@ export function parseSandboxStatus(
     stdout: out.text,
     stderr: err.text,
     truncated: out.truncated || err.truncated,
-    resultImage:
-      status === "SUCCESS" && v.result_image_uuid != null
-        ? uuid(v.result_image_uuid)
-        : null,
+    resultImage: v.result_image_uuid != null ? uuid(v.result_image_uuid) : null,
   };
 }
 export class SandboxRequestError extends Error {
@@ -262,6 +264,79 @@ export function sandboxClient(
     return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
   }
   return {
+    async listFiles(imageId: string, directory = "/workspace") {
+      const id = uuid(imageId);
+      if (directory !== "/workspace" && !directory.startsWith("/workspace/"))
+        throw new Error("Image inspection is outside the project workspace");
+      const response = await request(
+        `/inspect/${id}/list?${new URLSearchParams({ path: directory })}`,
+      );
+      const value = record(response);
+      if (
+        value.path !== directory ||
+        !Array.isArray(value.files) ||
+        value.files.length > 5000
+      )
+        throw new Error("Invalid image listing");
+      return value.files.map((entry) => {
+        const file = record(entry);
+        if (
+          typeof file.path !== "string" ||
+          !file.path ||
+          file.path.includes("/") ||
+          typeof file.is_dir !== "boolean" ||
+          typeof file.is_regular !== "boolean" ||
+          typeof file.is_symlink !== "boolean" ||
+          !Number.isSafeInteger(file.size)
+        )
+          throw new Error("Invalid image file metadata");
+        return {
+          name: file.path,
+          directory: file.is_dir,
+          regular: file.is_regular,
+          symlink: file.is_symlink,
+          size: file.size as number,
+        };
+      });
+    },
+    async downloadFile(imageId: string, path: string) {
+      const id = uuid(imageId);
+      safePath(path);
+      const response = await fetcher(
+        `${endpoint}/inspect/${id}/download?${new URLSearchParams({ path: `/workspace/${path}` })}`,
+        {
+          method: "GET",
+          redirect: "error",
+          signal: AbortSignal.timeout(20000),
+          headers: { Authorization: `Bearer ${key}`, Project: project },
+        },
+      );
+      if (response.status !== 200 || !response.body) {
+        await response.body?.cancel();
+        throw new Error("Saved file cannot be inspected");
+      }
+      const reader = response.body.getReader();
+      const chunks: Uint8Array[] = [];
+      let bytes = 0;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          bytes += value.length;
+          if (bytes > 8_388_608)
+            throw new Error("Saved file exceeds the inspection byte limit");
+          chunks.push(value);
+        }
+      } finally {
+        await reader.cancel();
+      }
+      const content = new TextDecoder("utf-8", { fatal: true }).decode(
+        Buffer.concat(chunks),
+      );
+      if (content.includes("\0"))
+        throw new Error("Saved file is not supported text");
+      return content;
+    },
     inspectImage(imageId: string): Promise<void> {
       return measured(
         "sandbox.inspect",
@@ -433,7 +508,7 @@ export function sandboxClient(
       return measured(
         "sandbox.upload",
         async () => {
-          boundedText(content, 80000);
+          boundedText(content, 8_388_608);
           const bytes = Buffer.from(content, "utf8");
           const digest = createHash("sha256").update(bytes).digest("hex");
           try {

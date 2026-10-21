@@ -14,12 +14,17 @@ import { join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { mkdirSync } from "node:fs";
 import { Store } from "./store";
+import { PearlChatStore } from "./pearl-chat-store";
+import { PearlChatManager } from "./pearl-chat-manager";
+import { nebiusPearlModel } from "../engine/pearl-model";
 import { RunManager } from "./run-manager";
 import { readSource } from "./source";
 import { ExecutionManager } from "./execution-manager";
 import { ApplyManager } from "./apply-manager";
 import { inspectLocalArtifacts, planTaskArtifactRemoval } from "./artifacts";
 import { CloudManager } from "./cloud-manager";
+import { CollaborationManager } from "./collaboration-manager";
+import { canStartInitialPlanning } from "../shared/runs";
 import { boundedClipboardText } from "./clipboard-text";
 import { verifyProjectRoot } from "./project-workspace";
 import { initializeGit, readGitHistory } from "./git-history";
@@ -43,10 +48,13 @@ protocol.registerSchemesAsPrivileged([
 // HTTP cache for this process; workspace data is stored separately in SQLite.
 app.commandLine.appendSwitch("disable-http-cache");
 let store: Store;
+let pearlStore: PearlChatStore;
+let pearl: PearlChatManager;
 let runs: RunManager;
 let executions: ExecutionManager;
 let applications: ApplyManager;
 let cloud: CloudManager;
+let collaboration: CollaborationManager;
 let win: BrowserWindow | null = null;
 const appIcon = join(__dirname, "branding", "scully.png");
 const testingPath = process.env.SCULLY_TEST_DATA;
@@ -128,6 +136,26 @@ app
           }).show();
       },
     );
+    pearlStore = new PearlChatStore(
+      join(app.getPath("userData"), "workspace.sqlite"),
+    );
+    const fixtureEndpoint =
+      !app.isPackaged && testingPath
+        ? process.env.SCULLY_PEARL_TEST_ENDPOINT
+        : undefined;
+    if (fixtureEndpoint) {
+      const url = new URL(fixtureEndpoint);
+      if (url.protocol !== "http:" || url.hostname !== "127.0.0.1")
+        throw new Error("Invalid local Pearl test endpoint");
+    }
+    pearl = new PearlChatManager(
+      pearlStore,
+      app.getPath("userData"),
+      () => runs.collaborationSession(),
+      (chat) => win?.webContents.send("pearl:update", chat),
+      fixtureEndpoint ? nebiusPearlModel(fetch, fixtureEndpoint) : undefined,
+      metrics.record,
+    );
     executions = new ExecutionManager(store, app.getPath("userData"), (run) =>
       win?.webContents.send("run:update", run),
     );
@@ -139,6 +167,14 @@ app
       (run) => win?.webContents.send("run:update", run),
       metrics.record,
     );
+    collaboration = new CollaborationManager(
+      store,
+      (run) => win?.webContents.send("run:update", run),
+      app.getPath("userData"),
+      () => runs.collaborationSession(),
+      () => cloud.collaborationConfig(),
+    );
+    collaboration.recover();
     const trusted = (event: Electron.IpcMainInvokeEvent) => {
       if (
         !win ||
@@ -148,6 +184,52 @@ app
       )
         throw new Error("Untrusted request");
     };
+    ipcMain.handle("pearl:list", (event) => {
+      trusted(event);
+      return pearl.list();
+    });
+    metricHandle("pearl:create", (event) => {
+      trusted(event);
+      return pearl.create();
+    });
+    ipcMain.handle("pearl:get", (event, id) => {
+      trusted(event);
+      return pearl.get(id);
+    });
+    metricHandle("pearl:send", (event, id, text) => {
+      trusted(event);
+      return pearl.send(id, text);
+    });
+    metricHandle("pearl:project:choose", async (event, id) => {
+      trusted(event);
+      const result = await dialog.showOpenDialog(win!, {
+        title: "Choose a project for Pearl",
+        properties: ["openDirectory", "createDirectory"],
+      });
+      return result.canceled
+        ? null
+        : pearl.chooseProject(id, result.filePaths[0]);
+    });
+    metricHandle("pearl:project:approve", (event, id, approved) => {
+      trusted(event);
+      return pearl.approveProject(id, approved);
+    });
+    metricHandle("pearl:tool:decide", (event, id, callId, approved) => {
+      trusted(event);
+      return pearl.decideTool(id, callId, approved);
+    });
+    metricHandle("pearl:question:answer", (event, id, questionId, answer) => {
+      trusted(event);
+      return pearl.answerQuestion(id, questionId, answer);
+    });
+    metricHandle("pearl:retry", (event, id) => {
+      trusted(event);
+      return pearl.retry(id);
+    });
+    metricHandle("pearl:stop", (event, id) => {
+      trusted(event);
+      return pearl.stop(id);
+    });
     metricHandle("clipboard:write", (event, value: unknown) => {
       trusted(event);
       clipboard.writeText(boundedClipboardText(value));
@@ -457,6 +539,64 @@ app
       trusted(event);
       return cloud.configure(value);
     });
+    metricHandle("collaboration:review", (event, id, options) => {
+      trusted(event);
+      return collaboration.review(id, options);
+    });
+    metricHandle("collaboration:environments", (event, id) => {
+      trusted(event);
+      return collaboration.recommendEnvironments(id);
+    });
+    metricHandle("collaboration:local-review", (event, id, actor) => {
+      trusted(event);
+      return collaboration.reviewLocalFallback(id, actor);
+    });
+    metricHandle("collaboration:local-approve", (event, token, approved) => {
+      trusted(event);
+      return collaboration.approveLocalFallback(token, approved);
+    });
+    metricHandle("collaboration:proposal-review", (event, id, proposalId) => {
+      trusted(event);
+      return collaboration.reviewDispatchProposal(id, proposalId);
+    });
+    metricHandle("collaboration:approve", (event, token, approved) => {
+      trusted(event);
+      return collaboration.approve(token, approved);
+    });
+    metricHandle(
+      "collaboration:message",
+      (event, id, text, recipient, questionId) => {
+        trusted(event);
+        return collaboration.send(id, text, recipient, questionId);
+      },
+    );
+    metricHandle("collaboration:continue", (event, id, actor, guidance) => {
+      trusted(event);
+      return collaboration.continue(id, actor, guidance);
+    });
+    metricHandle("collaboration:reconcile", (event, id, operationId) => {
+      trusted(event);
+      return collaboration.reconcile(id, operationId);
+    });
+    metricHandle(
+      "collaboration:dispatch-review",
+      (event, id, memberId, permissions, headId) => {
+        trusted(event);
+        return collaboration.reviewDispatch(id, memberId, permissions, headId);
+      },
+    );
+    metricHandle("collaboration:dispatch-approve", (event, token, approved) => {
+      trusted(event);
+      return collaboration.approveDispatch(token, approved);
+    });
+    metricHandle("collaboration:sync-review", (event, id) => {
+      trusted(event);
+      return collaboration.reviewSync(id);
+    });
+    metricHandle("collaboration:sync-approve", (event, token, approved) => {
+      trusted(event);
+      return collaboration.approveSync(token, approved);
+    });
     metricHandle(
       "cloud:review",
       (event, id, commandId, image, executable, options) => {
@@ -517,6 +657,18 @@ app
       trusted(event);
       return runs.sendPlanningMessage(id, text);
     });
+    metricHandle("room:planning-answer", (event, id, answer) => {
+      trusted(event);
+      return runs.answerPlanningQuestion(id, answer);
+    });
+    metricHandle("room:planning-answers", (event, id, answerSet) => {
+      trusted(event);
+      return runs.answerPlanningQuestions(id, answerSet);
+    });
+    metricHandle("room:planning-approve", (event, id, revision, approved) => {
+      trusted(event);
+      return runs.approvePlanningPlan(id, revision, approved);
+    });
     metricHandle("room:planning-retry", (event, id) => {
       trusted(event);
       return runs.retryPlanning(id);
@@ -537,7 +689,11 @@ app
     );
     metricHandle("run:start", (event, id, approved) => {
       trusted(event);
-      return runs.start(id, approved);
+      const run = store.getRun(id);
+      if (canStartInitialPlanning(run)) return runs.start(id, approved);
+      throw new Error(
+        "Use the collaborative project scope review to start this build",
+      );
     });
     metricHandle("room:build-answer", (event, id, questionId, answer) => {
       trusted(event);

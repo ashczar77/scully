@@ -82,8 +82,11 @@ export type Finding = {
   detail: string;
 };
 export type Run = {
+  planning?: import("./planning-state").PlanningState;
+  collaboration?: import("./collaboration").Collaboration;
   planningConsultationPolicy?: "automatic" | "ask";
   diagnostics?: import("./request-diagnostics").RequestDiagnostic[];
+  planningTrace?: import("./planning-trace").PlanningTraceEvent[];
   requestPause?: {
     id: string;
     status:
@@ -114,6 +117,14 @@ export type Run = {
     previousPlan: string;
     previousDrafts: DraftFile[];
     conversation?: { from: string; text: string }[];
+    directQuestionAnswer?: {
+      questionId: string;
+      answer: string;
+      note?: string;
+    };
+    directQuestionAnswers?: { questionId: string; answer: string }[];
+    directQuestionNote?: string;
+    approvedPlanRevision?: string;
   };
   redirectedTo?: string;
   correction?: {
@@ -139,12 +150,14 @@ export type Run = {
   events: RunEvent[];
   inFlightRequests?: InFlightRequest[];
   plan: string;
+  planningDraft?: string;
   planReply?: string;
   planningRetries?: number;
   drafts: DraftFile[];
   findings: Finding[];
   checks: string[];
   error: string;
+  failureCode?: "planning_validation";
   calls: number;
   model: string;
   roleModels?: import("./role-models").RoleModelSettings;
@@ -156,6 +169,20 @@ export type Run = {
   applications?: ApplyResult[];
   coordination?: Coordination;
 };
+
+export function canStartInitialPlanning(
+  run: Pick<Run, "status" | "plan"> & {
+    taskSnapshot?: { mode?: string };
+    correction?: unknown;
+  },
+) {
+  return (
+    run.status === "prepared" &&
+    run.taskSnapshot?.mode === "plan" &&
+    !run.plan &&
+    !run.correction
+  );
+}
 export type SessionConfig = {
   key: string;
   model: string;
@@ -166,8 +193,95 @@ export type SessionInfo = {
   model: string;
   outputTokens: number;
 };
-export type ModelOption = { id: string; name: string };
+export type ModelOption = {
+  id: string;
+  name: string;
+  disabledReason?: string;
+  maxOutputTokens?: number;
+  supportsThinking?: boolean;
+};
 export type RunAPI = {
+  reviewCollaboration: (
+    id: string,
+    options?: {
+      mode?: "sandbox" | "local";
+      baseImageId?: string | null;
+      checks?: string[];
+      environmentToken?: string;
+    },
+  ) => Promise<import("../main/collaboration-manager").CollaborationReview>;
+  recommendEnvironments: (id: string) => Promise<{
+    token: string;
+    expiresAt: string;
+    selections: {
+      memberId: string;
+      imageId: string | null;
+      imageTag: string | null;
+      tools: string[];
+      reason: string;
+    }[];
+    catalogLimited: boolean;
+  }>;
+  reviewLocalFallback: (
+    id: string,
+    actor: string,
+  ) => Promise<{
+    token: string;
+    expiresAt: string;
+    actor: string;
+    projectPath: string;
+    files: string[];
+    checks: { command: string; args: string[]; purpose: string }[];
+    reason: string;
+    sourceRevision: string;
+  }>;
+  approveLocalFallback: (token: string, approved: boolean) => Promise<Run>;
+  reviewDispatchProposal: (
+    id: string,
+    proposalId: string,
+  ) => Promise<{
+    token: string;
+    expiresAt: string;
+    proposal: import("./collaboration").DispatchProposal;
+    imageId: string | null;
+    imageTag: string | null;
+    mode: "sandbox" | "local";
+    localApprovalNeeded: boolean;
+    projectPath: string;
+    files: string[];
+    selectedInTask: boolean;
+  }>;
+  approveCollaboration: (token: string, approved: boolean) => Promise<Run>;
+  sendCollaborationMessage: (
+    id: string,
+    text: string,
+    recipient?: string,
+    questionId?: string,
+  ) => Promise<{
+    run: Run;
+    event: import("./collaboration").CollaborationEvent;
+  }>;
+  continueTeammate: (
+    id: string,
+    actor: string,
+    guidance?: string,
+  ) => Promise<Run>;
+  reconcileCollaboration: (id: string, operationId: string) => Promise<Run>;
+  reviewSpecialistDispatch: (
+    id: string,
+    memberId: string,
+    permissions: import("./collaboration").CollaborationPermission[],
+    headId?: string,
+  ) => Promise<unknown>;
+  approveSpecialistDispatch: (token: string, approved: boolean) => Promise<Run>;
+  reviewCollaborationSync: (id: string) => Promise<{
+    token: string;
+    expiresAt: string;
+    projectPath: string;
+    revision: string;
+    files: string[];
+  }>;
+  approveCollaborationSync: (token: string, approved: boolean) => Promise<Run>;
   roleModelSettings: () => Promise<import("./role-models").RoleModelSettings>;
   setRoleModelSettings: (
     value: import("./role-models").RoleModelSettings,
@@ -310,6 +424,19 @@ export type RunAPI = {
   selectRunModel: (id: string, model: string) => Promise<Run>;
   selectDefaultModel: (model: string) => Promise<SessionInfo>;
   sendPlanningMessage: (id: string, text: string) => Promise<Run>;
+  answerPlanningQuestion: (
+    id: string,
+    answer: import("./planning-state").PlanningQuestionAnswer,
+  ) => Promise<Run>;
+  answerPlanningQuestions: (
+    id: string,
+    answerSet: import("./planning-state").PlanningQuestionAnswerSet,
+  ) => Promise<Run>;
+  approvePlanningPlan: (
+    id: string,
+    revision: string,
+    approved: boolean,
+  ) => Promise<Run>;
   retryPlanning: (id: string) => Promise<Run>;
   sendConversationMessage: (
     id: string,
@@ -339,7 +466,9 @@ export type RunAPI = {
   approveLineup: (
     id: string,
     planRevision: string,
-    entries: import("./lineup-proposal").SpecialistLineupEntry[],
+    entries:
+      | import("./lineup-proposal").SpecialistLineupEntry[]
+      | import("./planning-state").WorkAssignment[],
     approved: boolean,
     core?: import("./core-lineup").CoreLineup,
   ) => Promise<Run>;
@@ -392,9 +521,11 @@ export function validateSession(value: unknown): SessionConfig {
     !/^[\w./:-]{1,160}$/.test(v.model) ||
     !Number.isInteger(v.outputTokens) ||
     v.outputTokens < 512 ||
-    v.outputTokens > 4096
+    v.outputTokens > 32768
   )
-    throw new Error("Enter a valid key, model ID and output limit (512-4096).");
+    throw new Error(
+      "Enter a valid key, model ID and output limit (512-32768).",
+    );
   return { key: v.key.trim(), model: v.model, outputTokens: v.outputTokens };
 }
 export function safePath(path: unknown): asserts path is string {
@@ -410,6 +541,7 @@ export function safePath(path: unknown): asserts path is string {
       .some((s) => !s || s === ".." || s === "." || s.startsWith(".")) ||
     /(^|\/)(node_modules|vendor|dist|build|out|coverage)(\/|$)/i.test(path) ||
     /(^|\/)(credentials|secrets?)([./]|$)/i.test(path) ||
+    /(^|\/)AGENTS\.md$/i.test(path) ||
     /\.(pem|key|p12|pfx|sqlite|db)$/i.test(path)
   )
     throw new Error("Unsafe or private file path");

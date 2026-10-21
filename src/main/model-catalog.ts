@@ -7,19 +7,40 @@ export function parseModelCatalog(value: unknown): ModelOption[] {
     !Array.isArray((value as { data?: unknown }).data)
   )
     throw new Error("Nebius returned an invalid model list");
-  const names = new Set<string>();
-  for (const row of (value as { data: unknown[] }).data.slice(0, 500)) {
+  const names = new Map<string, ModelOption>();
+  for (const row of (value as { data: unknown[] }).data) {
     if (!row || typeof row !== "object") continue;
     const id = (row as { id?: unknown }).id;
-    if (typeof id === "string" && /^[\w./:-]{1,160}$/.test(id)) names.add(id);
+    if (typeof id !== "string" || !/^[\w./:-]{1,160}$/.test(id)) continue;
+    const item = row as Record<string, unknown>;
+    const capabilities =
+      item.capabilities && typeof item.capabilities === "object"
+        ? (item.capabilities as Record<string, unknown>)
+        : {};
+    const output =
+      typeof item.max_output_tokens === "number" &&
+      Number.isSafeInteger(item.max_output_tokens)
+        ? item.max_output_tokens
+        : undefined;
+    const option: ModelOption = { id, name: id.split("/").at(-1) || id };
+    const reason =
+      item.type && item.type !== "text2text" && item.type !== "chat"
+        ? "This model does not support chat completions"
+        : /(?:^|[-_/])(embedding|rerank(?:er)?|whisper|text-to-speech|speech-to-text)(?:$|[-_/])/i.test(
+              id,
+            )
+          ? "This model is for a different endpoint and cannot run teammate chat tools"
+          : capabilities.tools === false || capabilities.tool_calls === false
+            ? "This model does not support tool calls"
+            : undefined;
+    if (reason) option.disabledReason = reason;
+    if (output) option.maxOutputTokens = output;
+    if (capabilities.reasoning === true || capabilities.thinking === true)
+      option.supportsThinking = true;
+    names.set(id, option);
   }
   if (!names.size) throw new Error("Nebius returned no selectable models");
-  return [...names]
-    .sort((a, b) => a.localeCompare(b))
-    .map((id) => ({
-      id,
-      name: id.split("/").at(-1) || id,
-    }));
+  return [...names.values()].sort((a, b) => a.id.localeCompare(b.id));
 }
 
 export async function fetchModelCatalog(
@@ -46,7 +67,7 @@ export async function fetchModelCatalog(
       const { value, done } = await reader.read();
       if (done) break;
       size += value.length;
-      if (size > 524288)
+      if (size > 8 * 1024 * 1024)
         throw new Error("Nebius model list exceeds the size limit");
       chunks.push(value);
     }

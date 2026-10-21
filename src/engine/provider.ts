@@ -6,11 +6,14 @@ export type Completion = {
   model?: string;
   system: string;
   input: string;
+  history?: { role: "assistant" | "user"; content: string }[];
   name: string;
   schema: object;
   onUsage?: (usage: ReportedUsage | null) => void;
   onDiagnostic?: (diagnostic: RequestDiagnostic) => void;
   maxOutputTokens?: number;
+  thinking?: "off" | "on";
+  format?: "text";
 };
 export type Model = { complete: (request: Completion) => Promise<unknown> };
 export function nebiusModel(
@@ -42,39 +45,66 @@ export function nebiusModel(
       if (
         !Number.isSafeInteger(maxOutputTokens) ||
         maxOutputTokens < 512 ||
-        maxOutputTokens > 4096
+        maxOutputTokens > 32768
       )
         throw new Error("Invalid output token limit");
+      if (
+        request.history &&
+        (!Array.isArray(request.history) ||
+          request.history.length > 24 ||
+          request.history.some(
+            (turn) =>
+              !turn ||
+              !["assistant", "user"].includes(turn.role) ||
+              typeof turn.content !== "string" ||
+              turn.content.length > 20_000,
+          ))
+      )
+        throw new Error("Invalid model conversation history");
       const body = JSON.stringify({
         model: selectedModel,
         messages: [
           { role: "system", content: request.system },
           { role: "user", content: request.input },
+          ...(request.history || []),
         ],
         store: false,
         stream: false,
         max_tokens: maxOutputTokens,
-        ...(/nemotron[-_]?3[._-]?5[-_]?lightning/i.test(selectedModel)
-          ? { chat_template_kwargs: { enable_thinking: false } }
+        ...(/nemotron[-_]?3(?:[._-]?5[-_]?lightning|[-_]?super)/i.test(
+          selectedModel,
+        )
+          ? {
+              chat_template_kwargs: {
+                enable_thinking: request.thinking === "on",
+              },
+            }
           : {}),
         temperature:
           request.name === "propose_plan" ? planningTemperature : 0.6,
         top_p: 0.95,
         n: 1,
         service_tier: "default",
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: request.name,
-              description: "Return the structured result.",
-              parameters: request.schema,
-            },
-          },
-        ],
-        tool_choice: { type: "function", function: { name: request.name } },
+        ...(request.format === "text"
+          ? {}
+          : {
+              tools: [
+                {
+                  type: "function",
+                  function: {
+                    name: request.name,
+                    description: "Return the structured result.",
+                    parameters: request.schema,
+                  },
+                },
+              ],
+              tool_choice: {
+                type: "function",
+                function: { name: request.name },
+              },
+            }),
       });
-      if (Buffer.byteLength(body) > 100000)
+      if (Buffer.byteLength(body) > 1024 * 1024)
         throw new Error("Request exceeds the input limit");
       const signal = AbortSignal.timeout(90000);
       let httpStatus: number | null = null;
@@ -103,7 +133,7 @@ export function nebiusModel(
           outcome = "http_error";
           await response.body?.cancel();
           throw new Error(
-            `Nebius returned HTTP ${response.status}. Check model access, credits and credentials. No retry was made.`,
+            `Nebius returned HTTP ${response.status}. Check the request diagnostic for the observed status before choosing a recovery action.`,
           );
         }
         if (!response.body) {
@@ -118,7 +148,7 @@ export function nebiusModel(
             const { value, done } = await reader.read();
             if (done) break;
             size += value.length;
-            if (size > 200000) {
+            if (size > 2 * 1024 * 1024) {
               outcome = "response_too_large";
               throw new Error("Provider response exceeds the limit");
             }
@@ -133,9 +163,7 @@ export function nebiusModel(
           value = JSON.parse(rawResponse);
         } catch {
           outcome = "invalid_json";
-          throw new Error(
-            "Provider response was not valid JSON. No retry was made.",
-          );
+          throw new Error("Provider response was not valid JSON.");
         }
         usage = reportedUsage(value.usage);
         try {
@@ -164,8 +192,22 @@ export function nebiusModel(
         if (finishReason === "length") {
           outcome = "incomplete";
           throw new Error(
-            `Nebius stopped at the ${maxOutputTokens}-token output limit before completing the result. No retry was made. Increase the output limit in Run usage and start a new attempt.`,
+            `Nebius stopped at the ${maxOutputTokens}-token output limit before completing the result.`,
           );
+        }
+        if (request.format === "text") {
+          const content = choice?.message?.content;
+          if (
+            finishReason !== "stop" ||
+            choiceCount !== 1 ||
+            typeof content !== "string" ||
+            !content.trim()
+          ) {
+            outcome = "incomplete";
+            throw new Error("Nebius did not complete a conversational reply.");
+          }
+          outcome = "ok";
+          return content.trim();
         }
         const argumentsText =
           finishReason === "tool_calls" &&
@@ -181,7 +223,7 @@ export function nebiusModel(
         if (typeof argumentsText !== "string") {
           outcome = "incomplete";
           throw new Error(
-            `Nebius did not complete the expected structured result (finish: ${finishReason}, tool calls: ${toolCallCount ?? "unknown"}). No retry was made.`,
+            `Nebius did not complete the expected structured result (finish: ${finishReason}, tool calls: ${toolCallCount ?? "unknown"}).`,
           );
         }
         try {
@@ -192,9 +234,7 @@ export function nebiusModel(
           return parsed;
         } catch {
           outcome = "invalid_arguments";
-          throw new Error(
-            "Nebius returned invalid structured arguments. No retry was made.",
-          );
+          throw new Error("Nebius returned invalid structured arguments.");
         }
       } finally {
         const diagnostic: RequestDiagnostic = {

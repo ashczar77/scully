@@ -26,40 +26,41 @@ export type Workspace = {
   activity: import("./team-activity").TeamActivity;
 };
 export type TaskInput = Pick<Task, "title" | "description" | "mode">;
-export type DesktopAPI = import("./runs").RunAPI & {
-  copyText: (text: string) => Promise<void>;
-  load: () => Promise<Workspace>;
-  taskActivity: (id: string) => Promise<Workspace["activity"]>;
-  createTask: (input: TaskInput) => Promise<Task>;
-  updateTask: (id: string, input: TaskInput) => Promise<Task>;
-  deleteTask: (id: string) => Promise<{ deletedRuns: number }>;
-  taskDisposition: (id: string) => Promise<{
-    canDelete: boolean;
-    canArchive: boolean;
-    reason: "in_flight" | "saved_work" | "archived" | null;
-    runCount: number;
-    requestCount: number;
-  }>;
-  archiveTask: (id: string) => Promise<Task & { archivedAt: string }>;
-  restoreTask: (id: string) => Promise<Task>;
-  permanentlyDeleteArchivedTask: (
-    id: string,
-    confirmationTitle: string,
-  ) => Promise<{
-    deletedRuns: number;
-    privateArtifacts: { removed: number; failed: number };
-  }>;
-  updateTeammate: (input: Teammate) => Promise<Teammate>;
-  applyTeamStyle: (
-    style: import("./team-styles").TeamStyleId,
-  ) => Promise<Teammate[]>;
-  saveTeam: (
-    input: import("./fixed-teams").SaveFixedTeamInput,
-  ) => Promise<import("./teams").SavedTeam>;
-  setDefaultTeam: (id: string) => Promise<import("./teams").SavedTeam>;
-  deleteTeam: (id: string) => Promise<import("./teams").SavedTeam>;
-  restoreTeam: (id: string) => Promise<import("./teams").SavedTeam>;
-};
+export type DesktopAPI = import("./runs").RunAPI &
+  import("./pearl-chat").PearlChatAPI & {
+    copyText: (text: string) => Promise<void>;
+    load: () => Promise<Workspace>;
+    taskActivity: (id: string) => Promise<Workspace["activity"]>;
+    createTask: (input: TaskInput) => Promise<Task>;
+    updateTask: (id: string, input: TaskInput) => Promise<Task>;
+    deleteTask: (id: string) => Promise<{ deletedRuns: number }>;
+    taskDisposition: (id: string) => Promise<{
+      canDelete: boolean;
+      canArchive: boolean;
+      reason: "in_flight" | "saved_work" | "archived" | null;
+      runCount: number;
+      requestCount: number;
+    }>;
+    archiveTask: (id: string) => Promise<Task & { archivedAt: string }>;
+    restoreTask: (id: string) => Promise<Task>;
+    permanentlyDeleteArchivedTask: (
+      id: string,
+      confirmationTitle: string,
+    ) => Promise<{
+      deletedRuns: number;
+      privateArtifacts: { removed: number; failed: number };
+    }>;
+    updateTeammate: (input: Teammate) => Promise<Teammate>;
+    applyTeamStyle: (
+      style: import("./team-styles").TeamStyleId,
+    ) => Promise<Teammate[]>;
+    saveTeam: (
+      input: import("./fixed-teams").SaveFixedTeamInput,
+    ) => Promise<import("./teams").SavedTeam>;
+    setDefaultTeam: (id: string) => Promise<import("./teams").SavedTeam>;
+    deleteTeam: (id: string) => Promise<import("./teams").SavedTeam>;
+    restoreTeam: (id: string) => Promise<import("./teams").SavedTeam>;
+  };
 export const initialTeam: Teammate[] = [
   {
     id: "maya",

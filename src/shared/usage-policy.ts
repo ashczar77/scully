@@ -17,17 +17,17 @@ export type UsagePolicyChoice = {
 
 export function requiredCalls(
   run: Pick<Run, "correction" | "redirection"> &
-    Partial<Pick<Run, "coordination">>,
+    Partial<Pick<Run, "coordination" | "planning">>,
   mode: "plan" | "work",
 ) {
   if (run.correction) return 2;
-  const writers = run.coordination?.assignments.length || 2;
+  const writers = run.coordination?.assignments?.length || 2;
   return writers + 1 + (mode === "plan" || run.redirection ? 1 : 0);
 }
 
 export function chooseUsagePolicy(
   run: Pick<Run, "correction" | "redirection"> &
-    Partial<Pick<Run, "coordination">>,
+    Partial<Pick<Run, "coordination" | "planning">>,
   mode: "plan" | "work",
   model: string,
   value: unknown,
@@ -35,8 +35,30 @@ export function chooseUsagePolicy(
   if (!value || typeof value !== "object")
     throw new Error("Invalid usage policy");
   const input = value as UsagePolicyChoice;
+  if (run.planning) {
+    const outputTokens = input.outputTokens as number;
+    const requestCeiling = input.requestCeiling as number;
+    if (
+      input.preset !== "custom" ||
+      !Number.isSafeInteger(outputTokens) ||
+      outputTokens < 512 ||
+      outputTokens > 32768 ||
+      !Number.isSafeInteger(requestCeiling) ||
+      requestCeiling < 0 ||
+      requestCeiling > 10000 ||
+      input.earlyReviews !== false
+    )
+      throw new Error("Invalid collaborative usage policy");
+    return {
+      preset: "custom",
+      model,
+      outputTokens,
+      requestCeiling,
+      earlyReviews: false,
+    };
+  }
   const minimum = requiredCalls(run, mode);
-  const earlyReviewCalls = run.coordination?.assignments.length || 2;
+  const earlyReviewCalls = run.coordination?.assignments?.length || 2;
   const correction = !!run.correction;
   let outputTokens: number;
   let requestCeiling: number;
@@ -77,7 +99,7 @@ export function chooseUsagePolicy(
   if (
     !Number.isSafeInteger(outputTokens) ||
     outputTokens < 512 ||
-    outputTokens > 4096 ||
+    outputTokens > 32768 ||
     !Number.isSafeInteger(requestCeiling) ||
     requestCeiling < minimum + (earlyReviews ? earlyReviewCalls : 0) ||
     requestCeiling > (correction ? 2 : 16) ||
@@ -95,13 +117,22 @@ export function chooseUsagePolicy(
 }
 
 export function defaultUsagePolicy(
-  run: Pick<Run, "correction" | "redirection" | "coordination">,
+  run: Pick<Run, "correction" | "redirection" | "coordination"> &
+    Partial<Pick<Run, "planning">>,
   mode: "plan" | "work",
   model: string,
   outputTokens: number,
 ): UsagePolicy {
+  if (run.planning)
+    return {
+      preset: "custom",
+      model,
+      outputTokens,
+      requestCeiling: 0,
+      earlyReviews: false,
+    };
   const minimum = requiredCalls(run, mode);
-  const writers = run.coordination?.assignments.length || 2;
+  const writers = run.coordination?.assignments?.length || 2;
   const earlyReviews =
     !!run.coordination?.settings?.chunkReviews && !run.correction;
   return {
@@ -121,7 +152,8 @@ export function defaultUsagePolicy(
 export function expandsUsage(old: UsagePolicy, next: UsagePolicy) {
   return (
     next.outputTokens > old.outputTokens ||
-    next.requestCeiling > old.requestCeiling ||
+    (next.requestCeiling === 0 && old.requestCeiling !== 0) ||
+    (old.requestCeiling !== 0 && next.requestCeiling > old.requestCeiling) ||
     (next.earlyReviews && !old.earlyReviews) ||
     (old.model !== "" && next.model !== old.model)
   );

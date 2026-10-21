@@ -1,4 +1,3 @@
-import { characterById } from "./character-catalog";
 import type { Teammate } from "./contracts";
 
 export type MessageRoutingSettings = {
@@ -29,36 +28,6 @@ export function parseMessageRoutingSettings(
   };
 }
 
-const topicWords: Record<string, RegExp> = {
-  "interface-design":
-    /\b(ui|ux|layout|visual|screen|design|typography|spacing|navigation)\b/i,
-  accessibility:
-    /\b(accessibility|keyboard|screen reader|contrast|wcag|aria)\b/i,
-  "system-design":
-    /\b(architecture|schema|scalability|performance|latency|contract|trade.?off)\b/i,
-  "documentation-communications":
-    /\b(documentation|docs|email|stakeholder|policy|terms|announcement)\b/i,
-  "preventive-security":
-    /\b(security|authentication|authorization|auth|session|secret|permission|threat)\b/i,
-  "penetration-testing":
-    /\b(pen.?test|exploit|attack|vulnerability|injection)\b/i,
-  "source-research":
-    /\b(research|source|evidence|citation|literature|compare studies)\b/i,
-  "release-reliability":
-    /\b(release|deploy|rollback|recovery|availability|incident|uptime)\b/i,
-  "product-testing": /\b(tests?|qa|regression|reproduce|edge case|bugs?)\b/i,
-  "independent-audit":
-    /\b(audit|code review|review findings|standards|code smell)\b/i,
-  "full-stack-build":
-    /\b(implement|build|code|api|database|frontend|backend)\b/i,
-};
-
-export function messageMatchesTeammateTopic(text: string, member: Teammate) {
-  return !!characterById(member.id)?.modules.some((module) =>
-    topicWords[module]?.test(text),
-  );
-}
-
 export function routeTeamMessage(
   text: string,
   members: Teammate[],
@@ -78,15 +47,6 @@ export function routeTeamMessage(
       needsChoice: false,
     };
   }
-  const matches = members.filter((member) =>
-    messageMatchesTeammateTopic(text, member),
-  );
-  if (matches.length === 1)
-    return {
-      recipientId: matches[0].id,
-      reason: `${matches[0].name} matches the subject of this question.`,
-      needsChoice: false,
-    };
   const pearl = members.find((member) => member.id === "pearl");
   if (settings.unclear === "pearl" && pearl)
     return {

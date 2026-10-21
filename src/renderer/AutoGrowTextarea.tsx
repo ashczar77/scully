@@ -1,10 +1,17 @@
-import { useLayoutEffect, useRef, type TextareaHTMLAttributes } from "react";
+import {
+  useLayoutEffect,
+  useRef,
+  type RefObject,
+  type TextareaHTMLAttributes,
+} from "react";
 
 export function AutoGrowTextarea({
   value,
+  inputRef,
   ...props
 }: Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "value"> & {
   value: string;
+  inputRef?: RefObject<HTMLTextAreaElement | null>;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   useLayoutEffect(() => {
@@ -15,5 +22,15 @@ export function AutoGrowTextarea({
     element.style.height = `${Math.max(28, Math.min(element.scrollHeight, cap))}px`;
     element.style.overflowY = element.scrollHeight > cap ? "auto" : "hidden";
   }, [value]);
-  return <textarea {...props} ref={ref} value={value} rows={1} />;
+  return (
+    <textarea
+      {...props}
+      ref={(element) => {
+        ref.current = element;
+        if (inputRef) inputRef.current = element;
+      }}
+      value={value}
+      rows={1}
+    />
+  );
 }

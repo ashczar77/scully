@@ -1,0 +1,391 @@
+.pearl-shell {
+  display: flex;
+  width: 100%;
+  height: 100vh;
+  background: #121820;
+  color: #e7eaf0;
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+}
+.pearl-shell button,
+.pearl-shell input,
+.pearl-shell textarea {
+  font: inherit;
+}
+.pearl-shell button {
+  cursor: pointer;
+}
+.pearl-sidebar {
+  width: 258px;
+  min-width: 220px;
+  background: #181f28;
+  border-right: 1px solid #303945;
+  display: flex;
+  flex-direction: column;
+  padding: 22px 13px 13px;
+  gap: 16px;
+}
+.pearl-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 20px;
+  padding: 0 10px;
+}
+.pearl-mark,
+.pearl-welcome-mark {
+  color: #b5a0ff;
+  font-size: 26px;
+}
+.pearl-new {
+  border: 1px solid #56617a;
+  border-radius: 10px;
+  background: #252d3a;
+  color: #f4f2ff;
+  text-align: left;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.pearl-new:hover,
+.pearl-project-button:hover {
+  background: #354050;
+}
+.pearl-sidebar-heading {
+  color: #95a0b0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 3px 10px;
+}
+.pearl-chat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow: auto;
+  flex: 1;
+}
+.pearl-chat-list button,
+.pearl-settings-link {
+  border: 0;
+  color: #cbd3de;
+  background: transparent;
+  border-radius: 8px;
+  text-align: left;
+  padding: 10px 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pearl-chat-list button:hover,
+.pearl-chat-list button.selected,
+.pearl-settings-link:hover {
+  background: #2b3542;
+  color: #fff;
+}
+.pearl-settings-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+.pearl-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.pearl-header {
+  height: 72px;
+  border-bottom: 1px solid #303945;
+  padding: 0 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.pearl-header > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pearl-name {
+  font-size: 18px;
+  font-weight: 650;
+}
+.pearl-header small {
+  color: #9ca9b8;
+}
+.pearl-project-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #d8e2ec;
+  border: 1px solid #404b59;
+  border-radius: 8px;
+  background: #252d38;
+  padding: 9px 12px;
+  max-width: 260px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pearl-scroll {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+.pearl-messages {
+  max-width: 850px;
+  margin: 0 auto;
+  padding: 28px 25px 30px;
+}
+.pearl-welcome {
+  max-width: 700px;
+  margin: 18vh auto 0;
+  text-align: center;
+  padding: 0 20px;
+}
+.pearl-welcome h1 {
+  font-size: 31px;
+  font-weight: 600;
+  margin: 8px 0;
+}
+.pearl-welcome p {
+  color: #aab5c3;
+}
+.pearl-message {
+  margin: 0 0 24px;
+}
+.pearl-speaker {
+  display: block;
+  color: #a8b6c8;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.pearl-message.user {
+  margin-left: auto;
+  background: #283343;
+  padding: 15px 19px;
+  border-radius: 16px;
+  max-width: 80%;
+  width: fit-content;
+}
+.pearl-message.user .pearl-speaker {
+  color: #c2cbda;
+}
+.pearl-message .rich-text > *:first-child {
+  margin-top: 0;
+}
+.pearl-message .rich-text > *:last-child {
+  margin-bottom: 0;
+}
+.pearl-evidence {
+  margin-top: 12px;
+  padding: 9px 11px;
+  border-left: 3px solid #bcafff;
+  color: #c7d1de;
+  background: #202a37;
+  font-size: 12px;
+}
+.pearl-tool,
+.pearl-action {
+  font-size: 12px;
+  color: #9aabbc;
+  margin: 10px 0;
+}
+.pearl-tool summary {
+  cursor: pointer;
+}
+.pearl-tool pre,
+.pearl-card pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 270px;
+  overflow: auto;
+  background: #151c26;
+  padding: 12px;
+  border-radius: 7px;
+}
+.pearl-working {
+  color: #b5a0ff;
+  padding: 10px 0;
+}
+.pearl-working .pearl-stop {
+  margin-left: 12px;
+  border: 1px solid #667388;
+  border-radius: 7px;
+  background: #303a49;
+  color: #f1f3f7;
+  padding: 5px 10px;
+}
+.pearl-card {
+  display: flex;
+  gap: 14px;
+  border: 1px solid #4d5a70;
+  background: #202a37;
+  border-radius: 13px;
+  padding: 18px;
+  margin: 18px 0;
+}
+.pearl-card > div {
+  flex: 1;
+  min-width: 0;
+}
+.pearl-card strong {
+  font-size: 15px;
+}
+.pearl-card p {
+  color: #bbc5d1;
+  line-height: 1.5;
+}
+.pearl-card code {
+  overflow-wrap: anywhere;
+}
+.pearl-card button,
+.pearl-modal button {
+  border: 0;
+  border-radius: 8px;
+  color: #181d26;
+  background: #bcafff;
+  font-weight: 650;
+  padding: 8px 13px;
+  margin-right: 9px;
+}
+.pearl-card button.quiet,
+.pearl-modal button.quiet {
+  color: #e6eaf0;
+  background: #3a4554;
+}
+.pearl-card button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.pearl-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 12px 0;
+}
+.pearl-card form {
+  display: flex;
+  gap: 10px;
+}
+.pearl-card input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid #526074;
+  border-radius: 8px;
+  background: #171f2a;
+  color: #f2f5f8;
+  padding: 9px;
+}
+.pearl-error {
+  color: #ffb8b8;
+  padding: 8px 30px;
+}
+.pearl-composer {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  width: min(850px, calc(100% - 48px));
+  margin: 0 auto;
+  border: 1px solid #4b5669;
+  border-radius: 17px;
+  background: #212b38;
+  padding: 10px 12px;
+}
+.pearl-composer textarea {
+  resize: vertical;
+  min-height: 48px;
+  max-height: 210px;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #f1f4f7;
+  padding: 8px;
+}
+.pearl-composer button {
+  border: 0;
+  border-radius: 9px;
+  background: #bcafff;
+  color: #161a22;
+  width: 37px;
+  height: 37px;
+  display: grid;
+  place-items: center;
+}
+.pearl-composer button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.pearl-footer {
+  text-align: center;
+  color: #8491a0;
+  font-size: 11px;
+  padding: 11px;
+}
+.pearl-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: #000a;
+  display: grid;
+  place-items: center;
+  z-index: 100;
+}
+.pearl-modal {
+  background: #222c39;
+  border: 1px solid #4c5868;
+  border-radius: 16px;
+  padding: 24px;
+  width: min(430px, calc(100% - 35px));
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.pearl-modal h2 {
+  margin: 0;
+}
+.pearl-modal p {
+  color: #aebbc8;
+  margin: 0;
+}
+.pearl-modal label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.pearl-modal input {
+  border: 1px solid #596579;
+  border-radius: 7px;
+  background: #141b25;
+  color: white;
+  padding: 10px;
+}
+.pearl-modal > div {
+  display: flex;
+  justify-content: flex-end;
+}
+@media (max-width: 700px) {
+  .pearl-sidebar {
+    width: 180px;
+    min-width: 180px;
+  }
+  .pearl-messages {
+    padding: 20px 15px;
+  }
+  .pearl-header {
+    padding: 0 14px;
+  }
+  .pearl-composer {
+    width: calc(100% - 25px);
+  }
+}

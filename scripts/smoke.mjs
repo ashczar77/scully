@@ -35,7 +35,7 @@ try {
   app = await launch();
   let page = await app.firstWindow();
   const errors = [];
-  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("pageerror", (error) => errors.push(error.stack || error.message));
   await page
     .getByRole("heading", { name: "What would you like to build?" })
     .waitFor();
@@ -199,6 +199,19 @@ try {
       "conversationAllowance",
       "reviewConversation",
       "approveConversation",
+      "reviewCollaboration",
+      "approveCollaboration",
+      "sendCollaborationMessage",
+      "continueTeammate",
+      "recommendEnvironments",
+      "reviewLocalFallback",
+      "approveLocalFallback",
+      "reviewDispatchProposal",
+      "reconcileCollaboration",
+      "reviewSpecialistDispatch",
+      "approveSpecialistDispatch",
+      "reviewCollaborationSync",
+      "approveCollaborationSync",
       "autoAnswerMessage",
       "rawCaptureStatus",
       "armRawCapture",
@@ -238,6 +251,9 @@ try {
       "selectRunModel",
       "selectDefaultModel",
       "sendPlanningMessage",
+      "answerPlanningQuestion",
+      "answerPlanningQuestions",
+      "approvePlanningPlan",
       "retryPlanning",
       "sendConversationMessage",
       "answerConversationMessage",
@@ -585,27 +601,24 @@ try {
   );
   await page.getByRole("button", { name: "Room", exact: true }).click();
   await page.getByRole("textbox", { name: "Message your team" }).waitFor();
-  await page.evaluate(async () => {
-    const task = (await window.scully.load()).tasks.find(
-      (item) => item.title === "Persistence smoke test",
-    );
-    if (!task) throw new Error("Missing smoke task");
-    const run = (await window.scully.runs(task.id))[0];
-    await window.scully.configureCoordination(run.id, {
-      ownership: "jun checks/",
-      chunkReviews: true,
-    });
-  });
-  await page.getByRole("button", { name: "Task", exact: true }).click();
-  await page.getByRole("button", { name: /6 coordinator requests/ }).waitFor();
-  await page.getByRole("button", { name: "Room", exact: true }).click();
-  await page.getByRole("textbox", { name: "Message your team" }).waitFor();
+  await assert.rejects(
+    page.evaluate(async () => {
+      const task = (await window.scully.load()).tasks.find(
+        (item) => item.title === "Persistence smoke test",
+      );
+      if (!task) throw new Error("Missing smoke task");
+      const run = (await window.scully.runs(task.id))[0];
+      await window.scully.configureCoordination(run.id, {
+        ownership: "jun checks/",
+        chunkReviews: true,
+      });
+    }),
+  );
   const prepared = await page.evaluate(async () => {
     const w = await window.scully.load();
     return (await window.scully.runs(w.tasks[0].id))[0];
   });
-  assert.equal(prepared.coordination.settings.chunkReviews, true);
-  assert.equal(prepared.coordination.rules[0].path, "checks");
+  assert.equal(prepared.planning?.version, 2);
   await assert.rejects(
     page.evaluate((id) => window.scully.startRun(id, false), prepared.id),
   );
@@ -743,7 +756,15 @@ try {
         worker.postMessage(input);
       }),
     {
-      run: { ...snapshot, calls: snapshot.usagePolicy.requestCeiling },
+      run: {
+        ...snapshot,
+        planning: undefined,
+        collaboration: undefined,
+        workspaceMode: undefined,
+        projectWorkspace: undefined,
+        usagePolicy: { ...snapshot.usagePolicy, requestCeiling: 4 },
+        calls: 4,
+      },
       task: {
         id: snapshot.taskId,
         title: "Test",
@@ -772,9 +793,33 @@ try {
     };
     const run = {
       ...snapshot,
+      planning: undefined,
+      collaboration: undefined,
       workspaceMode: undefined,
       projectWorkspace: undefined,
-      coordination: { ...snapshot.coordination },
+      coordination: {
+        ...snapshot.coordination,
+        assignments: [
+          {
+            owner: "maya",
+            scope: "Implementation",
+            status: "ready",
+            summary: "",
+            files: [],
+          },
+          {
+            owner: "jun",
+            scope: "Tests",
+            status: "ready",
+            summary: "",
+            files: [],
+          },
+        ],
+        integrator: "maya",
+        auditor: "ellis",
+        conflicts: [],
+        metrics: { writerWallMs: 0, integrationMs: 0, writerTotalMs: 0 },
+      },
       status: "complete",
       drafts: [
         {
@@ -855,6 +900,7 @@ try {
     db.close();
     return run;
   })();
+  await page.reload();
   await page
     .getByRole("button", { name: "Persistence smoke test", exact: true })
     .click();
@@ -1140,9 +1186,7 @@ try {
   assert(coordinatorCard && coordinatorCard.width > 250);
   await rosterDialog.getByRole("button", { name: /Sloane/ }).click();
   await rosterDialog.getByRole("button", { name: /Tessa/ }).click();
-  await rosterDialog
-    .getByLabel("Builder for current runs")
-    .selectOption("tessa");
+  await rosterDialog.getByLabel("Legacy default builder").selectOption("tessa");
   await rosterDialog.locator(".roster-scroll").evaluate((scroll) => {
     scroll.scrollTop = 0;
   });
@@ -1361,7 +1405,7 @@ try {
     .getByRole("button", { name: "Persistence smoke test", exact: true })
     .click();
   await page.getByRole("button", { name: "Task", exact: true }).click();
-  await page.getByRole("button", { name: /6 coordinator requests/ }).waitFor();
+  await page.getByRole("button", { name: /No lifetime request cap/ }).waitFor();
   const localMetrics = await page.evaluate(() => window.scully.metrics());
   assert(
     localMetrics.events.some(
@@ -1535,8 +1579,9 @@ try {
   );
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "Run usage" }).click();
-  await page.getByRole("button", { name: "Apply Save tokens" }).click();
-  await page.getByText(/Current: Save tokens/).waitFor();
+  await page.getByLabel("Optional request cap").fill("24");
+  await page.getByRole("button", { name: "Save usage limit" }).click();
+  await page.getByText(/User-set cap: 24 model requests/).waitFor();
   await page.getByRole("button", { name: "Room", exact: true }).click();
   await page
     .getByText("Use a command line interface instead", { exact: true })
@@ -1546,9 +1591,7 @@ try {
     await page.getByRole("heading", { name: "Revised plan context" }).count(),
     0,
   );
-  await page
-    .getByRole("button", { name: /1,024 output tokens per request/ })
-    .waitFor();
+  await page.getByRole("button", { name: /24 request cap/ }).waitFor();
   assert.equal(
     await page
       .getByRole("button", { name: "Request plan", exact: true })
@@ -1571,9 +1614,7 @@ try {
     await page.getByRole("heading", { name: "Revised plan context" }).count(),
     0,
   );
-  await page
-    .getByRole("button", { name: /1,024 output tokens per request/ })
-    .waitFor();
+  await page.getByRole("button", { name: /24 request cap/ }).waitFor();
   await page.getByRole("button", { name: "Room", exact: true }).click();
   await page
     .getByText("Use a command line interface instead", { exact: true })
@@ -1589,6 +1630,8 @@ try {
     return { task, run: await window.scully.prepareRun(task.id, null, []) };
   });
   lineupFixture.run.status = "planned";
+  lineupFixture.run.planning = undefined;
+  lineupFixture.run.collaboration = undefined;
   lineupFixture.run.plan =
     "## Overview\nReview **account recovery** before implementation.";
   lineupFixture.run.calls = 1;
@@ -1635,16 +1678,13 @@ try {
     .getByRole("button", { name: "Persistence smoke test", exact: true })
     .click();
   await page.getByRole("button", { name: "Task", exact: true }).click();
-  const draftPlan = page.getByRole("region", { name: "Draft analysis" });
-  await draftPlan.getByRole("button", { name: "Copy Markdown" }).click();
   assert.equal(
-    await app.evaluate(({ clipboard }) => clipboard.readText()),
-    lineupFixture.run.plan,
+    await page.getByRole("region", { name: "Draft analysis" }).count(),
+    0,
   );
-  await draftPlan.getByRole("button", { name: "Copy text" }).click();
   assert.equal(
-    await app.evaluate(({ clipboard }) => clipboard.readText()),
-    "Overview\nReview account recovery before implementation.",
+    await page.getByRole("region", { name: "Full plan" }).count(),
+    0,
   );
   await page.getByRole("button", { name: "Room", exact: true }).click();
   await page.locator(".chat-team-role").first().waitFor();
@@ -1669,7 +1709,31 @@ try {
   await lineupPanel
     .getByRole("button", { name: "Approve team for this plan" })
     .click();
-  await lineupPanel.getByText("Approved selection").waitFor();
+  await page.getByRole("button", { name: "Room", exact: true }).click();
+  await page.getByRole("button", { name: "Task", exact: true }).click();
+  const fullPlan = page.getByRole("region", { name: "Full plan" });
+  await fullPlan.getByRole("button", { name: "Copy Markdown" }).click();
+  assert.equal(
+    await app.evaluate(({ clipboard }) => clipboard.readText()),
+    lineupFixture.run.plan,
+  );
+  await fullPlan.getByRole("button", { name: "Copy text" }).click();
+  assert.equal(
+    await app.evaluate(({ clipboard }) => clipboard.readText()),
+    "Overview\nReview account recovery before implementation.",
+  );
+  const collaborativePanel = page.getByRole("region", {
+    name: "Collaborative build",
+  });
+  await collaborativePanel
+    .getByRole("button", { name: "Review project scope" })
+    .waitFor();
+  assert.equal(
+    await collaborativePanel
+      .getByRole("button", { name: "Review project scope" })
+      .isDisabled(),
+    true,
+  );
   assert.deepEqual(
     (
       await page.evaluate((id) => window.scully.runs(id), lineupFixture.task.id)
@@ -1682,257 +1746,9 @@ try {
       },
     ],
   );
-  assert.deepEqual(
-    (
-      await page.evaluate((id) => window.scully.runs(id), lineupFixture.task.id)
-    )[0].approvedLineup.core,
-    { builderId: "maya", auditorId: "ellis", testerId: "jun" },
-  );
-  await lineupPanel.screenshot({ path: "test-results/lineup-review.png" });
-  await page.evaluate(
-    async ({ id, revision }) => {
-      await window.scully.approveLineup(
-        id,
-        revision,
-        [
-          {
-            id: "sloane",
-            phase: "planning",
-            purpose: "Review first-run usability",
-          },
-        ],
-        true,
-        { builderId: "maya", auditorId: "ellis", testerId: "jun" },
-      );
-      await window.scully.configureSession({
-        key: "fixture-only-key",
-        model: "fixture-model",
-        outputTokens: 1024,
-      });
-    },
-    { id: lineupFixture.run.id, revision: planRevision },
-  );
-  const consultation = page.getByRole("region", {
-    name: "Planning consultations",
+  await collaborativePanel.screenshot({
+    path: "test-results/collaborative-scope.png",
   });
-  await consultation.getByText("Review first-run usability").waitFor();
-  await consultation
-    .getByRole("button", { name: "Review consultation" })
-    .click();
-  await consultation
-    .getByRole("heading", { name: "Approve one read-only consultation" })
-    .waitFor();
-  assert.equal(
-    await consultation
-      .getByRole("button", { name: "Request consultation" })
-      .isEnabled(),
-    false,
-  );
-  await consultation.screenshot({
-    path: "test-results/consultation-review.png",
-  });
-  await consultation.getByRole("button", { name: "Cancel review" }).click();
-  const handoffFixture = await page.evaluate(
-    async ({ taskId, runId }) =>
-      (await window.scully.runs(taskId)).find((run) => run.id === runId),
-    { taskId: lineupFixture.task.id, runId: lineupFixture.run.id },
-  );
-  handoffFixture.consultations = [
-    {
-      id: "offline-planning-advice",
-      specialistId: "sloane",
-      phase: "planning",
-      purpose: "Review first-run usability",
-      planRevision,
-      contextRevision: "offline-context",
-      status: "answered",
-      advice: "Show a clear recovery path for keyboard users.",
-      questions: ["Which recovery policy should apply?"],
-      at: new Date().toISOString(),
-    },
-  ];
-  const handoffDb = new DatabaseSync(join(state, "workspace.sqlite"));
-  handoffDb
-    .prepare("UPDATE runs SET data=? WHERE id=?")
-    .run(JSON.stringify(handoffFixture), handoffFixture.id);
-  handoffDb.close();
-  await page.reload();
-  await page
-    .getByRole("button", { name: "Persistence smoke test", exact: true })
-    .click();
-  await page.getByRole("button", { name: "Task", exact: true }).click();
-  const handoffPanel = page.getByRole("region", {
-    name: "Specialist advice handoff",
-  });
-  await handoffPanel
-    .getByRole("textbox", {
-      name: "Your answer to: Which recovery policy should apply?",
-    })
-    .fill("Use account email recovery.");
-  await handoffPanel
-    .getByRole("button", { name: "Review builder handoff" })
-    .click();
-  await handoffPanel
-    .getByText("Show a clear recovery path for keyboard users.", {
-      exact: false,
-    })
-    .waitFor();
-  assert.equal(
-    await handoffPanel
-      .getByRole("button", { name: "Attach advice" })
-      .isEnabled(),
-    false,
-  );
-  await handoffPanel.screenshot({
-    path: "test-results/advice-handoff-review.png",
-  });
-  await handoffPanel
-    .getByRole("checkbox", {
-      name: "I approve sharing this advice with the builders.",
-    })
-    .check();
-  await handoffPanel.getByRole("button", { name: "Attach advice" }).click();
-  await handoffPanel
-    .getByText("Included in the next builder requests.", { exact: false })
-    .waitFor();
-  assert.equal(
-    (
-      await page.evaluate(
-        async ({ taskId, runId }) =>
-          (await window.scully.runs(taskId)).find((run) => run.id === runId),
-        { taskId: lineupFixture.task.id, runId: handoffFixture.id },
-      )
-    ).approvedAdvice[0].answers[0],
-    "Use account email recovery.",
-  );
-  assert.equal(
-    (
-      await page.evaluate(
-        async ({ taskId, runId }) =>
-          (await window.scully.runs(taskId)).find((run) => run.id === runId),
-        { taskId: lineupFixture.task.id, runId: handoffFixture.id },
-      )
-    ).approvedAdvice.length,
-    1,
-  );
-  await handoffPanel.getByRole("button", { name: "Remove from build" }).click();
-  await handoffPanel
-    .getByRole("button", { name: "Review builder handoff" })
-    .waitFor();
-  await page.evaluate(
-    ({ id, revision }) =>
-      window.scully.approveLineup(
-        id,
-        revision,
-        [
-          {
-            id: "rafi",
-            phase: "building",
-            purpose: "Check recovery architecture",
-          },
-        ],
-        true,
-        { builderId: "maya", auditorId: "ellis", testerId: "jun" },
-      ),
-    { id: handoffFixture.id, revision: planRevision },
-  );
-  const preBuildPanel = page.getByRole("region", {
-    name: "Pre-build consultations",
-  });
-  await preBuildPanel.getByText("Check recovery architecture").waitFor();
-  await preBuildPanel
-    .getByRole("button", { name: "Review consultation" })
-    .click();
-  await preBuildPanel
-    .getByText("Exact task, purpose and plan sent to the model")
-    .waitFor();
-  assert.equal(
-    await preBuildPanel
-      .getByRole("button", { name: "Request consultation" })
-      .isEnabled(),
-    false,
-  );
-  await preBuildPanel.screenshot({
-    path: "test-results/pre-build-consultation-review.png",
-  });
-  await preBuildPanel.getByRole("button", { name: "Cancel review" }).click();
-  const verificationFixture = await page.evaluate(
-    async (taskId) => window.scully.prepareRun(taskId, null, []),
-    lineupFixture.task.id,
-  );
-  verificationFixture.status = "complete";
-  verificationFixture.plan = "Build and review account recovery";
-  verificationFixture.drafts = [
-    { path: "app.ts", content: "export const ready = true;", before: null },
-  ];
-  const draftRevision = createHash("sha256")
-    .update(JSON.stringify([["app.ts", "export const ready = true;"]]))
-    .digest("hex");
-  verificationFixture.coordination.integratedRevision = draftRevision;
-  verificationFixture.coordination.auditedRevision = draftRevision;
-  const verificationPlanRevision = createHash("sha256")
-    .update(
-      JSON.stringify({
-        plan: verificationFixture.plan,
-        files: verificationFixture.files,
-        task: {
-          title: lineupFixture.task.title,
-          description: lineupFixture.task.description,
-        },
-        roster: verificationFixture.teamSnapshot.roster,
-      }),
-    )
-    .digest("hex");
-  verificationFixture.lineupProposal = {
-    planRevision: verificationPlanRevision,
-    suggestions: [],
-    discardedInvalid: false,
-  };
-  verificationFixture.approvedLineup = {
-    planRevision: verificationPlanRevision,
-    entries: [
-      {
-        id: "kiran",
-        phase: "verification",
-        purpose: "Review account recovery boundaries",
-      },
-    ],
-    approvedAt: new Date().toISOString(),
-  };
-  const verificationDb = new DatabaseSync(join(state, "workspace.sqlite"));
-  verificationDb
-    .prepare("UPDATE runs SET data=? WHERE id=?")
-    .run(JSON.stringify(verificationFixture), verificationFixture.id);
-  verificationDb.close();
-  await page.reload();
-  await page
-    .getByRole("button", { name: "Persistence smoke test", exact: true })
-    .click();
-  await page.getByRole("button", { name: "Task", exact: true }).click();
-  const verificationPanel = page.getByRole("region", {
-    name: "Draft verification consultations",
-  });
-  await verificationPanel
-    .getByText("Review account recovery boundaries")
-    .waitFor();
-  await verificationPanel
-    .getByRole("button", { name: "Review consultation" })
-    .click();
-  await verificationPanel
-    .getByText("export const ready = true;", { exact: false })
-    .waitFor();
-  assert.equal(
-    await verificationPanel
-      .getByRole("button", { name: "Request consultation" })
-      .isEnabled(),
-    false,
-  );
-  await verificationPanel.screenshot({
-    path: "test-results/verification-consultation-review.png",
-  });
-  await verificationPanel
-    .getByRole("button", { name: "Cancel review" })
-    .click();
   const permanentDeleteJourney = await page.evaluate(async () => {
     const task = await window.scully.createTask({
       title: "Disposable archive check",
@@ -1975,8 +1791,41 @@ try {
   assert.equal(permanentDeleteJourney.otherRetained, true);
   assert.equal(permanentDeleteJourney.runsRemoved, true);
   assert.equal(permanentDeleteJourney.otherActivity, 0);
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "App & connection" }).click();
+  const sandboxSettings = page.getByRole("region", {
+    name: "Sandbox connection",
+  });
+  await sandboxSettings.waitFor();
+  if (!(await sandboxSettings.getByText("Sandbox connection saved").count())) {
+    await sandboxSettings
+      .getByLabel("Sandbox project ID")
+      .fill("aiproject-fixture");
+    await sandboxSettings
+      .getByLabel("Sandbox API key")
+      .fill("fixture-only-key");
+    await sandboxSettings
+      .getByRole("button", { name: "Use for this app session" })
+      .click();
+  }
+  await sandboxSettings.getByText("Sandbox connection saved").waitFor();
+  const sandboxBannerGap = await sandboxSettings.evaluate((section) => {
+    const banner = section.querySelector(".settings-save-banner");
+    const form = section.querySelector(".sandbox-connection-form");
+    if (!banner || !form) return -1;
+    return (
+      form.getBoundingClientRect().top - banner.getBoundingClientRect().bottom
+    );
+  });
+  assert(
+    sandboxBannerGap >= 12,
+    "Sandbox saved banner needs space before the form",
+  );
+  await sandboxSettings.screenshot({
+    path: "test-results/sandbox-connection-saved.png",
+  });
   console.log(
-    "PASS: desktop launch, renderer isolation, both project intakes, usage preset and cost budget persistence, upload approval, source preservation, offline coordinator, specialist lineup, planning/pre-build/draft consultation and advice handoff review, command review/stale rejection/restart expiry, local fixture execution with fresh permission and persisted results, fixed roster, activity and team persistence. No live provider request.",
+    "PASS: desktop launch, renderer isolation, both project intakes, usage and cost settings, upload review, source preservation, offline planning, lineup approval, collaborative scope controls, command review and restart expiry, local fixture execution with fresh permission and persisted results, roster, activity, archive deletion and team persistence. No live provider or Sandbox request.",
   );
 } finally {
   if (app) await app.close();

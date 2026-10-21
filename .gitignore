@@ -25,3 +25,16 @@ coverage/
 /AI_PROBLEM_INVENTORY.local.md
 /AGENT_WORKSPACE_PLAN.local.md
 /CLEAN_START_REVIEW.local.md
+
+# Local engineering research, retained outside the published project
+/docs/conversation-engineering-standard.md
+/docs/collaboration-product-standard.md
+/docs/scully-agent-architecture-research-audit.md
+/docs/pearl-connected-acceptance-gate.md
+/docs/pearl-connected-baseline-findings.md
+/docs/pearl-coding-agent-source-comparison.md
+/docs/pearl-solo-delivery.md
+/docs/orchestration-rule-inventory.md
+
+# Local pre-Pearl snapshot includes unpublished research documents
+/legacy/garbage/2026-10-20-pre-pearl-chat/working-tree.tar.gz

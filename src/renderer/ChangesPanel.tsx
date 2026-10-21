@@ -180,6 +180,69 @@ export function ChangesPanel({
           </button>
         )}
       </header>
+      {run?.collaboration && (
+        <section className="git-run-diffs" aria-label="Sandbox checkpoints">
+          <h3>
+            {run.collaboration.scope.mode === "sandbox"
+              ? "Sandbox checkpoints"
+              : "Local-only checkpoints"}
+          </h3>
+          <p>
+            These are workspace revisions. Git commits below come from the
+            selected local folder.
+          </p>
+          {run.collaboration.checkpoints.slice(1).map((point) => {
+            const parent = run.collaboration?.checkpoints.find(
+              (item) => item.id === point.parentId,
+            );
+            const oldFiles = new Map(
+              parent?.files.map((file) => [file.path, file.content]) || [],
+            );
+            const changed = point.files.filter(
+              (file) => oldFiles.get(file.path) !== file.content,
+            );
+            return (
+              <details key={point.id}>
+                <summary>
+                  {point.actor} · {point.status} · {point.id.slice(0, 12)} ·{" "}
+                  {changed.length} changed files
+                </summary>
+                <p>
+                  Parent {point.parentId?.slice(0, 12) || "none"} · image{" "}
+                  {point.imageId || "local or pending"}
+                </p>
+                {point.importedIds.length > 0 && (
+                  <p>
+                    Imported{" "}
+                    {point.importedIds.map((id) => id.slice(0, 12)).join(", ")}
+                  </p>
+                )}
+                {changed.map((file) => (
+                  <details key={file.path}>
+                    <summary>{file.path}</summary>
+                    <div className="diff-columns">
+                      <section>
+                        <h4>Before</h4>
+                        <pre>{oldFiles.get(file.path) ?? "(New file)"}</pre>
+                      </section>
+                      <section>
+                        <h4>After</h4>
+                        <pre>{file.content}</pre>
+                      </section>
+                    </div>
+                  </details>
+                ))}
+                {point.checks.map((check) => (
+                  <p key={check.id}>
+                    {check.command} {check.args.join(" ")} · {check.status} ·
+                    exit {check.exitCode ?? "unknown"}
+                  </p>
+                ))}
+              </details>
+            );
+          })}
+        </section>
+      )}
       {!loaded || (run?.projectWorkspace && !history) ? (
         <p role="status">Loading project history...</p>
       ) : !run?.projectWorkspace || history?.state === "no-project" ? (

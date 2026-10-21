@@ -6,18 +6,11 @@ import { makeCoordination, requestLimit } from "../shared/coordination";
 import { runRole } from "../shared/teams";
 import { bindRunTeam } from "./character-context";
 import { characterById, characterCatalog } from "../shared/character-catalog";
-import { messageMatchesTeammateTopic } from "../shared/message-routing";
 import { parseSpecialistSuggestions } from "../shared/lineup-proposal";
 import {
   planQuestions,
   planningTurnContext,
-  repeatsAnsweredQuestion,
-  samePlanText,
-  echoesConsultationQuestion,
-  userAuthorizedSpecialistConsultation,
   cleanPlanningText,
-  coordinatorReply,
-  asksForResolvedChoices,
 } from "../shared/plan-conversation";
 import { applyCoreLineup, parseCoreProposal } from "../shared/core-lineup";
 import { integrate, snapshotRevision } from "./integration";
@@ -30,6 +23,7 @@ import type { Model } from "./provider";
 import { whileRequest } from "./progress";
 import { parseSuggestions } from "../shared/suggestions";
 import type { RequestPauseGate } from "./request-pause";
+import { executePlanningV2 } from "./planning-v2";
 const object = (properties: object, required: string[]) => ({
   type: "object",
   properties,
@@ -93,6 +87,8 @@ export async function executeLoop(
   emit: (run: Run) => void,
   pauseGate?: RequestPauseGate,
 ): Promise<Run> {
+  if (run.planning && !run.plan && !run.correction)
+    return executePlanningV2(run, task, team, model, emit, pauseGate);
   const next = structuredClone(run);
   team = bindRunTeam(team, next.teamSnapshot?.roster);
   if (next.approvedLineup?.core) {
@@ -256,16 +252,6 @@ export async function executeLoop(
           )
         : object({ plan: string, roomMessage: string }, ["plan"]);
       const turn = planningTurnContext(next);
-      const buildRequests = next.coordination
-        ? next.coordination.assignments.length +
-          1 +
-          (next.coordination.settings?.chunkReviews
-            ? next.coordination.assignments.length
-            : 0)
-        : 2;
-      const planningRequestLimit = next.usagePolicy
-        ? Math.max(1, requestLimit(next) - buildRequests)
-        : requestLimit(next);
       const planningContext = coordinator
         ? JSON.stringify({
             ...JSON.parse(context),
@@ -301,7 +287,7 @@ export async function executeLoop(
         : context;
       let result = (await call(
         planner.id,
-        `${safety} ${coordinator ? "You are Pearl, the project coordinator in an ongoing conversation. Write roomMessage as your actual reply to the user now: address them as you, acknowledge their latest answer, say what it changes, and lead naturally into any remaining choices. Do not say 'the user wants', repeat a task brief, or expose internal plan headings. Keep it to one or two short paragraphs. If the plan includes open questions, ask those questions naturally in roomMessage. Do not repeat a question within that message. If there are no open questions, answer the user's latest question or acknowledge the decision and explain the next step. The plan field is a separate draft artifact, not your spoken reply. The conversation field includes the recent user and Pearl turns in order. Respond to latestUserMessage as ordinary language, including follow-up questions, corrections, and unnumbered answers. answeredChoices is only an optional hint for explicitly numbered replies, never the sole source of decisions. Infer settled choices from the full conversation and prior plan. Incorporate those answers into the revised plan. Do not repeat a question that the user answered. If an answer is ambiguous, ask one narrower follow-up that acknowledges what they said. Prepare a reviewable draft, but do not finalize it while essential product choices remain unanswered. Begin the plan with a ## Conversation Summary containing one or two complete, natural sentences in your own voice. Ask only essential open product questions in ## User Decisions Required. Ask at most two questions per turn, and only about outcome-changing, security or data-boundary, or hard-to-reverse choices. Treat reversible UI and implementation details as draft assumptions. Write each unresolved choice as a complete direct question ending with a question mark, with a reasonable default where useful. Never list a confirmed choice as a question; put confirmed choices in another section. Omit User Decisions Required when the user's replies resolved the choices. If a teammate's expertise would materially improve this particular user turn, request one consultation using their saved member ID and a focused question; otherwise return null. For specialists, the question must relate directly to latestUserMessage; do not consult a specialist for an older or generic task concern. If specialistConsultationPolicy is ask, ask the user in your Conversation Summary whether you may ask that named specialist and wait for their answer before requesting the consultation. Never request a general review of a draft that has not been built. Do not consult to decide a product preference that the user must answer. Before the user chooses a technology, describe that part without presuming a choice. Do not discuss or choose the team while questions remain; return suggestedTeam as null. Once choices are resolved, recommend exactly one builder and independent auditor, plus one tester or null, using availableTeamRoles. You coordinate the team and do not personally write code; refer to Maya, Jun, and Ellis by their assigned roles, and describe your next action as handing work to them once approved. Do not claim tests passed. Do not invent prices, hours, or an approved budget. A local profile name or copy-paste UUID is not secure authentication; when the user asks for real accounts, ask about the identity provider and data boundary rather than inventing security." : "You are the planner. Write roomMessage as a concise direct reply to the user."} ${planner.instructions} If redirection is present, the previous plan is reference material, not a reply to repeat. Newer user messages supersede incompatible old requirements.`,
+        `${safety} ${coordinator ? "You are Pearl, the project coordinator in an ongoing conversation. Write roomMessage as your actual reply to the user now: address them as you, acknowledge their latest answer, say what it changes, and lead naturally into any remaining choices. Do not say 'the user wants', repeat a task brief, or expose internal plan headings. Keep it to one or two short paragraphs. If the plan includes open questions, ask those questions naturally in roomMessage. Do not repeat a question within that message. If there are no open questions, answer the user's latest question or acknowledge the decision and explain the next step. The plan field is a separate draft artifact, not your spoken reply. The conversation field includes the recent user and Pearl turns in order. Respond to latestUserMessage as ordinary language, including follow-up questions, corrections, and unnumbered answers. Infer settled choices from the full conversation and prior plan. Incorporate those answers into the revised plan. Do not repeat a question that the user answered. If an answer is ambiguous, ask one narrower follow-up that acknowledges what they said. Prepare a reviewable draft, but do not finalize it while essential product choices remain unanswered. Begin the plan with a ## Conversation Summary containing one or two complete, natural sentences in your own voice. Ask only essential open product questions in ## User Decisions Required. Ask at most two questions per turn, and only about outcome-changing, security or data-boundary, or hard-to-reverse choices. Treat reversible UI and implementation details as draft assumptions. Write each unresolved choice as a complete direct question ending with a question mark, with a reasonable default where useful. Never list a confirmed choice as a question; put confirmed choices in another section. Omit User Decisions Required when the user's replies resolved the choices. If a teammate's expertise would materially improve this particular user turn, request one consultation using their saved member ID and a focused question; otherwise return null. For specialists, the question must relate directly to latestUserMessage; do not consult a specialist for an older or generic task concern. If specialistConsultationPolicy is ask, ask the user in your Conversation Summary whether you may ask that named specialist and wait for their answer before requesting the consultation. Never request a general review of a draft that has not been built. Do not consult to decide a product preference that the user must answer. Before the user chooses a technology, describe that part without presuming a choice. Do not discuss or choose the team while questions remain; return suggestedTeam as null. Once choices are resolved, recommend exactly one builder and independent auditor, plus one tester or null, using availableTeamRoles. You coordinate the team and do not personally write code; refer to Maya, Jun, and Ellis by their assigned roles, and describe your next action as handing work to them once approved. Do not claim tests passed. Do not invent prices, hours, or an approved budget. A local profile name or copy-paste UUID is not secure authentication; when the user asks for real accounts, ask about the identity provider and data boundary rather than inventing security." : "You are the planner. Write roomMessage as a concise direct reply to the user."} ${planner.instructions} If redirection is present, the previous plan is reference material, not a reply to repeat. Newer user messages supersede incompatible old requirements.`,
         "propose_plan",
         plannerSchema,
         planningContext,
@@ -334,25 +320,8 @@ export async function executeLoop(
       const specialist =
         member && characterById(member.id)?.role === "specialist";
       const consultationAllowed =
-        !specialist ||
-        (next.planningConsultationPolicy === "ask"
-          ? userAuthorizedSpecialistConsultation(
-              turn.latestUserMessage,
-              next.redirection?.previousPlan || "",
-              member!.name,
-            )
-          : messageMatchesTeammateTopic(turn.latestUserMessage, member!));
-      if (
-        coordinator &&
-        member &&
-        consultationAllowed &&
-        next.calls + 2 <= planningRequestLimit
-      ) {
-        event(
-          coordinator.id,
-          `${member.name}, could you look at this for me? ${request!.question.trim()}`,
-        );
-        event(member.id, "On it, Pearl. I'll check and report back.");
+        !specialist || next.planningConsultationPolicy !== "ask";
+      if (coordinator && member && consultationAllowed) {
         let advice = (await call(
           member.id,
           `${safety} You are ${member.name}. Give focused, read-only advice for Pearl's planning question. The user's choices in task.conversation are settled unless the user changes them. Do not substitute your own product preference for an explicit user choice. Do not write code, run commands, or claim checks were performed. ${member.instructions}`,
@@ -369,31 +338,6 @@ export async function executeLoop(
           advice.advice.length > 5000
         )
           throw new Error("Invalid teammate planning advice");
-        if (echoesConsultationQuestion(advice.advice, request!.question)) {
-          if (next.calls >= requestLimit(next))
-            throw new Error(
-              "Teammate repeated the question instead of answering it",
-            );
-          advice = (await call(
-            member.id,
-            `${safety} You are ${member.name}. Your previous response only repeated Pearl's question. Answer it with specific, useful advice in your own words. Do not repeat the assignment. ${member.instructions}`,
-            "propose_plan",
-            object({ advice: string }, ["advice"]),
-            JSON.stringify({
-              task: planningContext,
-              question: request!.question,
-            }),
-          )) as { advice?: unknown };
-          if (
-            typeof advice?.advice !== "string" ||
-            !advice.advice.trim() ||
-            advice.advice.length > 5000 ||
-            echoesConsultationQuestion(advice.advice, request!.question)
-          )
-            throw new Error(
-              "Teammate repeated the question instead of answering it",
-            );
-        }
         event(member.id, advice.advice);
         result = (await call(
           coordinator.id,
@@ -414,52 +358,6 @@ export async function executeLoop(
         )
           throw new Error("Invalid revised plan response");
       }
-      if (coordinator && next.redirection?.previousPlan) {
-        const previousPlan = next.redirection.previousPlan;
-        const revisionIssue = (candidate: typeof result) => {
-          if (typeof candidate?.plan !== "string" || !candidate.plan.trim())
-            return "The revised draft was empty.";
-          if (
-            !turn.latestUserMessage.includes("?") &&
-            samePlanText(candidate.plan, previousPlan)
-          )
-            return "The draft was unchanged after your message.";
-          if (asksForResolvedChoices(candidate.plan))
-            return "The draft listed settled choices as open questions.";
-          if (
-            repeatsAnsweredQuestion(
-              candidate.plan,
-              previousPlan,
-              turn.latestUserMessage,
-            )
-          )
-            return "The draft repeated a question you answered.";
-          return "";
-        };
-        let issue = revisionIssue(result);
-        for (
-          let repair = 0;
-          issue && repair < 2 && next.calls < planningRequestLimit;
-          repair++
-        ) {
-          result = (await call(
-            coordinator.id,
-            `${safety} You are Pearl, the coordinator. Correct the draft once using the full conversation and latestUserMessage. The problem is: ${issue} Answer the user's actual message, including unnumbered replies and questions, instead of repeating old questions. Keep roomMessage concise and do not claim to be the builder. ${coordinator.instructions}`,
-            "propose_plan",
-            plannerSchema,
-            JSON.stringify({
-              ...JSON.parse(planningContext),
-              rejectedDraft: result.plan,
-              revisionIssue: issue,
-            }),
-          )) as typeof result;
-          issue = revisionIssue(result);
-        }
-        if (issue)
-          throw new Error(
-            `Pearl did not reflect your latest message in the plan. ${issue} Your message is saved; ask Pearl to try again or add a clarification.`,
-          );
-      }
       next.plan = cleanPlanningText(result.plan);
       if (!next.plan) throw new Error("Invalid plan response");
       next.planReply =
@@ -467,12 +365,7 @@ export async function executeLoop(
         result.roomMessage.trim() &&
         result.roomMessage.length <= 2000 &&
         !/[\x00-\x08\x0b-\x1f\x7f]/.test(result.roomMessage)
-          ? coordinator
-            ? coordinatorReply(
-                result.roomMessage,
-                planQuestions(next.plan).length === 0,
-              )
-            : cleanPlanningText(result.roomMessage)
+          ? cleanPlanningText(result.roomMessage)
           : undefined;
       if (coordinator && planQuestions(result.plan).length === 0) {
         const parsed = parseSpecialistSuggestions(result.suggestedSpecialists);

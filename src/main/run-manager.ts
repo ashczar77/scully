@@ -21,6 +21,16 @@ import {
 } from "../shared/role-models";
 import { fetchModelCatalog } from "./model-catalog";
 import { planQuestions } from "../shared/plan-conversation";
+import {
+  approvePlan,
+  approveStaffing,
+  initialPlanningState,
+  pendingPlanningQuestions,
+  recordPlanningTurn,
+  type PlanningQuestionAnswer,
+  type PlanningQuestionAnswerSet,
+} from "../shared/planning-state";
+import { characterCatalog } from "../shared/character-catalog";
 import { validUsageStart, type UsageStart } from "../shared/usage";
 import type { UsageAlert } from "../shared/usage-alerts";
 import {
@@ -101,6 +111,9 @@ function sourceForNextAttempt(parent: Run) {
   return [...files].map(([path, content]) => ({ path, content }));
 }
 export class RunManager {
+  collaborationSession() {
+    return this.config && { ...this.config };
+  }
   private config: SessionConfig | null = null;
   private modelCatalog: ModelOption[] = [];
   private selection: SourceSelection | null = null;
@@ -230,7 +243,9 @@ export class RunManager {
   setRoleModelSettings(value: unknown): RoleModelSettings {
     const settings = parseRoleModelSettings(value);
     const allowed = new Set([
-      ...this.modelCatalog.map((option) => option.id),
+      ...this.modelCatalog
+        .filter((option) => !option.disabledReason)
+        .map((option) => option.id),
       ...Object.values(defaultRoleModelSettings).filter(
         (item): item is string => typeof item === "string",
       ),
@@ -245,6 +260,17 @@ export class RunManager {
     ])
       if (!allowed.has(model))
         throw new Error("Choose a model from the Nebius model list");
+    for (const [actor, preset] of Object.entries(settings.thinking || {})) {
+      const model =
+        actor in settings.specialists
+          ? settings.specialists[actor]
+          : settings[actor as "pearl" | "builder" | "tester" | "auditor"];
+      if (
+        preset === "on" &&
+        !/nemotron[-_]?3(?:[._-]?5[-_]?lightning|[-_]?super)/i.test(model)
+      )
+        throw new Error(`Thinking is not supported for ${model}`);
+    }
     return this.store.setRoleModelSettings(settings);
   }
   async listModels() {
@@ -817,6 +843,28 @@ export class RunManager {
     if (this.active || this.activeReply || this.activeConsult)
       throw new Error("Wait for active work to finish");
     const run = this.store.getRun(id);
+    if (run.planning) {
+      if (run.status !== "planned" || !run.planning.proposal)
+        throw new Error("No current team proposal is awaiting review");
+      const task = this.store
+        .load()
+        .tasks.find((item) => item.id === run.taskId);
+      if (!task || revision !== lineupPlanRevision(run, task))
+        throw new Error("Plan or task changed. Review the team again");
+      run.planning = approveStaffing(
+        run.planning,
+        revision as string,
+        entries,
+        characterCatalog.map((person) => person.id),
+      );
+      run.events.push({
+        actor: "system",
+        at: new Date().toISOString(),
+        text: "The assignment set is approved. Review each teammate's environment and project scope before starting.",
+      });
+      this.save(run);
+      return run;
+    }
     if (run.status !== "planned" || !run.lineupProposal)
       throw new Error("No planned specialist lineup is awaiting review");
     if (planQuestions(run.plan).length)
@@ -1436,7 +1484,7 @@ export class RunManager {
     if (!task) throw new Error("Task not found");
     if (
       !Array.isArray(paths) ||
-      paths.length > 100 ||
+      paths.length > 20_000 ||
       paths.some((p) => typeof p !== "string") ||
       new Set(paths).size !== paths.length
     )
@@ -1480,6 +1528,9 @@ export class RunManager {
           ? []
           : this.selection!.files.filter((f) => paths.includes(f.path)),
       status: "prepared",
+      ...((task.mode === "plan" || workspaceMode === "direct") && {
+        planning: initialPlanningState(),
+      }),
       events: [],
       plan: "",
       drafts: [],
@@ -1490,13 +1541,18 @@ export class RunManager {
       model: this.store.roleModelSettings().pearl,
       roleModels: this.store.roleModelSettings(),
       outputTokens: 0,
-      coordination: makeCoordination(assignedTeam.members),
+      ...(task.mode !== "plan" &&
+        workspaceMode !== "direct" && {
+          coordination: makeCoordination(assignedTeam.members),
+        }),
     };
     run.usagePolicy = defaultUsagePolicy(
       run,
       task.mode,
       run.model,
-      this.config?.outputTokens || 2048,
+      run.planning
+        ? Math.max(this.config?.outputTokens || 2048, 8192)
+        : this.config?.outputTokens || 2048,
     );
     this.store.saveRun(run);
     return run;
@@ -1905,9 +1961,7 @@ export class RunManager {
         ? [
             {
               from: "Pearl",
-              text: [parent.planReply, ...planQuestions(parent.plan)].join(
-                "\n",
-              ),
+              text: parent.planReply,
             },
           ]
         : parent.plan
@@ -1915,8 +1969,12 @@ export class RunManager {
               {
                 from: "Pearl",
                 text:
-                  [...planQuestions(parent.plan)].join("\n") ||
-                  parent.plan.slice(0, 1000),
+                  (parent.planning
+                    ? pendingPlanningQuestions(parent.planning).map(
+                        (item) => item.text,
+                      )
+                    : planQuestions(parent.plan)
+                  ).join("\n") || parent.plan.slice(0, 1000),
               },
             ]
           : []),
@@ -1938,8 +1996,16 @@ export class RunManager {
         parent.projectWorkspace && structuredClone(parent.projectWorkspace),
       files: sourceForNextAttempt(parent),
       status: "prepared",
+      planning: parent.planning
+        ? {
+            ...structuredClone(parent.planning),
+            proposal: undefined,
+            approved: undefined,
+          }
+        : initialPlanningState(),
       events: [],
       plan: "",
+      planningDraft: parent.planningDraft || parent.plan || "",
       drafts: [],
       findings: [],
       checks: [],
@@ -1955,8 +2021,12 @@ export class RunManager {
       ),
       redirection: {
         parentId: parent.id,
-        instructions: [...instructions],
-        previousPlan: parent.plan || parent.redirection?.previousPlan || "",
+        instructions: instructions.slice(-20),
+        previousPlan:
+          parent.planningDraft ||
+          parent.plan ||
+          parent.redirection?.previousPlan ||
+          "",
         previousDrafts: structuredClone(
           parent.drafts.length
             ? parent.drafts
@@ -1969,7 +2039,7 @@ export class RunManager {
       child,
       "plan",
       this.modelFor(parent),
-      this.config?.outputTokens || 2048,
+      Math.max(this.config?.outputTokens || 2048, 8192),
     );
     parent.redirectedTo = child.id;
     parent.status = "stopped";
@@ -2017,6 +2087,7 @@ export class RunManager {
       );
     if (
       input.intent === "replan" &&
+      !parent.planning &&
       (parent.redirection?.instructions.length || 0) >= 20
     )
       throw new Error(
@@ -2053,7 +2124,7 @@ export class RunManager {
       throw new Error("Wait for the active request to finish");
     const run = this.store.getRun(id);
     const task = this.store.load().tasks.find((item) => item.id === run.taskId);
-    if (!task || task.mode !== "plan" || run.redirectedTo)
+    if (!task || !run.planning || run.redirectedTo)
       throw new Error("This task cannot receive a planning message");
     if (
       !["prepared", "planned"].includes(run.status) &&
@@ -2074,6 +2145,134 @@ export class RunManager {
     // turn. Build, commands, and applying changes stay separately approved.
     return this.start(next.id, true);
   }
+  answerPlanningQuestion(id: unknown, value: unknown): Run {
+    const answer = value as PlanningQuestionAnswer;
+    return this.answerPlanningQuestions(id, {
+      answers: [{ ...answer, note: undefined }],
+      note: answer?.note,
+    });
+  }
+  answerPlanningQuestions(id: unknown, value: unknown): Run {
+    if (!this.config) throw new Error("Connect Nebius before messaging Pearl");
+    if (this.active || this.activeReply || this.activeConsult)
+      throw new Error("Wait for the active request to finish");
+    const run = this.store.getRun(id);
+    if (!run.planning || run.redirectedTo || run.status !== "planned")
+      throw new Error("This planning question is no longer current");
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      throw new Error("Choose answers to Pearl's questions");
+    const input = value as PlanningQuestionAnswerSet;
+    const pending = pendingPlanningQuestions(run.planning);
+    if (
+      !Array.isArray(input.answers) ||
+      !pending.length ||
+      input.answers.length !== pending.length ||
+      new Set(input.answers.map((answer) => answer?.questionId)).size !==
+        pending.length
+    )
+      throw new Error("Answer every question before sending the set");
+    const answers = input.answers.map((choice) => {
+      const answerInput = choice as PlanningQuestionAnswer;
+      const question = pending.find(
+        (item) => item.id === answerInput?.questionId,
+      );
+      if (!question || question.askedAt !== answerInput.askedAt)
+        throw new Error("This planning question is no longer current");
+      const selectedOption =
+        Number.isInteger(answerInput.optionIndex) &&
+        typeof answerInput.optionIndex === "number" &&
+        answerInput.optionIndex >= 0 &&
+        answerInput.optionIndex < (question.options?.length || 0)
+          ? question.options![answerInput.optionIndex]
+          : null;
+      const custom =
+        typeof answerInput.customAnswer === "string"
+          ? answerInput.customAnswer.trim()
+          : "";
+      if (
+        (answerInput.optionIndex !== undefined && selectedOption === null) ||
+        (answerInput.customAnswer !== undefined &&
+          typeof answerInput.customAnswer !== "string") ||
+        (selectedOption === null) === !custom ||
+        custom.length > 1000 ||
+        /[\x00-\x08\x0b-\x1f\x7f]/.test(custom) ||
+        answerInput.note !== undefined
+      )
+        throw new Error("Choose one option or write your own answer");
+      return {
+        questionId: question.id,
+        question: question.text,
+        answer: selectedOption || custom,
+      };
+    });
+    const note = input.note === undefined ? "" : input.note;
+    if (
+      typeof note !== "string" ||
+      note.length > 900 ||
+      /[\x00-\x08\x0b-\x1f\x7f]/.test(note)
+    )
+      throw new Error("Keep the additional message under 900 characters");
+    const text =
+      (answers.length === 1
+        ? answers[0].answer
+        : answers
+            .map(({ question, answer }) => `${question}\n${answer}`)
+            .join("\n\n")) + (note.trim() ? `\n\n${note.trim()}` : "");
+    const next = this.sendTeamMessage(run.id, { text, intent: "replan" });
+    next.planning = recordPlanningTurn(next.planning!, {
+      resolvedAnswers: answers.map(({ questionId, answer }) => ({
+        questionId,
+        answer,
+      })),
+    });
+    next.redirection!.directQuestionAnswers = answers.map(
+      ({ questionId, answer }) => ({ questionId, answer }),
+    );
+    if (note.trim()) next.redirection!.directQuestionNote = note.trim();
+    if (answers.length === 1)
+      next.redirection!.directQuestionAnswer = {
+        questionId: answers[0].questionId,
+        answer: answers[0].answer,
+        ...(note.trim() && { note: note.trim() }),
+      };
+    next.planningConsultationPolicy =
+      this.store.messageRoutingSettings().specialistConsultation;
+    this.save(next);
+    return this.start(next.id, true);
+  }
+  approvePlanningPlan(id: unknown, revision: unknown, approved: unknown): Run {
+    if (approved !== true)
+      throw new Error("Explicit plan approval is required");
+    if (!this.config) throw new Error("Connect Nebius before messaging Pearl");
+    if (this.active || this.activeReply || this.activeConsult)
+      throw new Error("Wait for the active request to finish");
+    const run = this.store.getRun(id);
+    const task = this.store.load().tasks.find((item) => item.id === run.taskId);
+    if (
+      !task ||
+      run.status !== "planned" ||
+      run.redirectedTo ||
+      !run.planning ||
+      !run.plan ||
+      run.planning.planReview?.approvedAt ||
+      revision !== lineupPlanRevision(run, task)
+    )
+      throw new Error("Review the current plan before approving it");
+    run.planning = approvePlan(run.planning, revision as string);
+    this.save(run);
+    const next = this.preparePlanningRevision(
+      run,
+      task,
+      [
+        ...(run.redirection?.instructions || []),
+        "The user approved this plan. Propose a team for the approved plan.",
+      ],
+      new Date().toISOString(),
+    );
+    next.redirection!.approvedPlanRevision = revision as string;
+    this.save(next);
+    return this.start(next.id, true);
+  }
   retryPlanning(id: unknown): Run {
     if (!this.config) throw new Error("Connect Nebius before messaging Pearl");
     if (this.active || this.activeReply || this.activeConsult)
@@ -2084,7 +2283,7 @@ export class RunManager {
       .tasks.find((item) => item.id === parent.taskId);
     if (
       !task ||
-      task.mode !== "plan" ||
+      !parent.planning ||
       parent.status !== "failed" ||
       parent.plan ||
       parent.redirectedTo
@@ -2444,6 +2643,10 @@ export class RunManager {
     if (this.active || this.activeConsult)
       throw new Error("Another request is already active");
     const run = this.store.getRun(id);
+    if (run.planning && run.status === "planned" && !specialist)
+      throw new Error(
+        "Start approved assignments through the collaborative build review",
+      );
     if (specialist) {
       if (
         run.status !== "complete" ||
@@ -2542,7 +2745,7 @@ export class RunManager {
       status: specialist
         ? "auditing"
         : !run.correction &&
-            (task.mode === "plan" || !!run.redirection) &&
+            (run.planning || task.mode === "plan" || !!run.redirection) &&
             !run.plan
           ? "planning"
           : "building",
@@ -2571,7 +2774,11 @@ export class RunManager {
       id: run.id,
       child,
       acknowledged: 0,
-      limit: specialist ? 2 : requestLimit(run),
+      limit: specialist
+        ? 2
+        : run.planning
+          ? Number.MAX_SAFE_INTEGER
+          : requestLimit(run),
       kind: specialist ? "specialist" : "core",
       outputTokens: run.usagePolicy.outputTokens,
     };
@@ -2588,6 +2795,7 @@ export class RunManager {
         usageLimitApplied?: unknown;
         pauseReached?: unknown;
         pauseReleased?: unknown;
+        failure?: unknown;
       }) => {
         if (this.active?.child !== child) return;
         if (message.requestDiagnostic) {
@@ -2669,7 +2877,34 @@ export class RunManager {
           return;
         }
         if (message.failed) {
-          this.fail(run.id, "The task coordinator failed");
+          const failure = message.failure;
+          if (
+            run.planning &&
+            !run.plan &&
+            failure &&
+            typeof failure === "object" &&
+            !Array.isArray(failure) &&
+            (failure as { kind?: unknown }).kind === "planning_validation" &&
+            typeof (failure as { reason?: unknown }).reason === "string" &&
+            (failure as { reason: string }).reason.length <= 200 &&
+            /^[^\x00-\x1f\x7f]+$/.test((failure as { reason: string }).reason)
+          ) {
+            this.fail(
+              run.id,
+              `Pearl's planning response could not be accepted after bounded repair: ${(failure as { reason: string }).reason}. Your answer is saved. You can retry or redirect Pearl.`,
+              "planning_validation",
+            );
+            console.warn("[scully:coordinator-failure]", {
+              stage: "planning",
+              code: "planning_validation",
+            });
+          } else {
+            this.fail(run.id, "The task coordinator failed");
+            console.warn("[scully:coordinator-failure]", {
+              stage: run.planning && !run.plan ? "planning" : "build",
+              code: "worker_failure",
+            });
+          }
           return;
         }
         if (message.run && message.run.id === run.id) {
@@ -2854,7 +3089,9 @@ export class RunManager {
     return (
       validUsageStart(value) &&
       value.model === expectedModel &&
-      value.maxOutputTokens === expectedOutputTokens &&
+      (scope === "coordinator"
+        ? value.maxOutputTokens <= expectedOutputTokens
+        : value.maxOutputTokens === expectedOutputTokens) &&
       (scope === "reply"
         ? value.stage === "answer_question"
         : scope === "consult"
@@ -2954,7 +3191,7 @@ export class RunManager {
     this.store.saveRun(run);
     this.publish(run);
   }
-  private fail(id: string, error: string) {
+  private fail(id: string, error: string, failureCode?: Run["failureCode"]) {
     let run = this.store.getRun(id);
     if (
       run.requestPause?.status === "requested" ||
@@ -2975,6 +3212,7 @@ export class RunManager {
     run.inFlightRequests = [];
     interruptAudits(run);
     run.error = error;
+    run.failureCode = failureCode;
     this.save(run);
   }
 }

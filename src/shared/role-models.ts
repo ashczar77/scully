@@ -9,6 +9,7 @@ export type RoleModelSettings = {
   tester: string;
   auditor: string;
   specialists: Record<string, string>;
+  thinking?: Record<string, "off" | "on">;
 };
 
 export const defaultRoleModelSettings: RoleModelSettings = {
@@ -21,6 +22,7 @@ export const defaultRoleModelSettings: RoleModelSettings = {
       .filter((member) => member.role === "specialist")
       .map((member) => [member.id, starterModelOptions[1].id]),
   ),
+  thinking: {},
 };
 
 export function parseRoleModelSettings(value: unknown): RoleModelSettings {
@@ -47,6 +49,24 @@ export function parseRoleModelSettings(value: unknown): RoleModelSettings {
   for (const id of specialistIds)
     if (!valid((specialists as Record<string, unknown>)[id]))
       throw new Error(`Invalid ${id} model`);
+  if (row.thinking !== undefined) {
+    if (
+      !row.thinking ||
+      typeof row.thinking !== "object" ||
+      Array.isArray(row.thinking)
+    )
+      throw new Error("Invalid thinking settings");
+    const allowed = new Set([
+      "pearl",
+      "builder",
+      "tester",
+      "auditor",
+      ...specialistIds,
+    ]);
+    for (const [id, preset] of Object.entries(row.thinking))
+      if (!allowed.has(id) || !["off", "on"].includes(preset as string))
+        throw new Error("Invalid thinking preset");
+  }
   return value as RoleModelSettings;
 }
 
@@ -59,8 +79,6 @@ export function modelForActor(
   if (!settings || !actor) return fallback;
   if (actor === "pearl") return settings.pearl;
   if (settings.specialists[actor]) return settings.specialists[actor];
-  const member = team.find((item) => item.id === actor);
-  if (!member) return fallback;
   const catalogRole = characterById(actor)?.role;
   if (
     catalogRole === "builder" ||
@@ -68,8 +86,33 @@ export function modelForActor(
     catalogRole === "auditor"
   )
     return settings[catalogRole];
+  const member = team.find((item) => item.id === actor);
+  if (!member) return fallback;
   const role = runRole(member);
   return role === "builder" || role === "tester" || role === "auditor"
     ? settings[role]
     : fallback;
+}
+
+export function thinkingForActor(
+  settings: RoleModelSettings | undefined,
+  actor: string | undefined,
+  team: Teammate[],
+): "off" | "on" | undefined {
+  if (!settings || !actor) return undefined;
+  const direct = settings.thinking?.[actor];
+  if (direct) return direct;
+  const catalogRole = characterById(actor)?.role;
+  if (
+    catalogRole === "builder" ||
+    catalogRole === "tester" ||
+    catalogRole === "auditor"
+  )
+    return settings.thinking?.[catalogRole];
+  const member = team.find((item) => item.id === actor);
+  if (!member) return undefined;
+  const role = runRole(member);
+  return role === "builder" || role === "tester" || role === "auditor"
+    ? settings.thinking?.[role]
+    : undefined;
 }

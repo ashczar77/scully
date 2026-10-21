@@ -28,7 +28,151 @@ import { AutoGrowTextarea } from "./AutoGrowTextarea";
 import { conversationTimeline } from "./conversation-timeline";
 import { AgentMessage, ThinkingIndicator, messageTime } from "./AgentMessage";
 import { ProjectLocation } from "./ProjectLocation";
-import { requestsTaskChange } from "../shared/message-intent";
+import { CollaborativeRoom } from "./CollaborativeRoom";
+import { StaffingProposalPanel } from "./StaffingProposalPanel";
+import { pendingPlanningQuestions } from "../shared/planning-state";
+import type { PlanningQuestionAnswerSet } from "../shared/planning-state";
+
+type ChoiceQuestion = NonNullable<
+  Extract<
+    ReturnType<typeof conversationTimeline>[number],
+    { kind: "plan" }
+  >["questionItems"]
+>[number];
+
+function PlanningQuestionSet({
+  questions,
+  active,
+  busy,
+  onAnswer,
+}: {
+  questions: ChoiceQuestion[];
+  active: boolean;
+  busy: boolean;
+  onAnswer: (answers: PlanningQuestionAnswerSet) => void;
+}) {
+  const [choices, setChoices] = useState<
+    Record<string, { selected: number | "other" | null; custom: string }>
+  >({});
+  const [note, setNote] = useState("");
+  const pending = questions.filter((question) => question.status === "pending");
+  const ready = pending.every((question) => {
+    const choice = choices[question.id];
+    return (
+      choice?.selected !== null &&
+      choice?.selected !== undefined &&
+      (choice.selected !== "other" || !!choice.custom.trim())
+    );
+  });
+  return (
+    <div className="planning-choices">
+      {questions.map((question) => {
+        const choice = choices[question.id] || { selected: null, custom: "" };
+        const update = (
+          selected: number | "other" | null,
+          custom = choice.custom,
+        ) =>
+          setChoices((current) => ({
+            ...current,
+            [question.id]: { selected, custom },
+          }));
+        return (
+          <section
+            className="planning-choice"
+            aria-label={question.text}
+            key={question.id}
+          >
+            <h4>{question.text}</h4>
+            <p className="planning-choice-recommendation">
+              Pearl recommends: {question.recommendation}
+            </p>
+            {question.status === "superseded" ? (
+              <p className="planning-choice-status">
+                Earlier answer: {question.answer}. This choice was revised.
+              </p>
+            ) : question.status === "answered" ? (
+              <p className="planning-choice-status">
+                Answered: {question.answer}
+              </p>
+            ) : question.status === "withdrawn" ? (
+              <p className="planning-choice-status">
+                This question was withdrawn.
+              </p>
+            ) : active ? (
+              <div className="planning-choice-options">
+                {(question.options || []).map((option, index) => (
+                  <label key={`${question.id}:${index}`}>
+                    <input
+                      type="radio"
+                      name={`choice-${question.id}`}
+                      checked={choice.selected === index}
+                      onChange={() => update(index)}
+                    />
+                    <span>{option}</span>
+                  </label>
+                ))}
+                <label>
+                  <input
+                    type="radio"
+                    name={`choice-${question.id}`}
+                    checked={choice.selected === "other"}
+                    onChange={() => update("other")}
+                  />
+                  <span>Something else</span>
+                </label>
+                {choice.selected === "other" && (
+                  <input
+                    className="planning-choice-input"
+                    aria-label={`Your answer to ${question.text}`}
+                    value={choice.custom}
+                    onChange={(event) => update("other", event.target.value)}
+                    placeholder="Write your answer"
+                    maxLength={1000}
+                  />
+                )}
+              </div>
+            ) : null}
+          </section>
+        );
+      })}
+      {active && pending.length > 0 && (
+        <div className="planning-choice-options">
+          <textarea
+            className="planning-choice-input"
+            aria-label="Additional message"
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+            placeholder="Anything else to discuss? (optional)"
+            maxLength={900}
+            rows={2}
+          />
+          <button
+            type="button"
+            className="primary-button"
+            disabled={busy || !ready}
+            onClick={() =>
+              onAnswer({
+                answers: pending.map((question) => {
+                  const choice = choices[question.id];
+                  return {
+                    questionId: question.id,
+                    askedAt: question.askedAt,
+                    ...(choice.selected === "other"
+                      ? { customAnswer: choice.custom }
+                      : { optionIndex: choice.selected as number }),
+                  };
+                }),
+                ...(note.trim() && { note }),
+              })
+            }
+          >
+            Send answers
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function titleFromPrompt(value: string) {
   const clean = value.trim().replace(/\s+/g, " ");
@@ -62,13 +206,13 @@ export function RoomConversation({
   const [error, setError] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [session, setSession] = useState<SessionInfo | null>(null);
-  const [approveBuild, setApproveBuild] = useState(false);
   const [showActivity, setShowActivity] = useState(false);
   const [chooseRecipient, setChooseRecipient] = useState(false);
   const [showLineupReview, setShowLineupReview] = useState(false);
   const [replyingQuestionId, setReplyingQuestionId] = useState<string | null>(
     null,
   );
+  const [revisePlan, setRevisePlan] = useState(false);
   const timelineRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   useEffect(() => {
@@ -78,6 +222,7 @@ export function RoomConversation({
     setChooseRecipient(false);
     setShowLineupReview(false);
     setReplyingQuestionId(null);
+    setRevisePlan(false);
     setLoaded(false);
     if (!task) {
       setLoaded(true);
@@ -100,7 +245,6 @@ export function RoomConversation({
             ? next
             : current,
         );
-        setApproveBuild(false);
       }
     });
     void api
@@ -188,12 +332,22 @@ export function RoomConversation({
     }
     if (
       run?.status === "planned" &&
-      task?.mode === "plan" &&
-      !planQuestions(run.plan).length &&
-      text.includes("?") &&
-      !requestsTaskChange(text)
+      (run.planning || task?.mode === "plan") &&
+      !(run.planning
+        ? pendingPlanningQuestions(run.planning).length
+        : planQuestions(run.plan).length)
     ) {
       await action(async () => {
+        if (
+          revisePlan ||
+          (run.planning?.planReview && !run.planning.proposal)
+        ) {
+          const updated = await api.sendPlanningMessage(run.id, text);
+          setRun(updated);
+          setRevisePlan(false);
+          onDraftChange("");
+          return;
+        }
         const result = await api.sendConversationMessage(run.id, text, "pearl");
         setRun(result.run);
         setRunHistory((previous) =>
@@ -208,7 +362,7 @@ export function RoomConversation({
     if (
       !task ||
       !run ||
-      (task.mode === "plan" &&
+      ((run.planning || task.mode === "plan") &&
         (["prepared", "planned"].includes(run.status) ||
           (run.status === "failed" && !run.plan)))
     ) {
@@ -250,11 +404,23 @@ export function RoomConversation({
       onDraftChange("");
     });
   }
+  async function answerPlanningQuestions(answerSet: PlanningQuestionAnswerSet) {
+    if (!run || !task) return;
+    await action(async () => {
+      const started = await api.answerPlanningQuestions(run.id, answerSet);
+      setRun(started);
+      setRunHistory(await api.runs(task.id));
+    });
+  }
   const pendingReply = run?.replies?.some(
     (reply) => reply.status === "answering",
   );
   const canMessage = !run || !run.redirectedTo;
-  const outstandingChoices = run?.plan ? planQuestions(run.plan) : [];
+  const outstandingChoices = run?.plan
+    ? run.planning
+      ? pendingPlanningQuestions(run.planning).map((question) => question.text)
+      : planQuestions(run.plan)
+    : [];
   const timeline = useMemo(
     () =>
       conversationTimeline(
@@ -268,6 +434,17 @@ export function RoomConversation({
     if (element && stickToBottom.current)
       element.scrollTop = element.scrollHeight;
   }, [timeline.length, run?.status]);
+  if (run?.collaboration) {
+    return (
+      <CollaborativeRoom
+        api={api}
+        run={run}
+        team={team}
+        onRun={setRun}
+        onOpenProfile={onOpenProfile}
+      />
+    );
+  }
   return (
     <section
       className={`room-conversation ${task ? "" : "room-new-task"}`}
@@ -401,8 +578,9 @@ export function RoomConversation({
               </AgentMessage>
             );
           }
-          const questions = planQuestions(entry.plan);
-          const showSeparateQuestions = !entry.reply?.includes("?");
+          const questions = entry.questions || planQuestions(entry.plan);
+          const structuredQuestions = entry.questionItems || [];
+          const showSeparateQuestions = !!entry.questions || !entry.reply;
           return (
             <AgentMessage
               key={entry.key}
@@ -414,29 +592,32 @@ export function RoomConversation({
               at={entry.at}
               onOpenProfile={onOpenProfile}
             >
-              <p>{entry.reply || planSummary(entry.plan)}</p>
-              {showSeparateQuestions && questions.length > 0 && (
-                <p className="plan-question-intro">
-                  Could you tell me what you prefer for these choices?
-                </p>
-              )}
-              {showSeparateQuestions && questions.length > 0 && (
+              <RichText text={entry.reply || planSummary(entry.plan)} />
+              {structuredQuestions.length > 0 ? (
+                <PlanningQuestionSet
+                  questions={structuredQuestions}
+                  active={run?.status === "planned" && !run.redirectedTo}
+                  busy={busy}
+                  onAnswer={answerPlanningQuestions}
+                />
+              ) : showSeparateQuestions && questions.length > 0 ? (
                 <ol className="plan-questions">
                   {questions.map((question) => (
                     <li key={question}>{roomQuestion(question)}</li>
                   ))}
                 </ol>
-              )}
-              <div className="chat-plan-actions">
-                <button
-                  type="button"
-                  className="text-button"
-                  onClick={onOpenTask}
-                >
-                  {entry.draft ? "View draft analysis" : "View full analysis"}{" "}
-                  <ArrowRight size={14} />
-                </button>
-              </div>
+              ) : null}
+              {entry.plan && !entry.draft ? (
+                <div className="chat-plan-actions">
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={onOpenTask}
+                  >
+                    View full analysis <ArrowRight size={14} />
+                  </button>
+                </div>
+              ) : null}
             </AgentMessage>
           );
         })}
@@ -491,10 +672,10 @@ export function RoomConversation({
                   ? ` Last model request: ${run.diagnostics.at(-1)!.outcome}; finish reason: ${run.diagnostics.at(-1)!.finishReason}.`
                   : " No provider diagnostic was recorded for this failure."}
               </p>
-              {task?.mode === "plan" && !run.plan && (
+              {run.failureCode === "planning_validation" && (
                 <p>
-                  This stopped during plan validation inside Scully. There is no
-                  terminal command to inspect for this step.
+                  Scully rejected Pearl's planning response after bounded
+                  repair. Your answer is saved, and no build commands ran.
                 </p>
               )}
             </details>
@@ -571,6 +752,77 @@ export function RoomConversation({
             </article>
           )}
         {run?.status === "planned" &&
+          run.plan &&
+          run.planning?.planReview &&
+          !run.planning.planReview.approvedAt &&
+          !run.planning.proposal && (
+            <section
+              className="chat-plan-review"
+              aria-label="Plan awaiting approval"
+            >
+              <h3>Review Pearl's plan</h3>
+              <p>
+                Read the full plan and discuss any changes before confirming it.
+              </p>
+              <button
+                type="button"
+                className="text-button"
+                onClick={onOpenTask}
+              >
+                View full plan <ArrowRight size={14} />
+              </button>
+              <button
+                type="button"
+                className="primary"
+                disabled={busy}
+                onClick={() =>
+                  void action(async () => {
+                    const started = await api.approvePlanningPlan(
+                      run.id,
+                      run.planning!.planReview!.revision,
+                      true,
+                    );
+                    setRun(started);
+                    if (task) setRunHistory(await api.runs(task.id));
+                  })
+                }
+              >
+                Approve plan and ask Pearl to propose a team
+              </button>
+            </section>
+          )}
+        {run?.status === "planned" &&
+          run.planning?.proposal &&
+          outstandingChoices.length === 0 && (
+            <AgentMessage
+              name="Pearl"
+              person={team.find((member) => member.id === "pearl")}
+              at={run.events.find((event) => event.text === run.plan)?.at}
+              onOpenProfile={onOpenProfile}
+              className="chat-team-proposal"
+            >
+              <StaffingProposalPanel
+                planning={run.planning}
+                team={run.teamSnapshot?.members || team}
+                busy={busy}
+                onApprove={() =>
+                  void action(async () => {
+                    setRun(
+                      await api.approveLineup(
+                        run.id,
+                        run.planning!.proposal!.planRevision,
+                        run.planning!.proposal!.assignments,
+                        true,
+                      ),
+                    );
+                  })
+                }
+              />
+              <ProjectLocation api={api} run={run} onUpdated={setRun} />
+            </AgentMessage>
+          )}
+        {run?.status === "planned" &&
+          !run.planning &&
           outstandingChoices.length === 0 &&
           run.lineupProposal &&
           run.teamSnapshot && (
@@ -711,9 +963,11 @@ export function RoomConversation({
           )}
         {run?.status === "planned" &&
           outstandingChoices.length === 0 &&
-          (!run.lineupProposal ||
-            run.approvedLineup?.planRevision ===
-              run.lineupProposal.planRevision) && (
+          (run.planning
+            ? !!run.planning.approved
+            : !run.lineupProposal ||
+              run.approvedLineup?.planRevision ===
+                run.lineupProposal.planRevision) && (
             <AgentMessage
               name="Pearl"
               person={team.find((member) => member.id === "pearl")}
@@ -723,46 +977,13 @@ export function RoomConversation({
             >
               <h3>Ready for the team to build?</h3>
               <p>
-                Review the full plan in Task. The team will write the approved
-                work in the selected project folder.
+                Review the selected folder, teammate permissions, execution
+                environment, upload manifest, and checks in Task before the team
+                starts.
               </p>
               <ProjectLocation api={api} run={run} onUpdated={setRun} />
-              <details>
-                <summary>Review model use and shared context</summary>
-                <p>
-                  Building shares the task and selected files with{" "}
-                  {run.model || session?.model || "the configured model"}. Up to{" "}
-                  {run.usagePolicy?.outputTokens ||
-                    session?.outputTokens ||
-                    2048}{" "}
-                  output tokens can be used per request. The request limit is in
-                  Task details.
-                </p>
-              </details>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={approveBuild}
-                  onChange={(event) => setApproveBuild(event.target.checked)}
-                />{" "}
-                I approve this build and bounded model use.
-              </label>
-              <button
-                className="primary"
-                disabled={
-                  busy ||
-                  !approveBuild ||
-                  !session?.configured ||
-                  (run.workspaceMode === "direct" && !run.projectWorkspace)
-                }
-                onClick={() =>
-                  void action(async () => {
-                    setRun(await api.startRun(run.id, true));
-                    setApproveBuild(false);
-                  })
-                }
-              >
-                Start building <ArrowRight size={15} />
+              <button className="primary" onClick={onOpenTask}>
+                Review project scope <ArrowRight size={15} />
               </button>
             </AgentMessage>
           )}
@@ -896,6 +1117,21 @@ export function RoomConversation({
         )}
       </div>
       <form className="room-composer" onSubmit={(event) => void send(event)}>
+        {run?.status === "planned" &&
+          task?.mode === "plan" &&
+          (run.planning
+            ? !!run.planning.proposal &&
+              !pendingPlanningQuestions(run.planning).length
+            : !planQuestions(run.plan).length) && (
+            <label>
+              <input
+                type="checkbox"
+                checked={revisePlan}
+                onChange={(event) => setRevisePlan(event.target.checked)}
+              />{" "}
+              Revise the plan with this message
+            </label>
+          )}
         {replyingQuestionId && run && (
           <div className="room-reply-context">
             <span>
@@ -968,8 +1204,10 @@ export function RoomConversation({
 export type ProjectFilePreview = {
   path: string;
   content: string;
-  status: "source" | "proposed" | "draft" | "written";
+  status: "source" | "proposed" | "draft" | "written" | "branch" | "integrated";
   owner?: string;
+  revision?: string;
+  before?: string | null;
 };
 
 export function RoomFiles({
@@ -999,35 +1237,77 @@ export function RoomFiles({
     };
   }, [api, task.id]);
   const files: ProjectFilePreview[] = [];
-  for (const file of run?.files || [])
-    files.push({ ...file, status: "source" });
-  if (!run?.drafts.length)
-    for (const assignment of run?.coordination?.assignments || [])
-      for (const file of assignment.files)
+  if (run?.collaboration) {
+    const state = run.collaboration;
+    const base = state.checkpoints.find((item) => item.id === state.baseId);
+    const baseFiles = new Map(
+      base?.files.map((file) => [file.path, file.content]) || [],
+    );
+    for (const file of base?.files || [])
+      files.push({
+        ...file,
+        status: "source",
+        owner: "Local project snapshot",
+        revision: state.baseId,
+      });
+    for (const person of state.members) {
+      const head = state.checkpoints.find((item) => item.id === person.headId);
+      if (!head || head.id === state.baseId) continue;
+      for (const file of head.files)
         files.push({
           ...file,
-          status: "proposed",
-          owner:
-            run?.teamSnapshot?.members.find(
-              (member) => member.id === assignment.owner,
-            )?.name || assignment.owner,
+          status: "branch",
+          owner: `${person.name} branch`,
+          revision: head.id,
+          before: baseFiles.get(file.path) ?? null,
         });
-  for (const file of run?.drafts || [])
-    files.push({
-      ...file,
-      status: run?.projectWorkspace?.writtenFiles?.includes(file.path)
-        ? "written"
-        : "draft",
-    });
+    }
+    const integrated = state.checkpoints.find(
+      (item) => item.id === state.integration.headId,
+    );
+    if (integrated && integrated.id !== state.baseId)
+      for (const file of integrated.files) {
+        files.push({
+          ...file,
+          status: "integrated",
+          owner: "Integration workspace",
+          revision: integrated.id,
+          before: baseFiles.get(file.path) ?? null,
+        });
+      }
+  } else {
+    for (const file of run?.files || [])
+      files.push({ ...file, status: "source" });
+    if (!run?.drafts.length)
+      for (const assignment of run?.coordination?.assignments || [])
+        for (const file of assignment.files)
+          files.push({
+            ...file,
+            status: "proposed",
+            owner:
+              run?.teamSnapshot?.members.find(
+                (member) => member.id === assignment.owner,
+              )?.name || assignment.owner,
+          });
+    for (const file of run?.drafts || [])
+      files.push({
+        ...file,
+        status: run?.projectWorkspace?.writtenFiles?.includes(file.path)
+          ? "written"
+          : "draft",
+      });
+  }
   type Node = {
     folders: Map<string, Node>;
     files: (ProjectFilePreview & { name: string })[];
   };
-  const root: Node = { folders: new Map(), files: [] };
+  const roots = new Map<string, Node>();
   for (const file of files) {
     const { path } = file;
     const parts = path.split("/");
-    let node = root;
+    const group = run?.collaboration ? file.owner || file.status : "Project";
+    if (!roots.has(group)) roots.set(group, { folders: new Map(), files: [] });
+    let node = roots.get(group)!;
     for (const folder of parts.slice(0, -1)) {
       if (!node.folders.has(folder))
         node.folders.set(folder, { folders: new Map(), files: [] });
@@ -1054,13 +1334,17 @@ export function RoomFiles({
             <button
               type="button"
               className="file-entry"
-              key={`${file.path}:${file.status}:${file.owner || ""}`}
+              key={`${file.path}:${file.status}:${file.owner || ""}:${file.revision || ""}`}
               title={file.path}
               onClick={() => onOpenFile?.(file)}
             >
               <span>{file.name}</span>
               <small>
-                {file.owner ? `${file.status} by ${file.owner}` : file.status}
+                {file.owner
+                  ? run?.collaboration
+                    ? `${file.owner} · ${file.status}`
+                    : `${file.status} by ${file.owner}`
+                  : file.status}
               </small>
             </button>
           ))}
@@ -1074,12 +1358,20 @@ export function RoomFiles({
         <span className="tiny-badge">{files.length}</span>
       </div>
       <p className="muted room-files-location">
-        {run?.projectWorkspace?.path ||
+        {run?.collaboration?.scope.projectPath ||
+          run?.projectWorkspace?.path ||
           run?.sourceName ||
           "No project selected"}
       </p>
       {files.length ? (
-        <div className="file-tree">{renderNode(root)}</div>
+        <div className="file-tree">
+          {[...roots].map(([group, root]) => (
+            <section key={group} aria-label={`${group} files`}>
+              <h3>{group}</h3>
+              {renderNode(root)}
+            </section>
+          ))}
+        </div>
       ) : (
         <div className="files-empty">
           <MessageSquare size={20} />

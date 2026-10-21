@@ -36,11 +36,12 @@ import { AdviceHandoffPanel } from "./AdviceHandoffPanel";
 import { RichText } from "./RichText";
 import { BuildActivity } from "./BuildActivity";
 import { ChangesPanel } from "./ChangesPanel";
+import { CollaborativeBuild } from "./CollaborativeBuild";
 export function ConnectionSettings({ api }: { api: DesktopAPI }) {
   const [info, setInfo] = useState<SessionInfo>({
     configured: false,
     model: "",
-    outputTokens: 2048,
+    outputTokens: 8192,
   });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -110,24 +111,27 @@ export function ConnectionSettings({ api }: { api: DesktopAPI }) {
             maxLength={4096}
           />
         </label>
-        <label>
-          Maximum output tokens per request
-          <input
-            name="outputTokens"
-            type="number"
-            min={512}
-            max={4096}
-            step={1}
-            defaultValue={info.outputTokens}
-            required
-          />
-        </label>
+        <details className="connection-advanced">
+          <summary>Advanced request settings</summary>
+          <label>
+            Default output allowance for older workflows
+            <input
+              name="outputTokens"
+              type="number"
+              min={512}
+              max={32768}
+              step={1}
+              defaultValue={info.configured ? info.outputTokens : 8192}
+              required
+            />
+          </label>
+        </details>
         <p className="muted">
-          Key kept in memory for this app session only. The output limit seeds
-          new runs; each run can choose a saved usage preset. Requests have a
-          90-second deadline and no retries. Token limits are not a currency
-          spending cap. Confirm free credits and account billing limits before
-          starting.
+          Key kept in memory for this app session only. Collaborative agents
+          choose an output allowance for each request and make bounded retries
+          when a response is incomplete. The advanced value seeds older runs.
+          Requests have a 90-second deadline. Token allowances are not a
+          currency spending cap.
         </p>
         <button className="primary" disabled={busy}>
           Save session connection
@@ -269,6 +273,42 @@ export function RunPanel({
       />
     );
   }
+  if (
+    run &&
+    (run.collaboration ||
+      task.mode === "work" ||
+      (run.status === "planned" &&
+        (!!run.approvedLineup || !!run.planning?.approved)))
+  ) {
+    return (
+      <section className="run-panel" aria-label="Task execution">
+        <h2>Project build</h2>
+        <p>{task.description || task.title}</p>
+        {!run.collaboration && !run.projectWorkspace && (
+          <ProjectLocation api={api} run={run} onUpdated={setRun} />
+        )}
+        {run.plan && !run.collaboration && <RichText text={run.plan} />}
+        <CollaborativeBuild
+          api={api}
+          run={run}
+          onRun={setRun}
+          onOpenSettings={
+            onOpenSettings ? () => onOpenSettings(run.id) : undefined
+          }
+        />
+        <p className="muted">
+          {usage
+            ? `${usage.measured} measured requests, ${usage.unknown} with unknown usage, ${usage.pending} pending. Reported tokens: ${usage.inputTokens + usage.outputTokens}.`
+            : "Usage is unavailable."}
+        </p>
+        {error && (
+          <p role="alert" className="error">
+            {error}
+          </p>
+        )}
+      </section>
+    );
+  }
   return (
     <section className="run-panel" aria-label="Task execution">
       <h2>{changes ? "Changes & review" : "Your task has a home."}</h2>
@@ -309,7 +349,7 @@ export function RunPanel({
                     const s = await api.selectSource();
                     if (s) {
                       setSource(s);
-                      setSelected([]);
+                      setSelected(s.files.map((file) => file.path));
                     }
                   })
                 }
@@ -757,7 +797,9 @@ export function RunPanel({
           {connection && (
             <p className="connection-info">
               {connection.configured
-                ? `Pearl: ${run.model || run.usagePolicy?.model || connection.model} · teammates use their saved role models · up to ${run.usagePolicy?.outputTokens || connection.outputTokens} output tokens per request`
+                ? run.planning
+                  ? `Pearl: ${run.model || run.usagePolicy?.model || connection.model} · teammates use their saved role models · output allowance adapts to each model`
+                  : `Pearl: ${run.model || run.usagePolicy?.model || connection.model} · teammates use their saved role models · up to ${run.usagePolicy?.outputTokens || connection.outputTokens} output tokens per request`
                 : "Configure a Nebius session in Settings before starting."}
             </p>
           )}

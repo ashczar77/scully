@@ -1,123 +1,76 @@
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { Copy } from "lucide-react";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { unified } from "unified";
+import remarkParse from "remark-parse";
 
-// Model text is untrusted. Render supported Markdown as React nodes, never HTML.
+type MarkdownNode = {
+  type: string;
+  value?: string;
+  alt?: string;
+  children?: MarkdownNode[];
+};
+const parser = unified().use(remarkParse).use(remarkGfm);
+
 export function plainTextFromMarkdown(markdown: string): string {
-  return markdown
-    .replace(/```[^\n]*\n([\s\S]*?)```/g, "$1")
-    .replace(/!?\[([^\]]+)\]\([^)]+\)/g, "$1")
-    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
-    .replace(/^\s*(?:[-*+] |\d+\. )/gm, "")
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    .replace(/\*([^*]+)\*/g, "$1")
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/^---+\s*$/gm, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-function inline(text: string): ReactNode[] {
-  const token = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|!?\[[^\]]+\]\([^)]+\))/g;
-  const result: ReactNode[] = [];
-  let at = 0;
-  for (const match of text.matchAll(token)) {
-    const index = match.index ?? 0;
-    if (index > at) result.push(text.slice(at, index));
-    const value = match[0];
-    if (value.startsWith("`"))
-      result.push(<code key={index}>{value.slice(1, -1)}</code>);
-    else if (value.startsWith("**"))
-      result.push(<strong key={index}>{value.slice(2, -2)}</strong>);
-    else if (value.startsWith("*"))
-      result.push(<em key={index}>{value.slice(1, -1)}</em>);
-    else {
-      const parts = /^!?\[([^\]]+)\]\(([^)]+)\)$/.exec(value);
-      const label = parts?.[1] || value;
-      const url = parts?.[2] || "";
-      result.push(
-        /^https?:\/\//i.test(url) && !value.startsWith("!") ? (
-          <a key={index} href={url} target="_blank" rel="noopener noreferrer">
-            {label}
-          </a>
-        ) : (
-          <span key={index}>{label}</span>
-        ),
-      );
-    }
-    at = index + value.length;
+  function text(node: MarkdownNode): string {
+    if (node.type === "image") return node.alt || "";
+    if (
+      node.type === "text" ||
+      node.type === "inlineCode" ||
+      node.type === "code"
+    )
+      return node.value || "";
+    if (node.type === "break") return "\n";
+    const children = (node.children || []).map(text);
+    if (node.type === "list") return children.join("\n");
+    if (node.type === "listItem") return children.join("\n");
+    if (node.type === "tableRow") return children.join("\t");
+    if (node.type === "root")
+      return (node.children || [])
+        .map(
+          (child, index, siblings) =>
+            (index
+              ? siblings[index - 1].type === "paragraph" &&
+                child.type === "paragraph"
+                ? "\n\n"
+                : "\n"
+              : "") + text(child),
+        )
+        .join("");
+    if (["paragraph", "heading", "blockquote", "table"].includes(node.type))
+      return children.join("");
+    return children.join("");
   }
-  if (at < text.length) result.push(text.slice(at));
-  return result;
+  return text(parser.parse(markdown) as MarkdownNode).trim();
 }
 
 export function RichText({ text }: { text: string }) {
-  const lines = text.replace(/\r\n?/g, "\n").split("\n");
-  const blocks: ReactNode[] = [];
-  let index = 0;
-  while (index < lines.length) {
-    const line = lines[index];
-    if (!line.trim()) {
-      index++;
-      continue;
-    }
-    if (/^\s*```/.test(line)) {
-      const code: string[] = [];
-      index++;
-      while (index < lines.length && !/^\s*```/.test(lines[index]))
-        code.push(lines[index++]);
-      if (index < lines.length) index++;
-      blocks.push(
-        <pre key={blocks.length}>
-          <code>{code.join("\n")}</code>
-        </pre>,
-      );
-      continue;
-    }
-    const heading = /^\s{0,3}#{1,6}\s+(.+)$/.exec(line);
-    if (heading) {
-      blocks.push(<h4 key={blocks.length}>{inline(heading[1])}</h4>);
-      index++;
-      continue;
-    }
-    if (/^\s*(?:[-*+] |\d+\. )/.test(line)) {
-      const items: ReactNode[] = [];
-      const ordered = /^\s*\d+\. /.test(line);
-      while (
-        index < lines.length &&
-        /^\s*(?:[-*+] |\d+\. )/.test(lines[index])
-      ) {
-        items.push(
-          <li key={items.length}>
-            {inline(lines[index].replace(/^\s*(?:[-*+] |\d+\. )/, ""))}
-          </li>,
-        );
-        index++;
-      }
-      blocks.push(
-        ordered ? (
-          <ol key={blocks.length}>{items}</ol>
-        ) : (
-          <ul key={blocks.length}>{items}</ul>
-        ),
-      );
-      continue;
-    }
-    if (/^\s*---+\s*$/.test(line)) {
-      blocks.push(<hr key={blocks.length} />);
-      index++;
-      continue;
-    }
-    const paragraph: string[] = [];
-    while (
-      index < lines.length &&
-      lines[index].trim() &&
-      !/^\s*(?:```|#{1,6} |[-*+] |\d+\. |---+\s*$)/.test(lines[index])
-    )
-      paragraph.push(lines[index++].trim());
-    if (paragraph.length)
-      blocks.push(<p key={blocks.length}>{inline(paragraph.join(" "))}</p>);
-  }
-  return <div className="rich-text">{blocks}</div>;
+  return (
+    <div className="rich-text">
+      <Markdown
+        remarkPlugins={[remarkGfm]}
+        skipHtml
+        components={{
+          a({ href, children }) {
+            return href && /^https:\/\//i.test(href) ? (
+              <a href={href} target="_blank" rel="noopener noreferrer">
+                {children}
+              </a>
+            ) : (
+              <span>{children}</span>
+            );
+          },
+          img({ alt }) {
+            return <span>{alt || "Image"}</span>;
+          },
+        }}
+      >
+        {text}
+      </Markdown>
+    </div>
+  );
 }
 
 export function CopyTextActions({

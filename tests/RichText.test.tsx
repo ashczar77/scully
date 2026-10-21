@@ -50,3 +50,18 @@ it("does not turn unsafe links or image Markdown into active content", () => {
   expect(screen.getByText("remote image")).toBeInTheDocument();
   expect(document.querySelector("img")).toBeNull();
 });
+
+it("keeps nested lists, quotes, tables and fenced code as formatted blocks", () => {
+  render(
+    <RichText
+      text={
+        "# Release\n\n> **Check** this first.\n\n1. Parent\n   - Child\n2. Next\n\n| Key | Value |\n| --- | --- |\n| mode | local |\n\n```ts\nconst x = 1;\n```"
+      }
+    />,
+  );
+  expect(screen.getByRole("heading", { name: "Release" })).toBeInTheDocument();
+  expect(screen.getByText("Check").closest("blockquote")).toBeInTheDocument();
+  expect(screen.getByText("Child").closest("ol")).toBeInTheDocument();
+  expect(screen.getByRole("table")).toHaveTextContent("mode");
+  expect(screen.getByText("const x = 1;").closest("pre")).toBeInTheDocument();
+});

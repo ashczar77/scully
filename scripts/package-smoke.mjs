@@ -13,38 +13,10 @@ assert.deepEqual(
 );
 const entries = listPackage(`${bundle}/Contents/Resources/app.asar`);
 assert(entries.some((p) => p.endsWith("/main.cjs")));
-assert(entries.some((p) => p.endsWith("/worker.cjs")));
+assert(!entries.some((p) => p.endsWith("/worker.cjs")));
 assert(entries.some((p) => p.endsWith("/branding/scully.png")));
 assert(entries.some((p) => p.endsWith("/fonts/ChelseaMarket-OFL.txt")));
-assert(entries.some((p) => /\/ChelseaMarket-Regular-[^/]+\.ttf$/.test(p)));
-for (const name of [
-  "adrian",
-  "carmen",
-  "ellis",
-  "jess",
-  "jun",
-  "kiran",
-  "maya",
-  "meryl",
-  "nadine",
-  "rafi",
-  "sloane",
-  "tessa",
-])
-  assert(
-    entries.some((p) =>
-      new RegExp(`/team-portrait-${name}-[^/]+\\.png$`).test(p),
-    ),
-    `Packaged portrait missing for ${name}`,
-  );
-assert.equal(
-  entries.filter((p) =>
-    /\/team-portrait-(?:coordinator|young-1|research|reliability)-v1-[^/]+\.png$/.test(
-      p,
-    ),
-  ).length,
-  4,
-);
+assert(entries.some((p) => /\/index-[^/]+\.js$/.test(p)));
 assert(
   !entries.some((p) =>
     /\/(\.env|AGENTS\.md|.*\.local\.md|node_modules)(\/|$)/.test(p),
@@ -61,17 +33,16 @@ try {
   });
   const page = await app.firstWindow();
   await page
-    .getByRole("heading", { name: "What would you like to build?" })
+    .getByRole("heading", { name: "What can I help you with?" })
     .waitFor();
-  await page.getByRole("textbox", { name: "Start a task" }).waitFor();
+  await page.getByRole("textbox", { name: "Message Pearl" }).waitFor();
+  assert.equal(await page.getByRole("button", { name: "New chat" }).count(), 1);
   assert.equal(
-    await page
-      .locator(".brand-logo")
-      .evaluate((image) => image.naturalWidth > 0),
-    true,
+    await page.getByRole("button", { name: "Task", exact: true }).count(),
+    0,
   );
   assert.equal(
-    await page.getByRole("button", { name: "Send", exact: true }).isDisabled(),
+    await page.getByRole("button", { name: "Send message" }).isDisabled(),
     true,
   );
   await page.screenshot({

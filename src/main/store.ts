@@ -930,8 +930,8 @@ export class Store {
             next.version,
             next.createdAt,
             JSON.stringify(input.memberIds),
-            input.activeBuilderId,
-            input.activeAuditorId,
+            input.activeBuilderId || "",
+            input.activeAuditorId || "",
             input.activeTesterId,
           );
       } else {
@@ -955,8 +955,8 @@ export class Store {
             next.name,
             next.version,
             JSON.stringify(input.memberIds),
-            input.activeBuilderId,
-            input.activeAuditorId,
+            input.activeBuilderId || "",
+            input.activeAuditorId || "",
             input.activeTesterId,
             next.id,
           );
@@ -1184,7 +1184,7 @@ export class Store {
     rate: ModelRate | null = null,
   ) {
     const totals = this.usageForRun(runId);
-    if (totals.requests >= 64 || totals.pending >= 16) return false;
+    if (totals.pending >= 16) return false;
     const inserted = this.db
       .prepare(
         "INSERT OR IGNORE INTO usage_requests (id,runId,stage,model,maxOutputTokens,reservationTokens,costRate,reservedCostNanoUsd,status,startedAt) VALUES (?,?,?,?,?,?,?,?,'pending',?)",
@@ -1245,7 +1245,7 @@ export class Store {
     value: unknown,
     pauseId?: unknown,
   ): "allowed" | "paused" | "rejected" {
-    this.getRun(runId);
+    const run = this.getRun(runId);
     if (!validUsageStart(value)) return "rejected";
     this.db.exec("BEGIN IMMEDIATE");
     try {
@@ -1260,6 +1260,14 @@ export class Store {
         return "rejected";
       }
       const usage = this.usageForRun(runId);
+      if (
+        run.planning &&
+        run.usagePolicy?.requestCeiling &&
+        usage.requests >= run.usagePolicy.requestCeiling
+      ) {
+        this.db.exec("COMMIT");
+        return "paused";
+      }
       const reserved = this.reservedForRun(runId);
       const allowance = Math.max(
         alerts.policy.requestAllowanceTokens,
@@ -1580,8 +1588,6 @@ export class Store {
   }
   appendMessage(id: string, message: TeamMessage) {
     const run = this.getRun(id);
-    if ((run.messages?.length || 0) >= 20)
-      throw new Error("This run reached its 20-message limit");
     run.messages = [...(run.messages || []), message];
     this.db
       .prepare("UPDATE runs SET data=? WHERE id=?")

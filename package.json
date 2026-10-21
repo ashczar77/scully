@@ -2,7 +2,7 @@
   "name": "scully",
   "productName": "Scully",
   "version": "0.2.0",
-  "description": "A desktop workspace for collaborative engineering agents",
+  "description": "A desktop coding assistant with Pearl in the Room",
   "author": "Scully contributors",
   "license": "Apache-2.0",
   "private": true,
@@ -12,15 +12,16 @@
     "build": "tsc --noEmit && node scripts/build.mjs",
     "start": "npm run build && electron .",
     "test": "vitest run",
-    "test:desktop": "npm run build && node scripts/smoke.mjs",
+    "test:desktop": "npm run build && node scripts/pearl-command-sandbox-smoke.mjs && node scripts/pearl-desktop-smoke.mjs && node scripts/pearl-connected-desktop-smoke.mjs && node scripts/pearl-browser-sanity-smoke.mjs",
+    "test:live:pearl": "node scripts/live-pearl-chat.manual.mjs",
     "test:package:mac": "node scripts/package-smoke.mjs",
     "format:check": "prettier --check src scripts tests index.html package.json tsconfig.json vite.config.ts vitest.config.ts forge.config.cjs",
     "package": "npm run build && electron-forge package",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@electron/asar": "4.3.1",
     "@electron-forge/cli": "8.0.1",
+    "@electron/asar": "4.3.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.0",
     "@types/node": "^24.0.0",
@@ -37,5 +38,11 @@
     "typescript": "^5.9.0",
     "vite": "8.3.4",
     "vitest": "5.0.3"
+  },
+  "dependencies": {
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "unified": "^11.0.5"
   }
 }

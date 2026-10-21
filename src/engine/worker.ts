@@ -6,8 +6,9 @@ import type { Task, Teammate } from "../shared/contracts";
 import { answerQuestion } from "./answer";
 import { consultSpecialist } from "./consult";
 import { trackedModel } from "./usage-tracking";
-import { modelForActor } from "../shared/role-models";
+import { modelForActor, thinkingForActor } from "../shared/role-models";
 import { RequestPauseGate } from "./request-pause";
+import { PlanningActionFailure } from "./planning-v2";
 import { writeFileSync } from "node:fs";
 const port = process.parentPort;
 const pauseGate = new RequestPauseGate((id) =>
@@ -144,6 +145,13 @@ port.once(
               data.team || [],
               data.config.model,
             ),
+            thinking:
+              request.thinking ||
+              thinkingForActor(
+                data.run?.roleModels,
+                request.actor,
+                data.team || [],
+              ),
           }),
       };
       if (data.replyContext !== undefined) {
@@ -182,8 +190,13 @@ port.once(
             pauseGate,
           );
       port.postMessage({ run: result, done: true });
-    } catch {
-      port.postMessage({ failed: true });
+    } catch (error) {
+      port.postMessage({
+        failed: true,
+        ...(error instanceof PlanningActionFailure && {
+          failure: { kind: "planning_validation", reason: error.reason },
+        }),
+      });
     }
   },
 );

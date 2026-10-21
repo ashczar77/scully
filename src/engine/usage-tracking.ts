@@ -13,7 +13,7 @@ export function trackedModel(
   return {
     async complete(request: Completion) {
       const id = randomUUID();
-      const maxOutputTokens = config.outputTokens;
+      const maxOutputTokens = request.maxOutputTokens ?? config.outputTokens;
       const selectedModel = request.model || config.model;
       let usage: ReportedUsage | null = null;
       const acknowledged = waitForAck(id);
@@ -36,8 +36,20 @@ export function trackedModel(
               maxOutputTokens,
               onUsage: (value) => {
                 usage = value;
+                try {
+                  request.onUsage?.(value);
+                } catch {
+                  // Observers cannot change a model request result.
+                }
               },
-              onDiagnostic: (value) => emit({ requestDiagnostic: value }),
+              onDiagnostic: (value) => {
+                emit({ requestDiagnostic: value });
+                try {
+                  request.onDiagnostic?.(value);
+                } catch {
+                  // Observers cannot change a model request result.
+                }
+              },
             }),
           metricSink,
         );

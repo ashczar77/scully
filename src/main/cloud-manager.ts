@@ -45,6 +45,9 @@ function reviewOptions(value: unknown): CloudReviewOptions {
   };
 }
 export class CloudManager {
+  collaborationConfig() {
+    return this.config && { ...this.config };
+  }
   private config: CloudConfig | null = null;
   private catalog: Map<string, string> | null = null;
   private catalogVersion = 0;

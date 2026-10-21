@@ -7,6 +7,7 @@ export const usageStages = [
   "respond_to_audit",
   "answer_question",
   "consult_specialist",
+  "collaborate",
 ] as const;
 
 export type UsageStage = (typeof usageStages)[number];
@@ -45,7 +46,7 @@ export function validUsageStart(value: unknown): value is UsageStart {
     row.model.length <= 160 &&
     Number.isSafeInteger(row.maxOutputTokens) &&
     (row.maxOutputTokens as number) >= 1 &&
-    (row.maxOutputTokens as number) <= 4096
+    (row.maxOutputTokens as number) <= 32768
   );
 }
 

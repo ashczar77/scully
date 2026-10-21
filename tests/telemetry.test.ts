@@ -47,6 +47,41 @@ it("records recovery inspection only as a bounded operation outcome", () => {
     durationMs: 9,
   });
 });
+it("records an agent action batch without tool names, arguments or source", () => {
+  expect(
+    sanitizeMetric({
+      version: 1,
+      operation: "agent.action_batch",
+      outcome: "returned",
+      durationMs: 0,
+      toolName: "run_command",
+      arguments: "private command",
+      source: "private source",
+    }),
+  ).toEqual({
+    version: 1,
+    operation: "agent.action_batch",
+    outcome: "returned",
+    durationMs: 0,
+  });
+});
+it("counts a paused agent loop without recording its reason text", () => {
+  expect(
+    sanitizeMetric({
+      version: 1,
+      operation: "agent.pause.repeated_action",
+      outcome: "returned",
+      durationMs: 0,
+      reason: "private tool output",
+      path: "/private/project",
+    }),
+  ).toEqual({
+    version: 1,
+    operation: "agent.pause.repeated_action",
+    outcome: "returned",
+    durationMs: 0,
+  });
+});
 it("records storage inspection without paths or inventory values", () => {
   expect(
     sanitizeMetric({

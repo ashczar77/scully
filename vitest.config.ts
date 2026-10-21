@@ -4,7 +4,11 @@ export default defineConfig({
     maxWorkers: 4,
     environment: "jsdom",
     setupFiles: ["tests/setup.ts"],
-    include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
+    include: [
+      "tests/**/*.test.ts",
+      "tests/**/*.test.tsx",
+      "tests/**/*.test.js",
+    ],
     exclude: ["**/._*"],
   },
 });

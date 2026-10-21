@@ -56,7 +56,7 @@ function inspect(binding: ProjectWorkspace, path: string): string | null {
       if (!stat.isDirectory())
         throw new Error(`Parent is not a directory: ${path}`);
     } else {
-      if (!stat.isFile() || stat.nlink !== 1 || stat.size > 80_000)
+      if (!stat.isFile() || stat.nlink !== 1 || stat.size > 8 * 1024 * 1024)
         throw new Error(`Unsupported project file: ${path}`);
       return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
         readFileSync(current),
@@ -65,6 +65,7 @@ function inspect(binding: ProjectWorkspace, path: string): string | null {
   }
   return null;
 }
+export const inspectProjectFile = inspect;
 
 function hasOnlyGitMetadata(path: string) {
   const entries = readdirSync(path);
@@ -153,7 +154,15 @@ export function writeProjectWorkspace(
       if (file.before === null) continue;
       const backup = join(backupRoot, "originals", file.path);
       mkdirSync(dirname(backup), { recursive: true, mode: 0o700 });
-      writeFileSync(backup, file.before, { flag: "wx", mode: 0o600 });
+      try {
+        writeFileSync(backup, file.before, { flag: "wx", mode: 0o600 });
+      } catch (error) {
+        if (
+          (error as NodeJS.ErrnoException).code !== "EEXIST" ||
+          readFileSync(backup, "utf8") !== file.before
+        )
+          throw error;
+      }
     }
   }
   for (const file of drafts) {

@@ -11,7 +11,22 @@ export function TaskPlan({ api, task }: { api: DesktopAPI; task: Task }) {
     void api
       .runs(task.id)
       .then((runs) => {
-        if (live) setPlannedRun(runs.find((run) => !!run.plan) || null);
+        if (live)
+          setPlannedRun(
+            runs.find(
+              (run) =>
+                !!run.plan &&
+                (run.planning
+                  ? (!!run.planning.planReview ||
+                      !!run.planning.proposal ||
+                      !!run.planning.approved) &&
+                    !run.planning.questions.some(
+                      (question) => question.status === "pending",
+                    )
+                  : !!run.approvedLineup &&
+                    planQuestions(run.plan).length === 0),
+            ) || null,
+          );
       })
       .catch(() => {
         if (live) setPlannedRun(null);
@@ -21,20 +36,13 @@ export function TaskPlan({ api, task }: { api: DesktopAPI; task: Task }) {
     };
   }, [api, task.id]);
   if (!plannedRun?.plan) return null;
-  const draft =
-    planQuestions(plannedRun.plan).length > 0 ||
-    (task.mode === "plan" && !plannedRun.approvedLineup);
-  const display = visiblePlan(plannedRun.plan, draft);
+  const display = visiblePlan(plannedRun.plan, false);
   return (
-    <section
-      className="task-plan"
-      id="task-full-plan"
-      aria-label={draft ? "Draft analysis" : "Full plan"}
-    >
+    <section className="task-plan" id="task-full-plan" aria-label="Full plan">
       <div className="task-plan-heading">
         <div>
           <span className="eyebrow">PEARL'S PLAN</span>
-          <h2>{draft ? "Draft analysis" : "Full plan"}</h2>
+          <h2>Full plan</h2>
         </div>
         <CopyTextActions text={display} copyText={api.copyText} />
       </div>

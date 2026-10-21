@@ -9,8 +9,8 @@ import type { Teammate } from "./contracts";
 
 export type FixedRoster = {
   memberIds: CharacterId[];
-  activeBuilderId: CharacterId;
-  activeAuditorId: CharacterId;
+  activeBuilderId: CharacterId | null;
+  activeAuditorId: CharacterId | null;
   activeTesterId: CharacterId | null;
 };
 
@@ -40,10 +40,10 @@ export function parseFixedRoster(value: unknown): FixedRoster {
   const input = value as Record<string, unknown>;
   if (
     !Array.isArray(input.memberIds) ||
-    input.memberIds.length < 3 ||
+    input.memberIds.length < 1 ||
     input.memberIds.length > 16
   )
-    throw new Error("Choose three to sixteen fixed characters");
+    throw new Error("Choose one to sixteen characters");
   const memberIds = input.memberIds.map((id) => {
     if (typeof id !== "string" || !characterById(id))
       throw new Error("Unknown character");
@@ -58,19 +58,19 @@ export function parseFixedRoster(value: unknown): FixedRoster {
     role: "builder" | "auditor" | "tester",
   ) => {
     const id = input[key];
-    if (key === "activeTesterId" && id === null) return null;
+    if (id === null || id === "") return null;
     if (
       typeof id !== "string" ||
       !memberIds.includes(id as CharacterId) ||
       characterById(id)?.role !== role
     )
-      throw new Error(`Choose an included ${role} for automatic runs`);
+      throw new Error(`Choose an included ${role} for historical runs`);
     return id as CharacterId;
   };
   return {
     memberIds,
-    activeBuilderId: active("activeBuilderId", "builder")!,
-    activeAuditorId: active("activeAuditorId", "auditor")!,
+    activeBuilderId: active("activeBuilderId", "builder"),
+    activeAuditorId: active("activeAuditorId", "auditor"),
     activeTesterId: active("activeTesterId", "tester"),
   };
 }

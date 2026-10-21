@@ -1,6 +1,65 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { DesktopAPI } from "../shared/contracts";
 const api: DesktopAPI = {
+  listPearlChats: () => ipcRenderer.invoke("pearl:list"),
+  createPearlChat: () => ipcRenderer.invoke("pearl:create"),
+  getPearlChat: (id) => ipcRenderer.invoke("pearl:get", id),
+  sendPearlMessage: (id, text) => ipcRenderer.invoke("pearl:send", id, text),
+  choosePearlProject: (id) => ipcRenderer.invoke("pearl:project:choose", id),
+  approvePearlProject: (id, approved) =>
+    ipcRenderer.invoke("pearl:project:approve", id, approved),
+  decidePearlTool: (id, toolCallId, approved) =>
+    ipcRenderer.invoke("pearl:tool:decide", id, toolCallId, approved),
+  answerPearlQuestion: (id, questionId, answer) =>
+    ipcRenderer.invoke("pearl:question:answer", id, questionId, answer),
+  retryPearlChat: (id) => ipcRenderer.invoke("pearl:retry", id),
+  stopPearlChat: (id) => ipcRenderer.invoke("pearl:stop", id),
+  onPearlChatUpdate: (listener) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      chat: import("../shared/pearl-chat").PearlChat,
+    ) => listener(chat);
+    ipcRenderer.on("pearl:update", handler);
+    return () => ipcRenderer.removeListener("pearl:update", handler);
+  },
+  reviewCollaboration: (id, options) =>
+    ipcRenderer.invoke("collaboration:review", id, options),
+  recommendEnvironments: (id) =>
+    ipcRenderer.invoke("collaboration:environments", id),
+  reviewLocalFallback: (id, actor) =>
+    ipcRenderer.invoke("collaboration:local-review", id, actor),
+  approveLocalFallback: (token, approved) =>
+    ipcRenderer.invoke("collaboration:local-approve", token, approved),
+  reviewDispatchProposal: (id, proposalId) =>
+    ipcRenderer.invoke("collaboration:proposal-review", id, proposalId),
+  approveCollaboration: (token, approved) =>
+    ipcRenderer.invoke("collaboration:approve", token, approved),
+  sendCollaborationMessage: (id, text, recipient, questionId) =>
+    ipcRenderer.invoke(
+      "collaboration:message",
+      id,
+      text,
+      recipient,
+      questionId,
+    ),
+  continueTeammate: (id, actor, guidance) =>
+    ipcRenderer.invoke("collaboration:continue", id, actor, guidance),
+  reconcileCollaboration: (id, operationId) =>
+    ipcRenderer.invoke("collaboration:reconcile", id, operationId),
+  reviewSpecialistDispatch: (id, memberId, permissions, headId) =>
+    ipcRenderer.invoke(
+      "collaboration:dispatch-review",
+      id,
+      memberId,
+      permissions,
+      headId,
+    ),
+  approveSpecialistDispatch: (token, approved) =>
+    ipcRenderer.invoke("collaboration:dispatch-approve", token, approved),
+  reviewCollaborationSync: (id) =>
+    ipcRenderer.invoke("collaboration:sync-review", id),
+  approveCollaborationSync: (token, approved) =>
+    ipcRenderer.invoke("collaboration:sync-approve", token, approved),
   roleModelSettings: () => ipcRenderer.invoke("models:roles"),
   setRoleModelSettings: (value) =>
     ipcRenderer.invoke("models:roles:set", value),
@@ -125,6 +184,12 @@ const api: DesktopAPI = {
   selectDefaultModel: (model) => ipcRenderer.invoke("session:model", model),
   sendPlanningMessage: (id, text) =>
     ipcRenderer.invoke("room:planning-message", id, text),
+  answerPlanningQuestion: (id, answer) =>
+    ipcRenderer.invoke("room:planning-answer", id, answer),
+  answerPlanningQuestions: (id, answerSet) =>
+    ipcRenderer.invoke("room:planning-answers", id, answerSet),
+  approvePlanningPlan: (id, revision, approved) =>
+    ipcRenderer.invoke("room:planning-approve", id, revision, approved),
   retryPlanning: (id) => ipcRenderer.invoke("room:planning-retry", id),
   sendConversationMessage: (id, text, recipientId) =>
     ipcRenderer.invoke("room:conversation-message", id, text, recipientId),
@@ -164,4 +229,20 @@ const api: DesktopAPI = {
     return () => ipcRenderer.removeListener("run:update", listener);
   },
 };
-contextBridge.exposeInMainWorld("scully", api);
+const pearlApi = {
+  listPearlChats: api.listPearlChats,
+  createPearlChat: api.createPearlChat,
+  getPearlChat: api.getPearlChat,
+  sendPearlMessage: api.sendPearlMessage,
+  choosePearlProject: api.choosePearlProject,
+  approvePearlProject: api.approvePearlProject,
+  decidePearlTool: api.decidePearlTool,
+  answerPearlQuestion: api.answerPearlQuestion,
+  retryPearlChat: api.retryPearlChat,
+  stopPearlChat: api.stopPearlChat,
+  onPearlChatUpdate: api.onPearlChatUpdate,
+  session: api.session,
+  configureSession: api.configureSession,
+  metrics: api.metrics,
+};
+contextBridge.exposeInMainWorld("scully", pearlApi);

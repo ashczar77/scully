@@ -70,6 +70,7 @@ import { Portrait } from "./Portrait";
 import scullyLogo from "../../assets/branding/scully-friendly-nerd-transparent-v1.png";
 import { RunPanel, ConnectionSettings } from "./RunPanel";
 import { TeammateModelSettings } from "./TeammateModelSettings";
+import { SandboxConnectionSettings } from "./SandboxConnectionSettings";
 import { MetricsPanel } from "./MetricsPanel";
 import { StoragePanel } from "./StoragePanel";
 import { RunSettings } from "./RunSettings";
@@ -893,17 +894,15 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
           characterCatalog.find((character) => character.id === memberId)
             ?.role === role,
       );
-    if (id === rosterDraft.activeBuilderId && !replacement("builder")) return;
-    if (id === rosterDraft.activeAuditorId && !replacement("auditor")) return;
     setRosterDraft({
       memberIds,
       activeBuilderId:
         id === rosterDraft.activeBuilderId
-          ? replacement("builder")!
+          ? replacement("builder") || null
           : rosterDraft.activeBuilderId,
       activeAuditorId:
         id === rosterDraft.activeAuditorId
-          ? replacement("auditor")!
+          ? replacement("auditor") || null
           : rosterDraft.activeAuditorId,
       activeTesterId:
         id === rosterDraft.activeTesterId ? null : rosterDraft.activeTesterId,
@@ -1674,6 +1673,7 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
                       />
                     </section>
                     <ConnectionSettings api={api!} />
+                    <SandboxConnectionSettings api={api!} />
                     <TeammateModelSettings api={api!} />
                     <PlanningSettings api={api!} />
                     <DiagnosticsPanel api={api!} />
@@ -1929,6 +1929,10 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
                   />{" "}
                   Start working
                 </label>
+                <p className="muted">
+                  Pearl will settle any blocking choices and propose the team
+                  for review before code runs.
+                </p>
               </fieldset>
               <div className="settings-card">
                 <strong>Team for this task: {defaultTeam.name}</strong>
@@ -2012,6 +2016,10 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
                 />{" "}
                 Start working
               </label>
+              <p className="muted">
+                Pearl will settle any blocking choices and propose the team for
+                review before code runs.
+              </p>
             </fieldset>
             {taskRunCount === null ? (
               <p className="muted">Checking saved runs...</p>
@@ -2330,16 +2338,19 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
               </div>
               <div className="roster-assignment-grid">
                 <label>
-                  Builder for current runs
+                  Legacy default builder
                   <select
-                    value={rosterDraft.activeBuilderId}
+                    value={rosterDraft.activeBuilderId || ""}
                     onChange={(event) =>
                       setRosterDraft({
                         ...rosterDraft,
-                        activeBuilderId: event.target.value as CharacterId,
+                        activeBuilderId: event.target.value
+                          ? (event.target.value as CharacterId)
+                          : null,
                       })
                     }
                   >
+                    <option value="">Assigned when a plan is approved</option>
                     {characterCatalog
                       .filter(
                         (character) =>
@@ -2354,16 +2365,19 @@ export function App({ api = window.scully }: { api?: DesktopAPI }) {
                   </select>
                 </label>
                 <label>
-                  Independent auditor for current runs
+                  Legacy default auditor
                   <select
-                    value={rosterDraft.activeAuditorId}
+                    value={rosterDraft.activeAuditorId || ""}
                     onChange={(event) =>
                       setRosterDraft({
                         ...rosterDraft,
-                        activeAuditorId: event.target.value as CharacterId,
+                        activeAuditorId: event.target.value
+                          ? (event.target.value as CharacterId)
+                          : null,
                       })
                     }
                   >
+                    <option value="">Assigned when a plan is approved</option>
                     {characterCatalog
                       .filter(
                         (character) =>

@@ -1,6 +1,6 @@
 import { build as bundle } from "esbuild";
 import { build as renderer } from "vite";
-import { copyFile, mkdir } from "node:fs/promises";
+import { copyFile, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 await renderer();
 await mkdir("dist/branding", { recursive: true });
@@ -12,9 +12,8 @@ await copyFile(
 await copyFile("assets/fonts/OFL.txt", "dist/fonts/ChelseaMarket-OFL.txt");
 await bundle({
   entryPoints: {
-    main: "src/main/main.ts",
-    preload: "src/main/preload.ts",
-    worker: "src/engine/worker.ts",
+    main: "src/main/pearl-main.ts",
+    preload: "src/main/pearl-preload.ts",
   },
   outdir: "dist",
   outExtension: { ".js": ".cjs" },
@@ -24,3 +23,4 @@ await bundle({
   external: ["electron", "node:sqlite"],
   sourcemap: false,
 });
+await rm("dist/worker.cjs", { force: true });
