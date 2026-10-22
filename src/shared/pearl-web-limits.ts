@@ -1,0 +1,2 @@
+export const PEARL_WEB_SEARCHES_PER_TURN = 12;
+export const PEARL_WEB_READS_PER_TURN = 20;

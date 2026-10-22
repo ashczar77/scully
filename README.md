@@ -18,7 +18,7 @@ Pearl can discuss an idea, answer general questions, plan a change, and work on 
 
 ## Quick start
 
-**Requirements:** Node.js 22.12 or newer, npm, and a desktop environment. A Nebius Token Factory API key is needed for Pearl's model replies.
+**Requirements:** Node.js 22.12 or newer, npm, and a desktop environment. A Nebius Token Factory API key is needed for Pearl's model replies. Public web search is optional and uses a separate Tavily API key.
 
 ```sh
 npm ci
@@ -26,10 +26,11 @@ npm start
 ```
 
 1. Open **Settings**, enter a Nebius API key and compatible model ID, then connect. The key stays in memory for this app session.
-2. Choose **New chat**. Ask Pearl a general question or describe coding work.
-3. Choose a local project folder and approve its read and edit scope when you want Pearl to inspect or change files. Pearl can chat without a project.
-4. Review each proposed command and choose **Run once** or **Deny**. Commands run under your account in the selected project folder.
-5. Inspect Pearl's action record, changed project files, and check results. A successful command exit does not prove the requested behavior is correct.
+2. To enable public web search, enter a Tavily API key in **Settings**. Pearl can search without an approved project. Search queries and selected public result URLs are sent to Tavily; results are saved in the chat. The key stays in memory until the app closes.
+3. Choose **New chat**. Ask Pearl a general question or describe coding work.
+4. Choose a local project folder and approve its read and edit scope when you want Pearl to inspect or change files. Pearl can chat without a project.
+5. Review each proposed command and choose **Run once** or **Deny**. Commands run under your account in the selected project folder.
+6. Inspect Pearl's action record, changed project files, and check results. A successful command exit does not prove the requested behavior is correct.
 
 See [Using Scully](docs/using-scully.md) for permissions, recovery, and current limits.
 
@@ -38,6 +39,7 @@ See [Using Scully](docs/using-scully.md) for permissions, recovery, and current 
 | Capability     | Current behavior                                                                                                                                                                       |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Chat           | Persistent Room conversations with Markdown replies, follow-up questions, linked answers, and ordinary digressions.                                                                    |
+| Web search     | Optional public search with attributed results and query-focused reading of a returned page. Calls and page text are bounded per turn.                                                 |
 | Project access | Explicit approval of one selected folder per chat. Private paths and symlinks are rejected by file tools.                                                                              |
 | Coding         | Pearl can list and search project files, read bounded line ranges, apply exact multi-edit patches, or create and replace files with revision checks. Existing originals are backed up. |
 | Browser        | Pearl can inspect static pages or start an approved local server, then interact with the app in a persistent isolated browser.                                                         |
@@ -48,22 +50,23 @@ Pearl's model may still misunderstand a requirement or produce a poor plan. [Run
 
 ## Development and verification
 
-| Command                                      | Purpose                                                                 |
-| -------------------------------------------- | ----------------------------------------------------------------------- |
-| `npm test`                                   | Run the default unit, component, storage, and provider boundary suite.  |
-| `npm run typecheck`                          | Check TypeScript.                                                       |
-| `npm run build`                              | Build the desktop app.                                                  |
-| `npm run format:check`                       | Check source and script formatting.                                     |
-| `npm run test:desktop`                       | Run Electron smoke tests, including a local model HTTP fixture.         |
-| `npm run package`                            | Build an unsigned macOS app bundle in `out/`.                           |
-| `npm run test:package:mac`                   | Launch and inspect the packaged macOS app.                              |
-| `SCULLY_LIVE_TEST=1 npm run test:live:pearl` | Run an opt-in connected Room journey with `NEBIUS_API_KEY` set locally. |
+| Command                                      | Purpose                                                                       |
+| -------------------------------------------- | ----------------------------------------------------------------------------- |
+| `npm test`                                   | Run the default unit, component, storage, and provider boundary suite.        |
+| `npm run typecheck`                          | Check TypeScript.                                                             |
+| `npm run build`                              | Build the desktop app.                                                        |
+| `npm run format:check`                       | Check source and script formatting.                                           |
+| `npm run test:desktop`                       | Run Electron smoke tests, including a local model HTTP fixture.               |
+| `npm run package`                            | Build an unsigned macOS app bundle in `out/`.                                 |
+| `npm run test:package:mac`                   | Launch and inspect the packaged macOS app.                                    |
+| `SCULLY_LIVE_TEST=1 npm run test:live:pearl` | Run an opt-in connected Room journey with `NEBIUS_API_KEY` set locally.       |
+| `node scripts/pearl-web-live.manual.mjs`     | Run an opt-in public web search Room check with local Nebius and Tavily keys. |
 
 The desktop fixture verifies the integrated protocol and UI, not model reasoning. The live script saves a detailed transcript only in ignored local `test-results/` for manual review. Do not put credentials in chat messages or repository files.
 
 ## Privacy and permissions
 
-Conversations and backups are stored locally in Electron's per-user application data. The Nebius key remains in memory and must be entered again after an app restart. Model requests send the relevant conversation and project tool observations to Nebius. External telemetry is disabled. Local operational metrics retain bounded operation names, outcomes, and durations, without prompts, source text, command arguments, credentials, or absolute paths.
+Conversations and backups are stored locally in Electron's per-user application data. The Nebius and Tavily keys remain in memory and must be entered again after an app restart. Model requests send the relevant conversation and project tool observations to Nebius. When web search is connected, Pearl sends short queries and selected public result URLs to Tavily. Search content is untrusted and may be incomplete. External telemetry is disabled. Local operational metrics retain bounded operation names, outcomes, and durations, without prompts, source text, command arguments, credentials, or absolute paths.
 
 File edits are confined to the approved project root and checked against the revision Pearl read. Commands require a separate review and can run arbitrary programs under your account. Review the command and the project's scripts before approval. On macOS, a system policy confines writes to the project, restricts reads from private directories, and blocks remote networking. Local loopback and project files remain accessible. Other platforms currently fail closed; this is not a full container.
 

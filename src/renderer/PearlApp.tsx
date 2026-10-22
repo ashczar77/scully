@@ -46,6 +46,8 @@ export function PearlApp({
   const [menuId, setMenuId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [key, setKey] = useState("");
+  const [webKey, setWebKey] = useState("");
+  const [webConfigured, setWebConfigured] = useState(false);
   const [model, setModel] = useState("zai-org/GLM-5.3-Flash");
   const [configured, setConfigured] = useState(false);
   const activeId = useRef<string | null>(null);
@@ -63,10 +65,15 @@ export function PearlApp({
   }
   useEffect(() => {
     let live = true;
-    void Promise.all([api.session(), refreshChats()])
-      .then(([session]) => {
+    void Promise.all([
+      api.session(),
+      api.webSearchInfo?.() ?? Promise.resolve({ configured: false }),
+      refreshChats(),
+    ])
+      .then(([session, web]) => {
         if (!live) return;
         setConfigured(session.configured);
+        setWebConfigured(web.configured);
         if (session.model) setModel(session.model);
       })
       .catch((cause) => {
@@ -455,6 +462,51 @@ export function PearlApp({
                 />
               </label>
               <button>Connect</button>
+            </form>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void action(async () => {
+                  const status = await api.configureWebSearch(webKey);
+                  setWebConfigured(status.configured);
+                  setWebKey("");
+                });
+              }}
+            >
+              <h3>Web search</h3>
+              <p>
+                {webConfigured
+                  ? "Connected for this app session."
+                  : "Connect Tavily to let Pearl search public web sources."}
+              </p>
+              <p>
+                Pearl may send short search queries and selected public result
+                URLs to Tavily. Search results are saved in the chat. The key is
+                kept in memory until the app closes.
+              </p>
+              <label>
+                Tavily API key
+                <input
+                  type="password"
+                  value={webKey}
+                  onChange={(event) => setWebKey(event.target.value)}
+                  required
+                />
+              </label>
+              <button type="submit">Connect web search</button>
+              {webConfigured && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    void action(async () => {
+                      const status = await api.disconnectWebSearch();
+                      setWebConfigured(status.configured);
+                    })
+                  }
+                >
+                  Disconnect web search
+                </button>
+              )}
             </form>
           </aside>
         )}

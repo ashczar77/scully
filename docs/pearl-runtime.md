@@ -21,3 +21,5 @@ Chats, questions, approvals, action results, and pause state survive an app rest
 ## Current limits
 
 Context selection uses a character budget, not the selected model's token window, and does not semantically compact a long chat. Patches cover one file per call and are not atomic across multiple files. `browser_check` handles static project pages and approved local live previews with bounded actions. It cannot browse arbitrary sites. Preview navigation and requests stay within the allocated local origin. Command isolation is available only through the current macOS policy and does not prevent access to every local service or project file. Connected Room checks now cover local application implementation and repair, independent browser behavior, restart and provider recovery. Broad dependency-installation and deployment workflows remain unverified. See [validation status](pearl-validation.md) for the exact tested scope and residual limits.
+
+The distinction between focused subagents and visible team teammates is recorded in [agent collaboration direction](agent-collaboration-direction.md). Neither is part of the active Pearl-only workflow.

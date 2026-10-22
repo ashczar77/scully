@@ -19,6 +19,7 @@ import { PearlChatStore } from "../src/main/pearl-chat-store";
 import { PearlChatManager } from "../src/main/pearl-chat-manager";
 import type { startProjectPreview } from "../src/main/pearl-preview";
 import type { PearlBrowser } from "../src/main/pearl-browser";
+import { PearlWebAccess, type PearlWebProvider } from "../src/main/pearl-web";
 import type { CommandRunner } from "../src/main/pearl-command-sandbox";
 import type { PearlModel, PearlModelResult } from "../src/engine/pearl-model";
 import {
@@ -40,6 +41,8 @@ function fixture(
   responses: PearlModelResult[],
   browser?: PearlBrowser,
   previewStarter?: typeof startProjectPreview,
+  web?: PearlWebAccess,
+  webEnabled: () => boolean = () => true,
 ) {
   const root = mkdtempSync(join(tmpdir(), "scully-pearl-"));
   roots.push(root);
@@ -73,9 +76,83 @@ function fixture(
         env: { PATH: process.env.PATH || "/usr/bin:/bin", HOME: cwd },
       })) satisfies CommandRunner,
     previewStarter,
+    web,
+    webEnabled,
   );
   return { root, data, project, store, manager, complete };
 }
+
+it("lets an ordinary Room chat search and read a public result without project access", async () => {
+  const provider: PearlWebProvider = {
+    search: vi.fn(async () => [
+      {
+        title: "Release notes",
+        url: "https://example.org/releases",
+        excerpt: "Version 2 is available.",
+      },
+    ]),
+    read: vi.fn(async () => "Version 2 was released on Tuesday."),
+  };
+  const f = fixture(
+    [
+      tool("search_web", { query: "Example release date" }, "search"),
+      tool("read_web_result", { resultId: "1" }, "read"),
+      reply(
+        "Version 2 was released on Tuesday. [Release notes](https://example.org/releases)",
+      ),
+    ],
+    undefined,
+    undefined,
+    new PearlWebAccess(provider),
+  );
+  const chat = f.manager.openNewChat();
+  await f.manager.send(chat.id, "When did Example 2 release?");
+  const done = await settled(f.store, chat.id);
+  expect(done.status).toBe("idle");
+  expect(done.project).toBeUndefined();
+  expect(provider.search).toHaveBeenCalledWith(
+    "Example release date",
+    expect.any(AbortSignal),
+  );
+  expect(provider.read).toHaveBeenCalledWith(
+    "https://example.org/releases",
+    "Example release date",
+    expect.any(AbortSignal),
+  );
+  expect(
+    done.messages.find(
+      (message) => message.toolName === "search_web" && message.role === "tool",
+    )?.text,
+  ).toContain("Release notes");
+  expect(done.messages.at(-1)?.text).toContain("https://example.org/releases");
+  expect(f.complete.mock.calls[0][0].allowedTools).toContain("search_web");
+  expect(f.complete.mock.calls[0][0].allowedTools).not.toContain("read_file");
+});
+
+it("does not expose web tools when search is disconnected", async () => {
+  const provider: PearlWebProvider = {
+    search: vi.fn(async () => []),
+    read: vi.fn(async () => ""),
+  };
+  const f = fixture(
+    [
+      tool("search_web", { query: "current news" }),
+      reply("Web search is unavailable."),
+    ],
+    undefined,
+    undefined,
+    new PearlWebAccess(provider),
+    () => false,
+  );
+  const chat = f.manager.openNewChat();
+  await f.manager.send(chat.id, "What is current news?");
+  const done = await settled(f.store, chat.id);
+  expect(
+    done.messages.some((message) => message.text.includes("Action rejected")),
+  ).toBe(true);
+  expect(provider.search).not.toHaveBeenCalled();
+  expect(f.complete.mock.calls[0][0].allowedTools).not.toContain("search_web");
+});
 async function settled(store: PearlChatStore, id: string) {
   await vi.waitFor(() => expect(store.get(id).status).not.toBe("running"));
   return store.get(id);

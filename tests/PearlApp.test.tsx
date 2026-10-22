@@ -11,6 +11,35 @@ import { PearlApp } from "../src/renderer/PearlApp";
 import type { DesktopAPI } from "../src/shared/contracts";
 import type { PearlChat } from "../src/shared/pearl-chat";
 
+it("explains outbound web queries and keeps the search key out of the Room", async () => {
+  const configureWebSearch = vi.fn(async () => ({ configured: true }));
+  const api = {
+    listPearlChats: vi.fn(async () => []),
+    session: vi.fn(async () => ({ configured: true, model: "fixture" })),
+    webSearchInfo: vi.fn(async () => ({ configured: false })),
+    configureWebSearch,
+    disconnectWebSearch: vi.fn(async () => ({ configured: false })),
+    onPearlChatUpdate: vi.fn(() => () => {}),
+  } as unknown as DesktopAPI;
+  render(<PearlApp api={api} />);
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  const panel = screen.getByRole("complementary", { name: "Settings panel" });
+  expect(
+    within(panel).getByText(/send short search queries/i),
+  ).toBeInTheDocument();
+  fireEvent.change(within(panel).getByLabelText("Tavily API key"), {
+    target: { value: "tvly-fixture-secret" },
+  });
+  fireEvent.click(
+    within(panel).getByRole("button", { name: "Connect web search" }),
+  );
+  await waitFor(() =>
+    expect(configureWebSearch).toHaveBeenCalledWith("tvly-fixture-secret"),
+  );
+  expect(screen.queryByText("tvly-fixture-secret")).toBeNull();
+  expect(within(panel).getByLabelText("Tavily API key")).toHaveValue("");
+});
+
 it("opens a fresh Room chat without task or team controls", async () => {
   const created: PearlChat = {
     id: "12345678-1234-1234-1234-123456789abc",

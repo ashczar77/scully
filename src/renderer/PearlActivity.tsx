@@ -239,6 +239,8 @@ function label(name: string): string {
     list_files: "List files",
     read_file: "Read file",
     search_text: "Search files",
+    search_web: "Search web",
+    read_web_result: "Read web result",
     create_file: "Create file",
     write_file: "Write file",
     replace_in_file: "Edit file",

@@ -17,6 +17,8 @@ import { IsolatedPearlBrowser } from "./pearl-browser";
 import { PearlChatStore } from "./pearl-chat-store";
 import { roomChat, roomResult } from "./pearl-chat-view";
 import { PearlSession } from "./pearl-session";
+import { PearlWebAccess, PearlWebConnection } from "./pearl-web";
+import { TavilyWebProvider } from "./pearl-tavily";
 import { cappedPearlModel, liveModelRequestLimit } from "./pearl-test-model";
 
 declare const __SCULLY_DEV_HARNESS__: boolean;
@@ -31,9 +33,26 @@ app.commandLine.appendSwitch("disable-http-cache");
 
 const metrics = new LocalMetrics();
 const settings = new PearlSession();
+const webConnection = new PearlWebConnection();
 const appIcon = join(__dirname, "branding", "scully.png");
 const testingPath = process.env.SCULLY_TEST_DATA;
 if (testingPath && !app.isPackaged) app.setPath("userData", testingPath);
+const webTestEndpoint =
+  testingPath && !app.isPackaged
+    ? process.env.SCULLY_PEARL_WEB_TEST_ENDPOINT
+    : undefined;
+if (webTestEndpoint) {
+  const url = new URL(webTestEndpoint);
+  if (url.protocol !== "http:" || url.hostname !== "127.0.0.1")
+    throw new Error("Invalid local web test endpoint");
+}
+const webFetch: typeof fetch = webTestEndpoint
+  ? (input, init) =>
+      fetch(new URL(new URL(String(input)).pathname, webTestEndpoint), init)
+  : fetch;
+const webAccess = new PearlWebAccess(
+  new TavilyWebProvider(() => webConnection.current(), webFetch),
+);
 const ownsWorkspace = app.requestSingleInstanceLock();
 if (!ownsWorkspace) app.quit();
 
@@ -152,7 +171,23 @@ app
       model,
       metrics.record,
       new IsolatedPearlBrowser(),
+      undefined,
+      undefined,
+      webAccess,
+      () => webConnection.info().configured,
     );
+
+    ipcMain.handle("pearl:web:info", (event) => {
+      trusted(event);
+      return webConnection.info();
+    });
+    handle("pearl:web:configure", (_event, key) =>
+      webConnection.configure(key),
+    );
+    handle("pearl:web:disconnect", () => {
+      webConnection.close();
+      return webConnection.info();
+    });
 
     ipcMain.handle("pearl:list", (event, scope) => {
       trusted(event);
@@ -224,5 +259,6 @@ app.on("before-quit", (event) => {
 });
 app.on("will-quit", () => {
   settings.close();
+  webConnection.close();
   chats?.close();
 });

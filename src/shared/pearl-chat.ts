@@ -105,6 +105,9 @@ export type PearlChatSummary = Pick<
 >;
 
 export type PearlChatAPI = {
+  webSearchInfo: () => Promise<{ configured: boolean }>;
+  configureWebSearch: (key: string) => Promise<{ configured: boolean }>;
+  disconnectWebSearch: () => Promise<{ configured: boolean }>;
   listPearlChats: (
     scope?: "active" | "archived" | "trash",
   ) => Promise<PearlChatSummary[]>;

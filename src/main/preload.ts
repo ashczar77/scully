@@ -1,6 +1,9 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { DesktopAPI } from "../shared/contracts";
 const api: DesktopAPI = {
+  webSearchInfo: () => ipcRenderer.invoke("pearl:web:info"),
+  configureWebSearch: (key) => ipcRenderer.invoke("pearl:web:configure", key),
+  disconnectWebSearch: () => ipcRenderer.invoke("pearl:web:disconnect"),
   listPearlChats: (scope) => ipcRenderer.invoke("pearl:list", scope),
   createPearlChat: () => ipcRenderer.invoke("pearl:create"),
   getPearlChat: (id) => ipcRenderer.invoke("pearl:get", id),
@@ -235,6 +238,9 @@ const api: DesktopAPI = {
   },
 };
 const pearlApi = {
+  webSearchInfo: api.webSearchInfo,
+  configureWebSearch: api.configureWebSearch,
+  disconnectWebSearch: api.disconnectWebSearch,
   listPearlChats: api.listPearlChats,
   createPearlChat: api.createPearlChat,
   getPearlChat: api.getPearlChat,

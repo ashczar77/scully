@@ -10,6 +10,9 @@ type PearlDesktopAPI = PearlChatAPI & {
 };
 
 const api: PearlDesktopAPI = {
+  webSearchInfo: () => ipcRenderer.invoke("pearl:web:info"),
+  configureWebSearch: (key) => ipcRenderer.invoke("pearl:web:configure", key),
+  disconnectWebSearch: () => ipcRenderer.invoke("pearl:web:disconnect"),
   listPearlChats: (scope) => ipcRenderer.invoke("pearl:list", scope),
   createPearlChat: () => ipcRenderer.invoke("pearl:create"),
   getPearlChat: (id) => ipcRenderer.invoke("pearl:get", id),

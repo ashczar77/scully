@@ -89,9 +89,11 @@ try {
     "archivePearlChat",
     "choosePearlProject",
     "configureSession",
+    "configureWebSearch",
     "createPearlChat",
     "decidePearlTool",
     "deletePearlChatPermanently",
+    "disconnectWebSearch",
     "getPearlChat",
     "listPearlChats",
     "metrics",
@@ -102,11 +104,13 @@ try {
     "session",
     "stopPearlChat",
     "trashPearlChat",
+    "webSearchInfo",
   ]);
   const channels = await app.evaluate(({ ipcMain }) => [
     ...ipcMain._invokeHandlers.keys(),
   ]);
   assert(channels.includes("pearl:send"));
+  assert(channels.includes("pearl:web:configure"));
   assert(
     ![
       "workspace:load",

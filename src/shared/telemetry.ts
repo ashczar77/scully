@@ -1,4 +1,8 @@
 export const operations = [
+  "pearl:web:configure",
+  "pearl:web:disconnect",
+  "web.search",
+  "web.read",
   "pearl:create",
   "pearl:archive",
   "pearl:trash",
