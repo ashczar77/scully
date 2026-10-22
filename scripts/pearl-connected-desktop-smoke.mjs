@@ -46,7 +46,7 @@ const responses = [
       "Separate-device sign-in changes the storage and account design. I will keep it in scope.",
   },
   {
-    content: "I will inspect the project before editing.",
+    content: "I will inspect the project:",
     tool: ["list_files", { path: "" }],
   },
   {
@@ -338,6 +338,20 @@ try {
     "Inspect this project and create the first page without overwriting my README.",
   );
   assert.equal(chat.status, "idle");
+  assert.equal(
+    await page
+      .locator(".pearl-message.assistant")
+      .filter({ hasText: "I will inspect the project:" })
+      .count(),
+    0,
+  );
+  const codingActivity = page.locator(".pearl-activity").last();
+  await codingActivity.locator(":scope > summary").click();
+  await codingActivity.getByText("I will inspect the project:").waitFor();
+  assert.equal(
+    (await codingActivity.locator(".pearl-activity-action").count()) >= 3,
+    true,
+  );
   await page
     .getByText(/No command checks completed for these changes/)
     .waitFor();
@@ -505,7 +519,10 @@ try {
     }),
   );
   await page
-    .getByRole("button", { name: "Help me plan a small reading list." })
+    .getByRole("button", {
+      name: "Help me plan a small reading list.",
+      exact: true,
+    })
     .click();
   assert((await current()).project.approved);
   const restoredActivity = page

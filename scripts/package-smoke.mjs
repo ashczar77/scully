@@ -48,6 +48,32 @@ try {
     0,
   );
   assert.equal(await page.getByRole("button", { name: "New chat" }).count(), 1);
+  for (let i = 0; i < 3; i++) await page.locator(".pearl-new").click();
+  assert.equal(
+    await page.evaluate(
+      async () => (await window.scully.listPearlChats()).length,
+    ),
+    1,
+  );
+  assert.equal(
+    await page.evaluate(() => {
+      const shell = document
+        .querySelector(".pearl-shell")
+        .getBoundingClientRect();
+      const header = document
+        .querySelector(".pearl-header")
+        .getBoundingClientRect();
+      const rail = document
+        .querySelector(".pearl-rail")
+        .getBoundingClientRect();
+      return (
+        Math.abs(header.left - shell.left) < 1 &&
+        Math.abs(header.right - shell.right) < 1 &&
+        Math.abs(rail.top - header.bottom) < 1
+      );
+    }),
+    true,
+  );
   await page.waitForFunction(() =>
     [
       ...document.querySelectorAll(".pearl-brand img, .pearl-welcome-mark"),

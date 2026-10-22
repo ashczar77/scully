@@ -154,15 +154,21 @@ app
       new IsolatedPearlBrowser(),
     );
 
-    ipcMain.handle("pearl:list", (event) => {
+    ipcMain.handle("pearl:list", (event, scope) => {
       trusted(event);
-      return pearl!.list();
+      return pearl!.list(scope);
     });
-    handle("pearl:create", () => pearl!.create());
+    handle("pearl:create", () => pearl!.openNewChat());
     ipcMain.handle("pearl:get", (event, id) => {
       trusted(event);
       return roomChat(pearl!.get(id));
     });
+    handle("pearl:archive", (_event, id) => pearl!.archive(id));
+    handle("pearl:trash", (_event, id) => pearl!.trash(id));
+    handle("pearl:restore", (_event, id) => pearl!.restore(id));
+    handle("pearl:permanent-delete", (_event, id) =>
+      pearl!.deletePermanently(id),
+    );
     handle("pearl:send", (_event, id, text) => pearl!.send(id, text));
     handle("pearl:project:choose", async (_event, id) => {
       const result = await dialog.showOpenDialog(win!, {

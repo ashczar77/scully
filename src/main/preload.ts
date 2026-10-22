@@ -1,9 +1,14 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { DesktopAPI } from "../shared/contracts";
 const api: DesktopAPI = {
-  listPearlChats: () => ipcRenderer.invoke("pearl:list"),
+  listPearlChats: (scope) => ipcRenderer.invoke("pearl:list", scope),
   createPearlChat: () => ipcRenderer.invoke("pearl:create"),
   getPearlChat: (id) => ipcRenderer.invoke("pearl:get", id),
+  archivePearlChat: (id) => ipcRenderer.invoke("pearl:archive", id),
+  trashPearlChat: (id) => ipcRenderer.invoke("pearl:trash", id),
+  restorePearlChat: (id) => ipcRenderer.invoke("pearl:restore", id),
+  deletePearlChatPermanently: (id) =>
+    ipcRenderer.invoke("pearl:permanent-delete", id),
   sendPearlMessage: (id, text) => ipcRenderer.invoke("pearl:send", id, text),
   choosePearlProject: (id) => ipcRenderer.invoke("pearl:project:choose", id),
   approvePearlProject: (id, approved) =>

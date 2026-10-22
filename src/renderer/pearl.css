@@ -1,6 +1,8 @@
 .pearl-shell {
   --pearl-teal: #46dfcc;
+  --pearl-divider: #ffffff14;
   display: flex;
+  flex-direction: column;
   width: 100%;
   height: 100vh;
   height: 100dvh;
@@ -29,21 +31,70 @@
   outline: 2px solid var(--pearl-teal);
   outline-offset: 3px;
 }
-.pearl-sidebar {
-  width: 250px;
-  min-width: 210px;
+.pearl-header {
+  min-height: 57px;
+  flex: none;
+  border-bottom: 1px solid var(--pearl-divider);
+  padding: 8px 24px 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
   background: #151a1f;
-  border-right: 1px solid #29363a;
+}
+.pearl-workspace {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.pearl-rail {
+  width: 48px;
+  flex: none;
   display: flex;
   flex-direction: column;
-  padding: 18px 12px 14px;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 6px 10px;
+  border-right: 1px solid var(--pearl-divider);
+  background: #151a1f;
+}
+.pearl-rail button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #9eafb8;
+}
+.pearl-rail button:hover,
+.pearl-rail button.active {
+  background: #26363a;
+  color: #d7f6ed;
+}
+.pearl-rail button.active {
+  box-shadow: inset 2px 0 var(--pearl-teal);
+}
+.pearl-rail .pearl-rail-settings {
+  margin-top: auto;
+}
+.pearl-sidebar {
+  width: 250px;
+  flex: none;
+  background: #151a1f;
+  border-right: 1px solid var(--pearl-divider);
+  display: flex;
+  flex-direction: column;
+  padding: 13px 12px 14px;
   gap: 12px;
 }
 .pearl-brand {
   display: flex;
   align-items: center;
   gap: 5px;
-  padding: 0 9px 10px;
+  width: 286px;
+  flex: none;
+  padding: 0 9px;
 }
 .pearl-brand img {
   width: 30px;
@@ -94,8 +145,7 @@
   scrollbar-width: thin;
   scrollbar-color: #365851 #141b22;
 }
-.pearl-chat-list button,
-.pearl-settings-link {
+.pearl-chat-list button {
   border: 0;
   color: #afbec9;
   background: transparent;
@@ -106,28 +156,71 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.pearl-shell .pearl-chat-list button {
+.pearl-chat-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  position: relative;
+  min-width: 0;
+}
+.pearl-chat-row .pearl-chat-title {
+  flex: 1;
+  min-width: 0;
+  width: 0;
+  display: flex;
+  align-items: center;
+}
+.pearl-chat-title span {
   display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pearl-chat-row .pearl-chat-options {
+  flex: none;
+  width: 30px;
+  padding: 7px;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+}
+.pearl-chat-row:hover .pearl-chat-options,
+.pearl-chat-options:focus-visible,
+.pearl-chat-options[aria-expanded="true"] {
+  opacity: 1;
+}
+.pearl-chat-menu {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px;
+  background: #213037;
+  border: 1px solid #3a5054;
+  border-radius: 9px;
+  box-shadow: 0 10px 25px #0008;
+}
+.pearl-chat-menu button {
   width: 100%;
 }
+.pearl-delete-confirm p,
+.pearl-list-empty {
+  color: #aebec5;
+  font-size: 12px;
+  padding: 8px 10px;
+  margin: 0;
+}
+.pearl-read-only {
+  margin-bottom: 16px;
+}
 .pearl-chat-list button:hover,
-.pearl-chat-list button.selected,
-.pearl-settings-link:hover {
+.pearl-chat-list button.selected {
   background: #22333a;
   color: #fff;
 }
 .pearl-chat-list button.selected {
   box-shadow: inset 2px 0 #46dfcc;
-}
-.pearl-settings-link {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  justify-content: flex-start;
-  border-top: 1px solid #29363a;
-  border-radius: 0;
-  padding-top: 16px;
 }
 .pearl-main {
   display: flex;
@@ -136,17 +229,6 @@
   flex: 1;
   background:
     radial-gradient(ellipse at 50% 0%, #1a2a2b66, transparent 48%), #11171d;
-}
-.pearl-header {
-  min-height: 56px;
-  flex: none;
-  border-bottom: 1px solid #29363a;
-  padding: 9px 24px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  background: #151a1f;
 }
 .pearl-header-context {
   min-width: 0;
@@ -182,6 +264,13 @@
 .pearl-project-button svg {
   flex: none;
   color: var(--pearl-teal);
+}
+.pearl-project-icon {
+  width: 34px;
+  height: 34px;
+  justify-content: center;
+  padding: 0;
+  flex: none;
 }
 .pearl-scroll {
   flex: 1;
@@ -433,12 +522,28 @@
   color: #f1baaa;
   font-size: 12px;
 }
+.pearl-activity-status {
+  flex: 1;
+  min-width: 120px;
+  margin-left: 4px;
+  color: #9fbab8;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .pearl-activity.has-issues {
   border-color: #936d61;
 }
 .pearl-activity-list {
   border-top: 1px solid #355651;
   padding: 7px 13px 11px 22px;
+}
+.pearl-activity-note {
+  margin: 8px 0 4px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #c7d8d6;
+  line-height: 1.5;
 }
 .pearl-activity-action {
   border-bottom: 1px solid #29413f;
@@ -532,7 +637,7 @@
   overflow-wrap: anywhere;
 }
 .pearl-card button,
-.pearl-modal button {
+.pearl-settings-panel button {
   border: 1px solid #57b4a5;
   border-radius: 8px;
   color: #072521;
@@ -541,8 +646,7 @@
   padding: 8px 13px;
   margin-right: 9px;
 }
-.pearl-card button.quiet,
-.pearl-modal button.quiet {
+.pearl-card button.quiet {
   color: #d9e8e5;
   background: #283a40;
   border-color: #425f5d;
@@ -633,59 +737,60 @@
   font-size: 11px;
   padding: 11px;
 }
-.pearl-modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: #040d11c9;
-  display: grid;
-  place-items: center;
-  z-index: 100;
+.pearl-settings-panel {
+  overflow-y: auto;
 }
-.pearl-modal {
-  background: #1b2b30;
-  border: 1px solid #4a726b;
-  border-radius: 16px;
-  padding: 24px;
-  width: min(430px, calc(100% - 35px));
+.pearl-settings-panel h2 {
+  margin: 4px 4px 10px;
+  font-size: 16px;
+}
+.pearl-settings-panel form {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  box-shadow: 0 28px 75px #030d11ad;
+  gap: 12px;
 }
-.pearl-modal h2 {
+.pearl-settings-panel h3 {
   margin: 0;
+  font-size: 13px;
 }
-.pearl-modal p {
+.pearl-settings-panel p {
   color: #acc3c6;
   margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
 }
-.pearl-modal label {
+.pearl-settings-panel label {
   display: flex;
   flex-direction: column;
   gap: 5px;
+  color: #cad9dc;
+  font-size: 12px;
 }
-.pearl-modal input {
+.pearl-settings-panel input {
   border: 1px solid #4a6d68;
   border-radius: 7px;
   background: #102026;
   color: white;
-  padding: 10px;
+  padding: 8px;
+  width: 100%;
+  min-width: 0;
 }
-.pearl-modal > div {
-  display: flex;
-  justify-content: flex-end;
+.pearl-settings-panel button {
+  margin-right: 0;
 }
 @media (max-width: 700px) {
   .pearl-sidebar {
-    width: 180px;
-    min-width: 180px;
+    width: 185px;
     padding-inline: 9px;
+  }
+  .pearl-brand {
+    width: 221px;
   }
   .pearl-messages {
     padding: 20px 15px;
   }
   .pearl-header {
-    padding: 10px 14px;
+    padding-right: 14px;
   }
   .pearl-project-button {
     max-width: 155px;

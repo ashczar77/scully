@@ -35,7 +35,9 @@ try {
     return {
       logoLoaded: logo?.complete && logo.naturalWidth > 0,
       portraitLoaded: portrait?.complete && portrait.naturalWidth > 0,
-      headerHasPortrait: Boolean(document.querySelector(".pearl-header img")),
+      headerHasPortrait: Boolean(
+        document.querySelector('.pearl-header img[src*="team-portrait"]'),
+      ),
       wordmarkFont: getComputedStyle(
         document.querySelector(".pearl-brand strong"),
       ).fontFamily,
@@ -50,22 +52,56 @@ try {
   assert.match(branding.wordmarkFont, /Chelsea Market/);
   assert.equal(branding.brandFontLoaded, true);
   assert.equal(branding.newChatColor, "rgba(0, 0, 0, 0)");
+  const layout = await page.evaluate(() => {
+    const rect = (selector) =>
+      document.querySelector(selector).getBoundingClientRect();
+    const shell = rect(".pearl-shell");
+    const header = rect(".pearl-header");
+    const rail = rect(".pearl-rail");
+    const panel = rect(".pearl-sidebar");
+    return {
+      fullWidth:
+        Math.abs(header.left - shell.left) < 1 &&
+        Math.abs(header.right - shell.right) < 1,
+      contentBelowHeader:
+        Math.abs(rail.top - header.bottom) < 1 &&
+        Math.abs(panel.top - header.bottom) < 1,
+      brandInHeader: Boolean(
+        document.querySelector(".pearl-header .pearl-brand"),
+      ),
+    };
+  });
+  assert.equal(layout.fullWidth, true);
+  assert.equal(layout.contentBelowHeader, true);
+  assert.equal(layout.brandInHeader, true);
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("complementary", { name: "Settings panel" }).waitFor();
+  assert.equal(
+    await page.getByRole("complementary", { name: "Chats panel" }).count(),
+    0,
+  );
+  await page.getByRole("button", { name: "Chats", exact: true }).click();
+  await page.getByRole("complementary", { name: "Chats panel" }).waitFor();
   const exposed = await page.evaluate(() => Object.keys(window.scully).sort());
   assert.deepEqual(exposed, [
     "answerPearlQuestion",
     "approvePearlProject",
+    "archivePearlChat",
     "choosePearlProject",
     "configureSession",
     "createPearlChat",
     "decidePearlTool",
+    "deletePearlChatPermanently",
     "getPearlChat",
     "listPearlChats",
     "metrics",
     "onPearlChatUpdate",
+    "restorePearlChat",
     "retryPearlChat",
     "sendPearlMessage",
     "session",
     "stopPearlChat",
+    "trashPearlChat",
   ]);
   const channels = await app.evaluate(({ ipcMain }) => [
     ...ipcMain._invokeHandlers.keys(),
@@ -87,6 +123,20 @@ try {
     0,
   );
   assert.equal(await page.getByText("Manage team").count(), 0);
+  for (let i = 0; i < 3; i++) await page.locator(".pearl-new").click();
+  assert.equal(
+    await page.evaluate(
+      async () => (await window.scully.listPearlChats()).length,
+    ),
+    1,
+  );
+  assert.equal(
+    await page
+      .getByRole("navigation", { name: "Chats" })
+      .getByRole("button", { name: "New chat", exact: true })
+      .count(),
+    1,
+  );
   const composer = page.getByRole("textbox", { name: "Message Pearl" });
   const initialHeight = await composer.evaluate(
     (input) => input.getBoundingClientRect().height,
@@ -148,11 +198,11 @@ try {
     "Help me build a keyboard-usable household expense tracker",
   );
   const titleLayout = await page
-    .getByRole("button", { name: chat.title })
+    .getByRole("button", { name: chat.title, exact: true })
     .evaluate((button) => {
       const range = document.createRange();
-      range.setStart(button.firstChild, 0);
-      range.setEnd(button.firstChild, 1);
+      range.setStart(button.firstElementChild.firstChild, 0);
+      range.setEnd(button.firstElementChild.firstChild, 1);
       return {
         first: range.getBoundingClientRect().left,
         left: button.getBoundingClientRect().left,
@@ -160,7 +210,7 @@ try {
     });
   assert(
     titleLayout.first >= titleLayout.left,
-    "Long chat titles must preserve their visible beginning",
+    `Long chat titles must preserve their visible beginning: ${JSON.stringify(titleLayout)}`,
   );
   await app.evaluate(
     ({ dialog }, filePaths) => {
@@ -206,6 +256,7 @@ try {
   await page
     .getByRole("button", {
       name: "Help me build a keyboard-usable household expense tracker",
+      exact: true,
     })
     .click();
   await page
@@ -218,9 +269,39 @@ try {
     chat.id,
   );
   assert.equal(restored.project.approved, true);
+  await page.getByRole("button", { name: `Options for ${chat.title}` }).click();
+  await page.getByRole("button", { name: "Archive", exact: true }).click();
+  await page.getByRole("button", { name: "Archived", exact: true }).click();
+  await page.getByRole("button", { name: chat.title, exact: true }).click();
+  await page.getByText("Archived chat").waitFor();
+  assert.equal(
+    await page.getByRole("textbox", { name: "Message Pearl" }).isDisabled(),
+    true,
+  );
+  await app.close();
+  app = await launch();
+  page = await app.firstWindow();
+  await page.getByRole("button", { name: "Archived", exact: true }).click();
+  await page.getByRole("button", { name: `Options for ${chat.title}` }).click();
+  await page.getByRole("button", { name: "Restore", exact: true }).click();
+  await page.getByRole("button", { name: `Options for ${chat.title}` }).click();
+  await page.getByRole("button", { name: "Move to Trash" }).click();
+  await page.getByRole("button", { name: "Trash", exact: true }).click();
+  await page.getByRole("button", { name: `Options for ${chat.title}` }).click();
+  await page.getByRole("button", { name: "Delete permanently" }).click();
+  assert.equal(
+    (await page.evaluate(async () => window.scully.listPearlChats("trash")))
+      .length,
+    1,
+  );
+  await page.getByRole("button", { name: "Confirm deletion" }).click();
+  await page.getByText("Trash is empty").waitFor();
+  await assert.rejects(
+    page.evaluate(async (id) => window.scully.getPearlChat(id), chat.id),
+  );
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: Pearl Room, hidden team UI, persisted chat, restart and forged-action rejection.",
+    "PASS: Pearl Room, one empty chat, archive, Trash, permanent delete, restart and forged-action rejection.",
   );
 } finally {
   if (app) await app.close();

@@ -91,6 +91,121 @@ const tool = (
   call: { id, name, arguments: JSON.stringify(input) },
 });
 
+it("reuses one pristine new chat across repeated requests and restart", () => {
+  const f = fixture([]);
+  const first = f.manager.openNewChat();
+  const again = f.manager.openNewChat();
+  expect(again.id).toBe(first.id);
+  expect(f.manager.list()).toHaveLength(1);
+
+  const secondStore = new PearlChatStore(join(f.data, "workspace.sqlite"));
+  stores.push(secondStore);
+  const resumed = new PearlChatManager(
+    secondStore,
+    f.data,
+    () => null,
+    () => {},
+  );
+  expect(resumed.openNewChat().id).toBe(first.id);
+  expect(resumed.list()).toHaveLength(1);
+});
+
+it("keeps a chat with messages or a selected project when opening a new chat", () => {
+  const f = fixture([]);
+  const completed = f.manager.create();
+  completed.messages.push({
+    id: "user-message",
+    role: "user",
+    text: "A saved request",
+    at: completed.createdAt,
+  });
+  f.store.save(completed);
+  const projectDraft = f.manager.create();
+  f.manager.chooseProject(projectDraft.id, f.project);
+  const fresh = f.manager.openNewChat();
+  expect(fresh.id).not.toBe(completed.id);
+  expect(fresh.id).not.toBe(projectDraft.id);
+  expect(f.manager.list()).toHaveLength(3);
+});
+
+it("shows at most one pristine draft from older data without deleting the others", () => {
+  const f = fixture([]);
+  const oldDraft = f.manager.create();
+  const newerDraft = f.manager.create();
+  const secondStore = new PearlChatStore(join(f.data, "workspace.sqlite"));
+  stores.push(secondStore);
+  const resumed = new PearlChatManager(
+    secondStore,
+    f.data,
+    () => null,
+    () => {},
+  );
+  expect(
+    resumed.list().filter((chat) => chat.title === "New chat"),
+  ).toHaveLength(1);
+  expect(resumed.openNewChat().id).toBe(newerDraft.id);
+  expect(resumed.list("archived").map((chat) => chat.id)).toContain(
+    oldDraft.id,
+  );
+  expect(secondStore.get(oldDraft.id).messages).toEqual([]);
+  resumed.restore(oldDraft.id);
+  expect(resumed.list().map((chat) => chat.id)).toEqual([oldDraft.id]);
+  expect(resumed.list("archived").map((chat) => chat.id)).toContain(
+    newerDraft.id,
+  );
+});
+
+it("archives and restores a saved chat without losing its messages", () => {
+  const f = fixture([]);
+  const chat = f.manager.create();
+  chat.messages.push({
+    id: "saved-message",
+    role: "user",
+    text: "Keep this history",
+    at: chat.createdAt,
+  });
+  f.store.save(chat);
+  f.manager.archive(chat.id);
+  expect(f.manager.list()).toEqual([]);
+  expect(f.manager.list("archived").map((item) => item.id)).toEqual([chat.id]);
+  expect(() => f.manager.send(chat.id, "Another message")).toThrow(/archived/i);
+  f.manager.restore(chat.id);
+  expect(f.manager.list().map((item) => item.id)).toEqual([chat.id]);
+  expect(f.manager.get(chat.id).messages[0].text).toBe("Keep this history");
+});
+
+it("moves chats to Trash, restores them, and deletes permanently only from Trash", () => {
+  const f = fixture([]);
+  const chat = f.manager.create();
+  expect(() => f.manager.deletePermanently(chat.id)).toThrow(/Trash/i);
+  f.manager.trash(chat.id);
+  expect(f.manager.list()).toEqual([]);
+  expect(f.manager.list("trash").map((item) => item.id)).toEqual([chat.id]);
+  expect(() => f.manager.send(chat.id, "Forged send")).toThrow(/Trash/i);
+  f.manager.restore(chat.id);
+  expect(f.manager.list().map((item) => item.id)).toEqual([chat.id]);
+  f.manager.trash(chat.id);
+  f.manager.deletePermanently(chat.id);
+  expect(() => f.manager.get(chat.id)).toThrow("Chat not found");
+});
+
+it("does not move a running or approval-pending chat out of the Room", () => {
+  const f = fixture([]);
+  const chat = f.manager.create();
+  chat.status = "running";
+  f.store.save(chat);
+  expect(() => f.manager.archive(chat.id)).toThrow(/current action/i);
+  expect(() => f.manager.trash(chat.id)).toThrow(/current action/i);
+  chat.status = "awaiting_approval";
+  f.store.save(chat);
+  expect(() => f.manager.archive(chat.id)).toThrow(/current action/i);
+  expect(() => f.manager.trash(chat.id)).toThrow(/current action/i);
+  chat.lifecycle = "trash";
+  f.store.save(chat);
+  expect(() => f.manager.restore(chat.id)).toThrow(/current action/i);
+  expect(() => f.manager.deletePermanently(chat.id)).toThrow(/current action/i);
+});
+
 it("records a structured batch, applies permitted project actions, and replays one assistant action group", async () => {
   const f = fixture([
     {

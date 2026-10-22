@@ -6,7 +6,17 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import { FolderOpen, Plus, Send, Settings2, ShieldCheck } from "lucide-react";
+import {
+  Archive,
+  Folder,
+  MessageSquareText,
+  MoreHorizontal,
+  Plus,
+  Send,
+  Settings2,
+  ShieldCheck,
+  Trash2,
+} from "lucide-react";
 import type { DesktopAPI } from "../shared/contracts";
 import type { PearlChat, PearlChatSummary } from "../shared/pearl-chat";
 import { RichText } from "./RichText";
@@ -23,24 +33,39 @@ export function PearlApp({
 }) {
   const api = optionalApi!;
   const [chats, setChats] = useState<PearlChatSummary[]>([]);
+  const [archivedChats, setArchivedChats] = useState<PearlChatSummary[]>([]);
+  const [trashedChats, setTrashedChats] = useState<PearlChatSummary[]>([]);
   const [chat, setChat] = useState<PearlChat | null>(null);
   const [draft, setDraft] = useState("");
   const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [panel, setPanel] = useState<
+    "chats" | "archived" | "trash" | "settings" | null
+  >("chats");
+  const [menuId, setMenuId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [key, setKey] = useState("");
   const [model, setModel] = useState("zai-org/GLM-5.3-Flash");
   const [configured, setConfigured] = useState(false);
   const activeId = useRef<string | null>(null);
   const end = useRef<HTMLDivElement>(null);
   const composerInput = useRef<HTMLTextAreaElement>(null);
+  async function refreshChats() {
+    const [active, archived, trash] = await Promise.all([
+      api.listPearlChats(),
+      api.listPearlChats("archived"),
+      api.listPearlChats("trash"),
+    ]);
+    setChats(active);
+    setArchivedChats(archived);
+    setTrashedChats(trash);
+  }
   useEffect(() => {
     let live = true;
-    void Promise.all([api.listPearlChats(), api.session()])
-      .then(([items, session]) => {
+    void Promise.all([api.session(), refreshChats()])
+      .then(([session]) => {
         if (!live) return;
-        setChats(items);
         setConfigured(session.configured);
         if (session.model) setModel(session.model);
       })
@@ -49,10 +74,7 @@ export function PearlApp({
       });
     const off = api.onPearlChatUpdate((updated) => {
       if (activeId.current === updated.id) setChat(updated);
-      void api
-        .listPearlChats()
-        .then(setChats)
-        .catch(() => {});
+      void refreshChats().catch(() => {});
     });
     return () => {
       live = false;
@@ -93,7 +115,8 @@ export function PearlApp({
     if (!created) return;
     activeId.current = created.id;
     setChat(created);
-    setChats(await api.listPearlChats());
+    setPanel("chats");
+    await action(refreshChats);
     setDraft("");
   }
   async function open(id: string) {
@@ -103,16 +126,45 @@ export function PearlApp({
     setChat(selected);
     setDraft("");
   }
+  async function changeLifecycle(
+    id: string,
+    operation: "archive" | "trash" | "restore" | "delete",
+  ) {
+    const changed = await action(async () => {
+      switch (operation) {
+        case "archive":
+          return api.archivePearlChat(id);
+        case "trash":
+          return api.trashPearlChat(id);
+        case "restore":
+          return api.restorePearlChat(id);
+        case "delete":
+          await api.deletePearlChatPermanently(id);
+          return null;
+      }
+    });
+    if (changed === undefined) return;
+    setMenuId(null);
+    setConfirmDeleteId(null);
+    if (activeId.current === id) {
+      activeId.current = operation === "restore" ? id : null;
+      setChat(operation === "restore" ? changed : null);
+      setDraft("");
+    }
+    if (operation === "restore") setPanel("chats");
+    await action(refreshChats);
+  }
   async function send(event?: FormEvent) {
     event?.preventDefault();
     const text = draft.trim();
-    if (!text || busy) return;
+    if (!text || busy || chat?.lifecycle) return;
     let current = chat;
     if (!current) {
       current = (await action(() => api.createPearlChat())) || null;
       if (!current) return;
       activeId.current = current.id;
       setChat(current);
+      setPanel("chats");
     }
     const result = await action(() =>
       mutateChat(() => api.sendPearlMessage(current!.id, text)),
@@ -120,6 +172,107 @@ export function PearlApp({
     if (result) {
       setDraft("");
     }
+  }
+  function chatList(
+    items: PearlChatSummary[],
+    scope: "chats" | "archived" | "trash",
+  ) {
+    return (
+      <nav
+        aria-label={
+          scope === "chats"
+            ? "Chats"
+            : scope === "archived"
+              ? "Archived chats"
+              : "Trash chats"
+        }
+        className="pearl-chat-list"
+      >
+        {items.length === 0 && (
+          <p className="pearl-list-empty">
+            {scope === "archived"
+              ? "No archived chats"
+              : scope === "trash"
+                ? "Trash is empty"
+                : "No chats yet"}
+          </p>
+        )}
+        {items.map((item) => (
+          <div key={item.id} className="pearl-chat-row">
+            <button
+              className={
+                chat?.id === item.id
+                  ? "selected pearl-chat-title"
+                  : "pearl-chat-title"
+              }
+              onClick={() => void open(item.id)}
+              title={item.title}
+            >
+              <span>{item.title}</span>
+            </button>
+            <button
+              className="pearl-chat-options"
+              aria-label={`Options for ${item.title}`}
+              aria-expanded={menuId === item.id}
+              onClick={() => {
+                setMenuId(menuId === item.id ? null : item.id);
+                setConfirmDeleteId(null);
+              }}
+            >
+              <MoreHorizontal size={16} aria-hidden="true" />
+            </button>
+            {menuId === item.id && (
+              <div className="pearl-chat-menu">
+                {scope === "chats" && (
+                  <button
+                    onClick={() => void changeLifecycle(item.id, "archive")}
+                  >
+                    Archive
+                  </button>
+                )}
+                {scope !== "chats" && (
+                  <button
+                    onClick={() => void changeLifecycle(item.id, "restore")}
+                  >
+                    Restore
+                  </button>
+                )}
+                {scope !== "trash" && (
+                  <button
+                    onClick={() => void changeLifecycle(item.id, "trash")}
+                  >
+                    Move to Trash
+                  </button>
+                )}
+                {scope === "trash" &&
+                  (confirmDeleteId === item.id ? (
+                    <div className="pearl-delete-confirm">
+                      <p>Delete this chat permanently?</p>
+                      <button
+                        onClick={() => {
+                          setConfirmDeleteId(null);
+                          setMenuId(null);
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => void changeLifecycle(item.id, "delete")}
+                      >
+                        Confirm deletion
+                      </button>
+                    </div>
+                  ) : (
+                    <button onClick={() => setConfirmDeleteId(item.id)}>
+                      Delete permanently
+                    </button>
+                  ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </nav>
+    );
   }
   function composerKey(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -140,450 +293,554 @@ export function PearlApp({
   }
   return (
     <div className="pearl-shell">
-      <aside className="pearl-sidebar">
+      <header className="pearl-header">
         <div className="pearl-brand">
           <img src={scullyLogo} alt="Scully alien head" />
           <strong>Scully</strong>
         </div>
-        <button className="pearl-new" onClick={() => void create()}>
-          <Plus size={17} /> New chat
-        </button>
-        <div className="pearl-sidebar-heading">Chats</div>
-        <nav aria-label="Chats" className="pearl-chat-list">
-          {chats.map((item) => (
-            <button
-              key={item.id}
-              className={chat?.id === item.id ? "selected" : ""}
-              onClick={() => void open(item.id)}
-              title={item.title}
-            >
-              {item.title}
-            </button>
-          ))}
-        </nav>
-        <button
-          className="pearl-settings-link"
-          onClick={() => setSettingsOpen(true)}
-        >
-          <Settings2 size={17} /> Settings
-        </button>
-      </aside>
-      <main className="pearl-main">
-        <header className="pearl-header">
-          <div className="pearl-header-context">
-            <h2 title={chat?.title || "Room"}>{chat?.title || "Room"}</h2>
-          </div>
-          {chat && (
-            <button
-              className="pearl-project-button"
-              onClick={() =>
-                void action(async () => {
-                  const updated = await api.choosePearlProject(chat.id);
-                  if (updated) setChat(updated);
-                })
-              }
-            >
-              <FolderOpen size={16} />{" "}
-              {chat.project
+        <div className="pearl-header-context">
+          <h2 title={chat?.title || "Room"}>{chat?.title || "Room"}</h2>
+        </div>
+        {chat && !chat.lifecycle && (
+          <button
+            className="pearl-project-button pearl-project-icon"
+            aria-label={
+              chat.project
+                ? `Change project: ${chat.project.path.split("/").at(-1)}`
+                : "Choose project"
+            }
+            title={
+              chat.project
                 ? chat.project.path.split("/").at(-1)
-                : "Choose project"}
+                : "Choose project"
+            }
+            onClick={() =>
+              void action(async () => {
+                const updated = await api.choosePearlProject(chat.id);
+                if (updated) setChat(updated);
+              })
+            }
+          >
+            <Folder size={18} aria-hidden="true" />
+          </button>
+        )}
+      </header>
+      <div className="pearl-workspace">
+        <nav className="pearl-rail" aria-label="Workspace panels">
+          <button
+            aria-label="Chats"
+            aria-expanded={panel === "chats"}
+            aria-controls={panel === "chats" ? "pearl-chats-panel" : undefined}
+            className={panel === "chats" ? "active" : ""}
+            title="Chats"
+            onClick={() => setPanel(panel === "chats" ? null : "chats")}
+          >
+            <MessageSquareText size={19} aria-hidden="true" />
+          </button>
+          <button
+            aria-label="Archived"
+            aria-expanded={panel === "archived"}
+            aria-controls={
+              panel === "archived" ? "pearl-archived-panel" : undefined
+            }
+            className={panel === "archived" ? "active" : ""}
+            title="Archived"
+            onClick={() => setPanel(panel === "archived" ? null : "archived")}
+          >
+            <Archive size={19} aria-hidden="true" />
+          </button>
+          <button
+            aria-label="Trash"
+            aria-expanded={panel === "trash"}
+            aria-controls={panel === "trash" ? "pearl-trash-panel" : undefined}
+            className={panel === "trash" ? "active" : ""}
+            title="Trash"
+            onClick={() => setPanel(panel === "trash" ? null : "trash")}
+          >
+            <Trash2 size={19} aria-hidden="true" />
+          </button>
+          <button
+            aria-label="Settings"
+            aria-expanded={panel === "settings"}
+            aria-controls={
+              panel === "settings" ? "pearl-settings-panel" : undefined
+            }
+            className={
+              panel === "settings"
+                ? "active pearl-rail-settings"
+                : "pearl-rail-settings"
+            }
+            title="Settings"
+            onClick={() => setPanel(panel === "settings" ? null : "settings")}
+          >
+            <Settings2 size={19} aria-hidden="true" />
+          </button>
+        </nav>
+        {panel === "chats" && (
+          <aside
+            className="pearl-sidebar"
+            id="pearl-chats-panel"
+            aria-label="Chats panel"
+          >
+            <button className="pearl-new" onClick={() => void create()}>
+              <Plus size={17} /> New chat
             </button>
-          )}
-        </header>
-        <div
-          className="pearl-scroll"
-          role="log"
-          aria-label="Pearl conversation"
-        >
-          {!chat?.messages.length && (
-            <div className="pearl-welcome">
-              <img src={pearlPortrait} alt="" className="pearl-welcome-mark" />
-              <h1>What can I help you with?</h1>
+            <div className="pearl-sidebar-heading">Chats</div>
+            {chatList(chats, "chats")}
+          </aside>
+        )}
+        {panel === "archived" && (
+          <aside
+            className="pearl-sidebar"
+            id="pearl-archived-panel"
+            aria-label="Archived panel"
+          >
+            <div className="pearl-sidebar-heading">Archived</div>
+            {chatList(archivedChats, "archived")}
+          </aside>
+        )}
+        {panel === "trash" && (
+          <aside
+            className="pearl-sidebar"
+            id="pearl-trash-panel"
+            aria-label="Trash panel"
+          >
+            <div className="pearl-sidebar-heading">Trash</div>
+            {chatList(trashedChats, "trash")}
+          </aside>
+        )}
+        {panel === "settings" && (
+          <aside
+            className="pearl-sidebar pearl-settings-panel"
+            id="pearl-settings-panel"
+            aria-label="Settings panel"
+          >
+            <h2>Settings</h2>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void action(async () => {
+                  await api.configureSession({
+                    key,
+                    model,
+                    outputTokens: 16384,
+                  });
+                  setConfigured(true);
+                  setKey("");
+                  setPanel("chats");
+                });
+              }}
+            >
+              <h3>Nebius connection</h3>
               <p>
-                Ask a question, discuss an idea, or choose a project and build
-                with Pearl.
+                {configured
+                  ? "Connected for this app session."
+                  : "Connect a model to chat with Pearl."}
               </p>
-              {!configured && (
-                <button
-                  className="pearl-project-button"
-                  onClick={() => setSettingsOpen(true)}
+              <label>
+                API key
+                <input
+                  type="password"
+                  value={key}
+                  onChange={(event) => setKey(event.target.value)}
+                  required
+                />
+              </label>
+              <label>
+                Model
+                <input
+                  value={model}
+                  onChange={(event) => setModel(event.target.value)}
+                  required
+                />
+              </label>
+              <button>Connect</button>
+            </form>
+          </aside>
+        )}
+        <main className="pearl-main">
+          <div
+            className="pearl-scroll"
+            role="log"
+            aria-label="Pearl conversation"
+          >
+            {!chat?.messages.length && (
+              <div className="pearl-welcome">
+                <img
+                  src={pearlPortrait}
+                  alt=""
+                  className="pearl-welcome-mark"
+                />
+                <h1>What can I help you with?</h1>
+                <p>
+                  Ask a question, discuss an idea, or choose a project and build
+                  with Pearl.
+                </p>
+                {!configured && (
+                  <button
+                    className="pearl-project-button"
+                    onClick={() => setPanel("settings")}
+                  >
+                    Connect Nebius
+                  </button>
+                )}
+              </div>
+            )}
+            <div className="pearl-messages">
+              {chat?.lifecycle && (
+                <section
+                  className="pearl-card pearl-read-only"
+                  aria-label="Chat state"
                 >
-                  Connect Nebius
-                </button>
+                  <div>
+                    <strong>
+                      {chat.lifecycle === "archived"
+                        ? "Archived chat"
+                        : "Chat in Trash"}
+                    </strong>
+                    <p>Restore this chat to continue the conversation.</p>
+                    <button
+                      onClick={() => void changeLifecycle(chat.id, "restore")}
+                    >
+                      Restore chat
+                    </button>
+                  </div>
+                </section>
               )}
-            </div>
-          )}
-          <div className="pearl-messages">
-            {roomTimeline(chat?.messages || []).map((entry) => {
-              if (entry.kind === "activity")
-                return (
-                  <PearlActivity key={entry.group.id} group={entry.group} />
-                );
-              const item = entry.message;
-              if (entry.progress)
+              {roomTimeline(chat?.messages || []).map((entry) => {
+                if (entry.kind === "activity")
+                  return (
+                    <PearlActivity key={entry.group.id} group={entry.group} />
+                  );
+                const item = entry.message;
+                if (entry.progress)
+                  return (
+                    <PearlMessageFrame
+                      key={item.id}
+                      role="assistant"
+                      at={item.at}
+                      progress
+                    >
+                      <RichText text={item.text} readableProse />
+                    </PearlMessageFrame>
+                  );
                 return (
                   <PearlMessageFrame
                     key={item.id}
-                    role="assistant"
+                    role={item.role}
                     at={item.at}
-                    progress
                   >
-                    <RichText text={item.text} readableProse />
-                  </PearlMessageFrame>
-                );
-              return (
-                <PearlMessageFrame key={item.id} role={item.role} at={item.at}>
-                  <RichText
-                    text={item.text}
-                    readableProse={item.role === "assistant"}
-                  />
-                  {item.role === "assistant" && item.completion && (
-                    <div className="pearl-evidence">
-                      Work status: {item.completion.status}.
-                      {item.completion.remaining && (
-                        <> Remaining: {item.completion.remaining}</>
-                      )}
-                    </div>
-                  )}
-                  {item.role === "assistant" &&
-                    item.evidence &&
-                    (item.evidence.projectApproved ||
-                      item.evidence.filesWritten > 0) && (
+                    <RichText
+                      text={item.text}
+                      readableProse={item.role === "assistant"}
+                    />
+                    {item.role === "assistant" && item.completion && (
                       <div className="pearl-evidence">
-                        {item.evidence.filesWritten > 0 ? (
-                          <>
-                            {item.evidence.filesWritten} file
-                            {item.evidence.filesWritten === 1 ? "" : "s"}{" "}
-                            changed.
-                            {item.evidence.commandsCompleted === 0
-                              ? " No command checks completed for these changes."
-                              : item.evidence
-                                    .successfulCommandAfterLatestWrite === false
-                                ? " No successful command check after the latest edit; the changes remain unverified."
-                                : ` ${item.evidence.commandsCompleted} command check${item.evidence.commandsCompleted === 1 ? "" : "s"} completed; review the result.`}
-                          </>
-                        ) : item.evidence.commandsCompleted > 0 ? (
-                          `No files changed. ${item.evidence.commandsCompleted} command check${item.evidence.commandsCompleted === 1 ? "" : "s"} completed; review the result.`
-                        ) : (
-                          "No files changed or command checks completed in this turn."
-                        )}
-                        {Boolean(item.evidence.uiFilesWritten) && (
-                          <span>
-                            {item.evidence.successfulBrowserAfterLatestUiWrite
-                              ? ` ${item.evidence.browserChecks || 0} browser check${item.evidence.browserChecks === 1 ? "" : "s"} completed after the UI edit; review the result.`
-                              : " No clean browser check after the latest UI edit; the UI remains unverified."}
-                          </span>
+                        Work status: {item.completion.status}.
+                        {item.completion.remaining && (
+                          <> Remaining: {item.completion.remaining}</>
                         )}
                       </div>
                     )}
-                </PearlMessageFrame>
-              );
-            })}
-            {chat?.status === "running" && chat.streamingText && (
-              <PearlMessageFrame role="assistant" draft>
-                <RichText text={chat.streamingText} />
-              </PearlMessageFrame>
-            )}
-            {chat?.status === "running" && (
-              <div className="pearl-working">
-                Pearl is working…{" "}
-                <button
-                  className="pearl-stop"
-                  onClick={() =>
-                    void action(() =>
-                      mutateChat(() => api.stopPearlChat(chat.id)),
-                    )
-                  }
-                >
-                  Stop
-                </button>
-              </div>
-            )}
-            {chat?.project && !chat.project.approved && (
-              <section className="pearl-card" aria-label="Project approval">
-                <ShieldCheck size={20} />
-                <div>
-                  <strong>Approve this project</strong>
-                  <p>
-                    Pearl may read and edit UTF-8 files inside{" "}
-                    <code>{chat.project.path}</code>. Commands ask for separate
-                    approval. Changes are checked against the file revision and
-                    backed up.
-                  </p>
-                  <button
-                    onClick={() =>
-                      void action(() =>
-                        mutateChat(() =>
-                          api.approvePearlProject(chat.id, true),
-                        ),
-                      )
-                    }
-                  >
-                    Allow project access
-                  </button>
-                  <button
-                    className="quiet"
-                    onClick={() =>
-                      void action(() =>
-                        mutateChat(() =>
-                          api.approvePearlProject(chat.id, false),
-                        ),
-                      )
-                    }
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </section>
-            )}
-            {chat?.work && (
-              <details className="pearl-card" aria-label="Working plan">
-                <summary>Working plan: {chat.work.objective}</summary>
-                <p>{chat.work.approach}</p>
-                {chat.work.requirements.length > 0 && (
-                  <div>
-                    Quoted user requirements
-                    <ul>
-                      {chat.work.requirements.map((requirement, index) => (
-                        <li key={index}>{requirement.quote}</li>
-                      ))}
-                    </ul>
-                  </div>
+                    {item.role === "assistant" &&
+                      item.evidence &&
+                      (item.evidence.projectApproved ||
+                        item.evidence.filesWritten > 0) && (
+                        <div className="pearl-evidence">
+                          {item.evidence.filesWritten > 0 ? (
+                            <>
+                              {item.evidence.filesWritten} file
+                              {item.evidence.filesWritten === 1 ? "" : "s"}{" "}
+                              changed.
+                              {item.evidence.commandsCompleted === 0
+                                ? " No command checks completed for these changes."
+                                : item.evidence
+                                      .successfulCommandAfterLatestWrite ===
+                                    false
+                                  ? " No successful command check after the latest edit; the changes remain unverified."
+                                  : ` ${item.evidence.commandsCompleted} command check${item.evidence.commandsCompleted === 1 ? "" : "s"} completed; review the result.`}
+                            </>
+                          ) : item.evidence.commandsCompleted > 0 ? (
+                            `No files changed. ${item.evidence.commandsCompleted} command check${item.evidence.commandsCompleted === 1 ? "" : "s"} completed; review the result.`
+                          ) : (
+                            "No files changed or command checks completed in this turn."
+                          )}
+                          {Boolean(item.evidence.uiFilesWritten) && (
+                            <span>
+                              {item.evidence.successfulBrowserAfterLatestUiWrite
+                                ? ` ${item.evidence.browserChecks || 0} browser check${item.evidence.browserChecks === 1 ? "" : "s"} completed after the UI edit; review the result.`
+                                : " No clean browser check after the latest UI edit; the UI remains unverified."}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                  </PearlMessageFrame>
+                );
+              })}
+              {chat?.status === "running" &&
+                !chat.lifecycle &&
+                chat.streamingText && (
+                  <PearlMessageFrame role="assistant" draft>
+                    <RichText text={chat.streamingText} />
+                  </PearlMessageFrame>
                 )}
-                <ul>
-                  {chat.work.steps.map((step, index) => (
-                    <li key={index}>
-                      {step.status === "completed"
-                        ? "✓"
-                        : step.status === "in_progress"
-                          ? "→"
-                          : "○"}{" "}
-                      {step.text}
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            )}
-            {chat?.pendingTool && (
-              <section className="pearl-card" aria-label="Command approval">
-                <ShieldCheck size={20} />
-                <div>
-                  <strong>Approve command?</strong>
-                  <p>
-                    {chat.pendingTool.name === "preview_app"
-                      ? "Start the project server and an isolated browser for this turn, up to ten minutes. Pearl can continue interacting with it; form actions can change project data. Stop ends the preview."
-                      : "This runs once inside the selected project."}
-                  </p>
-                  <pre>
-                    {command
-                      ? JSON.stringify(
-                          {
-                            executable: chat.pendingTool.executable?.path,
-                            argv: [command.command, ...(command.args || [])],
-                            ...(chat.pendingTool.name === "preview_app"
-                              ? {
-                                  browser: JSON.parse(
-                                    chat.pendingTool.arguments,
-                                  ),
-                                }
-                              : {}),
-                          },
-                          null,
-                          2,
-                        )
-                      : chat.pendingTool.arguments}
-                  </pre>
+              {chat?.status === "running" && !chat.lifecycle && (
+                <div className="pearl-working">
+                  Pearl is working…{" "}
                   <button
+                    className="pearl-stop"
                     onClick={() =>
                       void action(() =>
-                        mutateChat(() =>
-                          api.decidePearlTool(
-                            chat.id,
-                            chat.pendingTool!.id,
-                            true,
-                          ),
-                        ),
+                        mutateChat(() => api.stopPearlChat(chat.id)),
                       )
                     }
                   >
-                    Run once
-                  </button>
-                  <button
-                    className="quiet"
-                    onClick={() =>
-                      void action(() =>
-                        mutateChat(() =>
-                          api.decidePearlTool(
-                            chat.id,
-                            chat.pendingTool!.id,
-                            false,
-                          ),
-                        ),
-                      )
-                    }
-                  >
-                    Deny
+                    Stop
                   </button>
                 </div>
-              </section>
-            )}
-            {pendingQuestion && (
-              <section className="pearl-card" aria-label="Pearl question">
-                <div>
-                  <strong>{pendingQuestion.text}</strong>
-                  {pendingQuestion.recommendation && (
-                    <p>{pendingQuestion.recommendation}</p>
-                  )}
-                  {pendingQuestion.reopenReason && (
+              )}
+              {chat?.project && !chat.project.approved && !chat.lifecycle && (
+                <section className="pearl-card" aria-label="Project approval">
+                  <ShieldCheck size={20} />
+                  <div>
+                    <strong>Approve this project</strong>
                     <p>
-                      Revisiting this choice: {pendingQuestion.reopenReason}
+                      Pearl may read and edit UTF-8 files inside{" "}
+                      <code>{chat.project.path}</code>. Commands ask for
+                      separate approval. Changes are checked against the file
+                      revision and backed up.
                     </p>
-                  )}
-                  <div className="pearl-options">
-                    {pendingQuestion.options.map((option) => (
-                      <button
-                        key={option}
-                        className="quiet"
-                        onClick={() => setAnswer(option)}
-                      >
-                        {option}
-                      </button>
-                    ))}
-                  </div>
-                  <form
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      if (!chat) return;
-                      void action(async () => {
-                        await mutateChat(() =>
-                          api.answerPearlQuestion(
-                            chat.id,
-                            pendingQuestion.id,
-                            answer,
+                    <button
+                      onClick={() =>
+                        void action(() =>
+                          mutateChat(() =>
+                            api.approvePearlProject(chat.id, true),
                           ),
-                        );
-                        setAnswer("");
-                      });
-                    }}
+                        )
+                      }
+                    >
+                      Allow project access
+                    </button>
+                    <button
+                      className="quiet"
+                      onClick={() =>
+                        void action(() =>
+                          mutateChat(() =>
+                            api.approvePearlProject(chat.id, false),
+                          ),
+                        )
+                      }
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </section>
+              )}
+              {chat?.work && (
+                <details className="pearl-card" aria-label="Working plan">
+                  <summary>Working plan: {chat.work.objective}</summary>
+                  <p>{chat.work.approach}</p>
+                  {chat.work.requirements.length > 0 && (
+                    <div>
+                      Quoted user requirements
+                      <ul>
+                        {chat.work.requirements.map((requirement, index) => (
+                          <li key={index}>{requirement.quote}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  <ul>
+                    {chat.work.steps.map((step, index) => (
+                      <li key={index}>
+                        {step.status === "completed"
+                          ? "✓"
+                          : step.status === "in_progress"
+                            ? "→"
+                            : "○"}{" "}
+                        {step.text}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              {chat?.pendingTool && !chat.lifecycle && (
+                <section className="pearl-card" aria-label="Command approval">
+                  <ShieldCheck size={20} />
+                  <div>
+                    <strong>Approve command?</strong>
+                    <p>
+                      {chat.pendingTool.name === "preview_app"
+                        ? "Start the project server and an isolated browser for this turn, up to ten minutes. Pearl can continue interacting with it; form actions can change project data. Stop ends the preview."
+                        : "This runs once inside the selected project."}
+                    </p>
+                    <pre>
+                      {command
+                        ? JSON.stringify(
+                            {
+                              executable: chat.pendingTool.executable?.path,
+                              argv: [command.command, ...(command.args || [])],
+                              ...(chat.pendingTool.name === "preview_app"
+                                ? {
+                                    browser: JSON.parse(
+                                      chat.pendingTool.arguments,
+                                    ),
+                                  }
+                                : {}),
+                            },
+                            null,
+                            2,
+                          )
+                        : chat.pendingTool.arguments}
+                    </pre>
+                    <button
+                      onClick={() =>
+                        void action(() =>
+                          mutateChat(() =>
+                            api.decidePearlTool(
+                              chat.id,
+                              chat.pendingTool!.id,
+                              true,
+                            ),
+                          ),
+                        )
+                      }
+                    >
+                      Run once
+                    </button>
+                    <button
+                      className="quiet"
+                      onClick={() =>
+                        void action(() =>
+                          mutateChat(() =>
+                            api.decidePearlTool(
+                              chat.id,
+                              chat.pendingTool!.id,
+                              false,
+                            ),
+                          ),
+                        )
+                      }
+                    >
+                      Deny
+                    </button>
+                  </div>
+                </section>
+              )}
+              {pendingQuestion && !chat?.lifecycle && (
+                <section className="pearl-card" aria-label="Pearl question">
+                  <div>
+                    <strong>{pendingQuestion.text}</strong>
+                    {pendingQuestion.recommendation && (
+                      <p>{pendingQuestion.recommendation}</p>
+                    )}
+                    {pendingQuestion.reopenReason && (
+                      <p>
+                        Revisiting this choice: {pendingQuestion.reopenReason}
+                      </p>
+                    )}
+                    <div className="pearl-options">
+                      {pendingQuestion.options.map((option) => (
+                        <button
+                          key={option}
+                          className="quiet"
+                          onClick={() => setAnswer(option)}
+                        >
+                          {option}
+                        </button>
+                      ))}
+                    </div>
+                    <form
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        if (!chat) return;
+                        void action(async () => {
+                          await mutateChat(() =>
+                            api.answerPearlQuestion(
+                              chat.id,
+                              pendingQuestion.id,
+                              answer,
+                            ),
+                          );
+                          setAnswer("");
+                        });
+                      }}
+                    >
+                      <input
+                        aria-label="Answer Pearl"
+                        value={answer}
+                        onChange={(event) => setAnswer(event.target.value)}
+                        placeholder="Choose or write your answer"
+                      />
+                      <button disabled={!answer.trim()}>Answer</button>
+                    </form>
+                  </div>
+                </section>
+              )}
+              {(chat?.status === "failed" || chat?.status === "paused") &&
+                !chat.lifecycle && (
+                  <section
+                    className={`pearl-card${chat.status === "failed" ? " error" : ""}`}
                   >
-                    <input
-                      aria-label="Answer Pearl"
-                      value={answer}
-                      onChange={(event) => setAnswer(event.target.value)}
-                      placeholder="Choose or write your answer"
-                    />
-                    <button disabled={!answer.trim()}>Answer</button>
-                  </form>
-                </div>
-              </section>
-            )}
-            {(chat?.status === "failed" || chat?.status === "paused") && (
-              <section
-                className={`pearl-card${chat.status === "failed" ? " error" : ""}`}
-              >
-                <div>
-                  <strong>
-                    {chat.status === "paused"
-                      ? "Work paused"
-                      : "Turn interrupted"}
-                  </strong>
-                  <p>{chat.error}</p>
-                  <button
-                    onClick={() =>
-                      void action(() =>
-                        mutateChat(() => api.retryPearlChat(chat.id)),
-                      )
-                    }
-                  >
-                    Continue
-                  </button>
-                </div>
-              </section>
-            )}
-            <div ref={end} />
-          </div>
-        </div>
-        {error && (
-          <div className="pearl-error" role="alert">
-            {error}
-          </div>
-        )}
-        <form className="pearl-composer" onSubmit={(event) => void send(event)}>
-          <textarea
-            ref={composerInput}
-            aria-label="Message Pearl"
-            value={draft}
-            onKeyDown={composerKey}
-            onChange={(event) => setDraft(event.target.value)}
-            placeholder="Message Pearl"
-            rows={2}
-          />
-          <button
-            aria-label="Send message"
-            disabled={
-              !draft.trim() ||
-              chat?.status === "running" ||
-              chat?.status === "awaiting_approval" ||
-              busy
-            }
-          >
-            <Send size={18} />
-          </button>
-        </form>
-        <div className="pearl-footer">
-          Pearl can make mistakes. Review code changes and command requests.
-        </div>
-      </main>
-      {settingsOpen && (
-        <div className="pearl-modal-backdrop">
-          <form
-            className="pearl-modal"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void action(async () => {
-                await api.configureSession({ key, model, outputTokens: 16384 });
-                setConfigured(true);
-                setKey("");
-                setSettingsOpen(false);
-              });
-            }}
-          >
-            <h2>Nebius connection</h2>
-            <p>
-              {configured
-                ? "Connected for this app session."
-                : "Connect a model to chat with Pearl."}
-            </p>
-            <label>
-              API key
-              <input
-                type="password"
-                value={key}
-                onChange={(event) => setKey(event.target.value)}
-                required
-              />
-            </label>
-            <label>
-              Model
-              <input
-                value={model}
-                onChange={(event) => setModel(event.target.value)}
-                required
-              />
-            </label>
-            <div>
-              <button
-                type="button"
-                className="quiet"
-                onClick={() => setSettingsOpen(false)}
-              >
-                Cancel
-              </button>
-              <button>Connect</button>
+                    <div>
+                      <strong>
+                        {chat.status === "paused"
+                          ? "Work paused"
+                          : "Turn interrupted"}
+                      </strong>
+                      <p>{chat.error}</p>
+                      <button
+                        onClick={() =>
+                          void action(() =>
+                            mutateChat(() => api.retryPearlChat(chat.id)),
+                          )
+                        }
+                      >
+                        Continue
+                      </button>
+                    </div>
+                  </section>
+                )}
+              <div ref={end} />
             </div>
+          </div>
+          {error && (
+            <div className="pearl-error" role="alert">
+              {error}
+            </div>
+          )}
+          <form
+            className="pearl-composer"
+            onSubmit={(event) => void send(event)}
+          >
+            <textarea
+              ref={composerInput}
+              aria-label="Message Pearl"
+              value={draft}
+              disabled={Boolean(chat?.lifecycle)}
+              onKeyDown={composerKey}
+              onChange={(event) => setDraft(event.target.value)}
+              placeholder="Message Pearl"
+              rows={2}
+            />
+            <button
+              aria-label="Send message"
+              disabled={
+                !draft.trim() ||
+                Boolean(chat?.lifecycle) ||
+                chat?.status === "running" ||
+                chat?.status === "awaiting_approval" ||
+                busy
+              }
+            >
+              <Send size={18} />
+            </button>
           </form>
-        </div>
-      )}
+          <div className="pearl-footer">
+            Pearl can make mistakes. Review code changes and command requests.
+          </div>
+        </main>
+      </div>
     </div>
   );
 }

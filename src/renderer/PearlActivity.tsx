@@ -7,9 +7,14 @@ type ActivityAction = {
   results: PearlMessage[];
 };
 
+type ActivityEntry =
+  | { kind: "note"; id: string; text: string }
+  | { kind: "action"; action: ActivityAction };
+
 export type ActivityGroup = {
   id: string;
   actions: ActivityAction[];
+  entries: ActivityEntry[];
 };
 
 export type RoomTimelineItem =
@@ -46,7 +51,7 @@ export function roomTimeline(messages: PearlMessage[]): RoomTimelineItem[] {
   let byCallId = new Map<string, ActivityAction>();
   function activity(message: PearlMessage): ActivityGroup {
     if (!group) {
-      group = { id: `activity-${message.id}`, actions: [] };
+      group = { id: `activity-${message.id}`, actions: [], entries: [] };
       items.push({ kind: "activity", group });
     }
     return group;
@@ -74,20 +79,30 @@ export function roomTimeline(messages: PearlMessage[]): RoomTimelineItem[] {
           results: [],
         };
         current.actions.push(action);
+        current.entries.push({ kind: "action", action });
         byCallId.set(callId, action);
       }
       action.results.push(message);
       continue;
     }
     const requested = calls(message);
-    const visibleText =
-      message.text.trim() &&
-      !requested.some((call) => call.name === "complete_work");
-    if (visibleText || requested.length === 0)
+    const linkedQuestion = requested.some((call) =>
+      questionActions.has(call.name),
+    );
+    if (requested.length === 0 || (linkedQuestion && message.text.trim()))
       items.push({
         kind: "message",
         message: { ...message, role: "assistant" },
-        progress: requested.length > 0,
+        progress: linkedQuestion,
+      });
+    else if (
+      message.text.trim() &&
+      !requested.some((call) => call.name === "complete_work")
+    )
+      activity(message).entries.push({
+        kind: "note",
+        id: message.id,
+        text: message.text,
       });
     for (const call of requested) {
       if (questionActions.has(call.name)) continue;
@@ -96,6 +111,7 @@ export function roomTimeline(messages: PearlMessage[]): RoomTimelineItem[] {
       if (!action) {
         action = { id: call.id, name: call.name, results: [] };
         current.actions.push(action);
+        current.entries.push({ kind: "action", action });
         byCallId.set(call.id, action);
       }
       action.arguments = call.arguments;
@@ -267,6 +283,7 @@ export function PearlActivity({ group }: { group: ActivityGroup }) {
   const issues = group.actions.filter((action) =>
     action.results.some(failedResult),
   ).length;
+  const latestAction = group.actions.at(-1);
   return (
     <details
       className={`pearl-activity${issues ? " has-issues" : ""}`}
@@ -275,6 +292,11 @@ export function PearlActivity({ group }: { group: ActivityGroup }) {
       <summary>
         <span>Activity</span>
         <small>{countLabel(group.actions)}</small>
+        {latestAction && (
+          <span className="pearl-activity-status">
+            Latest: {label(latestAction.name)}
+          </span>
+        )}
         {issues > 0 && (
           <strong>
             {issues} issue{issues === 1 ? "" : "s"}
@@ -282,7 +304,14 @@ export function PearlActivity({ group }: { group: ActivityGroup }) {
         )}
       </summary>
       <div className="pearl-activity-list">
-        {group.actions.map((action) => {
+        {group.entries.map((entry) => {
+          if (entry.kind === "note")
+            return (
+              <p className="pearl-activity-note" key={entry.id}>
+                {entry.text}
+              </p>
+            );
+          const action = entry.action;
           const failed = action.results.some(failedResult);
           return (
             <details

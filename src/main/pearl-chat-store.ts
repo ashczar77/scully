@@ -48,6 +48,19 @@ export class PearlChatStore {
       return { id, title, createdAt, updatedAt, status };
     });
   }
+  all(): PearlChat[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT data FROM pearl_chats ORDER BY updatedAt DESC, rowid DESC",
+        )
+        .all() as { data: string }[]
+    ).map(({ data }) => JSON.parse(data) as PearlChat);
+  }
+  delete(id: unknown): void {
+    const chat = this.get(id);
+    this.db.prepare("DELETE FROM pearl_chats WHERE id=?").run(chat.id);
+  }
   save(chat: PearlChat): PearlChat {
     chat.updatedAt = new Date().toISOString();
     this.db

@@ -53,6 +53,20 @@ import {
 } from "../shared/telemetry";
 
 const maxDeniedCommandsPerTurn = 5;
+function pristineDraft(chat: PearlChat): boolean {
+  return (
+    !chat.lifecycle &&
+    chat.title === "New chat" &&
+    chat.status === "idle" &&
+    chat.messages.length === 0 &&
+    chat.questions.length === 0 &&
+    !chat.project &&
+    !chat.work &&
+    !chat.pendingTool &&
+    !chat.activeUserMessageId &&
+    !chat.error
+  );
+}
 function projectPath(value: unknown, allowRoot = false): string {
   if (allowRoot && (value === "" || value === "." || value === "/")) return "";
   safePath(value);
@@ -124,16 +138,99 @@ export class PearlChatManager {
     private previewStarter: typeof startProjectPreview = startProjectPreview,
   ) {
     this.store.recover();
+    let latestDraftSeen = false;
+    for (const chat of this.store.all()) {
+      if (!pristineDraft(chat)) continue;
+      if (!latestDraftSeen) {
+        latestDraftSeen = true;
+        continue;
+      }
+      chat.lifecycle = "archived";
+      this.store.save(chat);
+    }
   }
 
-  list() {
-    return this.store.list();
+  list(scope: "active" | "archived" | "trash" = "active") {
+    if (!["active", "archived", "trash"].includes(scope))
+      throw new Error("Invalid chat list");
+    let draftSeen = false;
+    return this.store
+      .all()
+      .filter((chat) => {
+        if ((chat.lifecycle || "active") !== scope) return false;
+        if (scope === "active" && pristineDraft(chat)) {
+          if (draftSeen) return false;
+          draftSeen = true;
+        }
+        return true;
+      })
+      .slice(0, 200)
+      .map(({ id, title, createdAt, updatedAt, status }) => ({
+        id,
+        title,
+        createdAt,
+        updatedAt,
+        status,
+      }));
   }
   create() {
     return this.store.create();
   }
+  openNewChat(): PearlChat {
+    return this.store.all().find(pristineDraft) || this.store.create();
+  }
   get(id: unknown) {
     return this.store.get(id);
+  }
+
+  private movable(chat: PearlChat): void {
+    if (
+      chat.status === "running" ||
+      chat.status === "awaiting_approval" ||
+      chat.pendingTool ||
+      this.active.has(chat.id)
+    )
+      throw new Error("Wait for Pearl's current action");
+  }
+  private activeChat(chat: PearlChat): void {
+    if (chat.lifecycle === "archived")
+      throw new Error("Restore this archived chat before continuing");
+    if (chat.lifecycle === "trash")
+      throw new Error("Restore this chat from Trash before continuing");
+  }
+  archive(id: unknown): PearlChat {
+    const chat = this.get(id);
+    this.movable(chat);
+    this.activeChat(chat);
+    chat.lifecycle = "archived";
+    return this.save(chat);
+  }
+  trash(id: unknown): PearlChat {
+    const chat = this.get(id);
+    this.movable(chat);
+    if (chat.lifecycle === "trash") throw new Error("Chat is already in Trash");
+    chat.lifecycle = "trash";
+    return this.save(chat);
+  }
+  restore(id: unknown): PearlChat {
+    const chat = this.get(id);
+    this.movable(chat);
+    if (!chat.lifecycle) throw new Error("Chat is already active");
+    if (pristineDraft({ ...chat, lifecycle: undefined })) {
+      for (const draft of this.store.all().filter(pristineDraft)) {
+        draft.lifecycle = "archived";
+        this.store.save(draft);
+      }
+    }
+    chat.lifecycle = undefined;
+    return this.save(chat);
+  }
+  deletePermanently(id: unknown): void {
+    const chat = this.get(id);
+    this.movable(chat);
+    if (chat.lifecycle !== "trash")
+      throw new Error("Move this chat to Trash before permanent deletion");
+    this.store.delete(chat.id);
   }
 
   private save(chat: PearlChat): PearlChat {
@@ -159,6 +256,7 @@ export class PearlChatManager {
   }
   send(id: unknown, value: unknown): PearlChat {
     const chat = this.get(id);
+    this.activeChat(chat);
     if (
       chat.status === "running" ||
       chat.status === "awaiting_approval" ||
@@ -178,6 +276,7 @@ export class PearlChatManager {
   }
   chooseProject(id: unknown, directory: string): PearlChat {
     const chat = this.get(id);
+    this.activeChat(chat);
     if (chat.status === "running" || chat.status === "awaiting_approval")
       throw new Error("Wait for Pearl's current action");
     void this.closePreviews(chat.id);
@@ -193,6 +292,7 @@ export class PearlChatManager {
   }
   approveProject(id: unknown, approved: unknown): PearlChat {
     const chat = this.get(id);
+    this.activeChat(chat);
     if (chat.status === "running" || chat.status === "awaiting_approval")
       throw new Error("Wait for Pearl's current action");
     if (!chat.project || chat.project.approved || typeof approved !== "boolean")
@@ -204,6 +304,7 @@ export class PearlChatManager {
   }
   answerQuestion(id: unknown, questionId: unknown, value: unknown): PearlChat {
     const chat = this.get(id);
+    this.activeChat(chat);
     if (chat.status === "running" || chat.status === "awaiting_approval")
       throw new Error("Wait for Pearl's current action");
     const question = chat.questions.find(
@@ -226,6 +327,7 @@ export class PearlChatManager {
   }
   decideTool(id: unknown, toolCallId: unknown, approved: unknown): PearlChat {
     const chat = this.get(id);
+    this.activeChat(chat);
     if (
       chat.status !== "awaiting_approval" ||
       !chat.pendingTool ||
@@ -283,6 +385,7 @@ export class PearlChatManager {
   }
   retry(id: unknown): PearlChat {
     const chat = this.get(id);
+    this.activeChat(chat);
     if (
       (chat.status !== "failed" && chat.status !== "paused") ||
       this.active.has(chat.id)
@@ -298,6 +401,7 @@ export class PearlChatManager {
   }
   stop(id: unknown): PearlChat {
     const chat = this.get(id);
+    this.activeChat(chat);
     if (chat.status !== "running") throw new Error("No active Pearl turn");
     this.cancellations.get(chat.id)?.abort();
     this.commandCancellations.get(chat.id)?.abort();
@@ -540,6 +644,7 @@ export class PearlChatManager {
     return [
       "You are Pearl, the coding assistant in Scully's Room. Answer the latest user message directly and naturally. Handle ordinary questions, product discussion, planning, and coding in one chat. For straightforward questions, give a concise answer without speculating about why the user asked or adding a follow-up question. Ask only when missing information would materially change the answer or the requested work. Tools are optional. There is no team workflow.",
       "Write user-facing replies in readable Markdown. Keep short answers short. For substantial plans, explanations, or coding summaries, use brief paragraphs, useful headings and lists, and fenced code blocks for commands or code. Avoid a single dense paragraph of files, checks, and instructions. Report only actions and verification actually observed; formatting must not strengthen an uncertain claim.",
+      "When calling tools, write any progress note as a complete, standalone sentence. The Room shows that note with its actions in Activity, so do not introduce tool arguments or results with a trailing colon or imply an observation before the tool returns. Give the user a separate, complete reply after the work or when a decision is needed.",
       "Follow the conversation: later user corrections take priority, while earlier requirements remain unless changed. Answer unrelated questions directly; do not append a prompt to return to earlier work unless the user asks. A pending question stays visible in the Room; do not repeat it in later replies. Historical linked questions and answers are earlier records, not new requests.",
       "Make routine technical choices yourself. If a product behavior or constraint truly needs the user's decision, call ask_user with one question and a recommendation; listing choices in prose does not create a decision card. Do not end a reply by asking the user to choose unless ask_user has created the pending decision. An unanswered recommendation is not agreement. Link an ordinary answer only when it clearly answers the pending question. Withdraw an obsolete question, or reopen an answered one using its ID when new requirements change that decision. A rejected tool call changes no user decision.",
       "When asked for a plan, show a concrete plan now. State user behavior, approach, reasons, assumptions, verification, and open choices. If a choice is not blocking, make a labeled assumption and proceed with the plan. Do not claim a pending choice was agreed.",

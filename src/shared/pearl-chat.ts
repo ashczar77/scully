@@ -77,6 +77,7 @@ export type PearlPauseReason =
 export type PearlChat = {
   id: string;
   title: string;
+  lifecycle?: "archived" | "trash";
   createdAt: string;
   updatedAt: string;
   status: "idle" | "running" | "awaiting_approval" | "paused" | "failed";
@@ -104,9 +105,15 @@ export type PearlChatSummary = Pick<
 >;
 
 export type PearlChatAPI = {
-  listPearlChats: () => Promise<PearlChatSummary[]>;
+  listPearlChats: (
+    scope?: "active" | "archived" | "trash",
+  ) => Promise<PearlChatSummary[]>;
   createPearlChat: () => Promise<PearlChat>;
   getPearlChat: (id: string) => Promise<PearlChat>;
+  archivePearlChat: (id: string) => Promise<PearlChat>;
+  trashPearlChat: (id: string) => Promise<PearlChat>;
+  restorePearlChat: (id: string) => Promise<PearlChat>;
+  deletePearlChatPermanently: (id: string) => Promise<void>;
   sendPearlMessage: (id: string, text: string) => Promise<PearlChat>;
   choosePearlProject: (id: string) => Promise<PearlChat | null>;
   approvePearlProject: (id: string, approved: boolean) => Promise<PearlChat>;

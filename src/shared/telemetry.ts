@@ -1,5 +1,9 @@
 export const operations = [
   "pearl:create",
+  "pearl:archive",
+  "pearl:trash",
+  "pearl:restore",
+  "pearl:permanent-delete",
   "pearl:send",
   "pearl:project:choose",
   "pearl:project:approve",

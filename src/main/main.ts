@@ -184,17 +184,33 @@ app
       )
         throw new Error("Untrusted request");
     };
-    ipcMain.handle("pearl:list", (event) => {
+    ipcMain.handle("pearl:list", (event, scope) => {
       trusted(event);
-      return pearl.list();
+      return pearl.list(scope);
     });
     metricHandle("pearl:create", (event) => {
       trusted(event);
-      return pearl.create();
+      return pearl.openNewChat();
     });
     ipcMain.handle("pearl:get", (event, id) => {
       trusted(event);
       return pearl.get(id);
+    });
+    metricHandle("pearl:archive", (event, id) => {
+      trusted(event);
+      return pearl.archive(id);
+    });
+    metricHandle("pearl:trash", (event, id) => {
+      trusted(event);
+      return pearl.trash(id);
+    });
+    metricHandle("pearl:restore", (event, id) => {
+      trusted(event);
+      return pearl.restore(id);
+    });
+    metricHandle("pearl:permanent-delete", (event, id) => {
+      trusted(event);
+      return pearl.deletePermanently(id);
     });
     metricHandle("pearl:send", (event, id, text) => {
       trusted(event);

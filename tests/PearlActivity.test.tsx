@@ -59,7 +59,6 @@ it("keeps one nested activity group per user message and leaves Pearl replies in
   const timeline = roomTimeline(messages);
   expect(timeline.map((item) => item.kind)).toEqual([
     "message",
-    "message",
     "activity",
     "message",
     "message",
@@ -72,6 +71,10 @@ it("keeps one nested activity group per user message and leaves Pearl replies in
     "project_map",
     "read_file",
   ]);
+  expect(groups[0].group.entries[0]).toMatchObject({
+    kind: "note",
+    text: "I will inspect the project.",
+  });
   expect(
     groups[0].group.actions.map((action) => action.results.length),
   ).toEqual([1, 1]);
@@ -79,6 +82,64 @@ it("keeps one nested activity group per user message and leaves Pearl replies in
     "apply_patch",
   ]);
   expect(JSON.stringify(messages)).toBe(original);
+});
+
+it("keeps tool-bound progress beside its actions instead of showing orphaned chat bubbles", () => {
+  const messages: PearlMessage[] = [
+    { id: "user", role: "user", text: "Build the shop", at },
+    {
+      id: "first",
+      role: "assistant",
+      text: "Now the four HTML pages:",
+      toolCallId: "create-1",
+      toolName: "create_file",
+      at,
+    },
+    {
+      id: "first-result",
+      role: "tool",
+      text: '{"written":true}',
+      toolCallId: "create-1",
+      toolName: "create_file",
+      at,
+    },
+    {
+      id: "second",
+      role: "assistant",
+      text: "Now I will check the storefront in the browser:",
+      toolCallId: "browser-1",
+      toolName: "browser_check",
+      at,
+    },
+    {
+      id: "second-result",
+      role: "tool",
+      text: '{"title":"Shop","visibleText":"Catalog","controls":[],"hiddenViolations":[],"errors":[]}',
+      toolCallId: "browser-1",
+      toolName: "browser_check",
+      at,
+    },
+    { id: "answer", role: "assistant", text: "The storefront is ready.", at },
+  ];
+  const timeline = roomTimeline(messages);
+  expect(timeline.map((item) => item.kind)).toEqual([
+    "message",
+    "activity",
+    "message",
+  ]);
+  const activity = timeline[1];
+  if (activity.kind !== "activity") throw new Error("Expected activity");
+  render(<PearlActivity group={activity.group} />);
+  expect(screen.getByText("Latest: Check in browser")).toBeInTheDocument();
+  fireEvent.click(screen.getByText("Activity"));
+  const list = document.querySelector(".pearl-activity-list")!;
+  expect(list.textContent).toMatch(
+    /Now the four HTML pages:.*Create file.*Now I will check the storefront in the browser:.*Check in browser/s,
+  );
+  expect(timeline[2]).toMatchObject({
+    kind: "message",
+    message: { text: "The storefront is ready." },
+  });
 });
 
 it("keeps linked question text visible and hides its internal control action", () => {
