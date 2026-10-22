@@ -74,6 +74,20 @@ export type PearlPauseReason =
   | "step_budget"
   | "completion_missing";
 
+export type PearlTerminalState = {
+  id: string;
+  revision: number;
+  command: string;
+  args: string[];
+  status: "running" | "exited" | "stopped" | "interrupted";
+  startedAt: string;
+  endedAt?: string;
+  exitCode?: number | null;
+  output: string;
+  outputStart?: number;
+  truncated: boolean;
+};
+
 export type PearlChat = {
   id: string;
   title: string;
@@ -82,6 +96,7 @@ export type PearlChat = {
   updatedAt: string;
   status: "idle" | "running" | "awaiting_approval" | "paused" | "failed";
   messages: PearlMessage[];
+  terminals?: PearlTerminalState[];
   activeUserMessageId?: string;
   questions: PearlQuestion[];
   readRevisions?: Record<string, string>;
@@ -132,6 +147,18 @@ export type PearlChatAPI = {
   ) => Promise<PearlChat>;
   retryPearlChat: (id: string) => Promise<PearlChat>;
   stopPearlChat: (id: string) => Promise<PearlChat>;
+  sendPearlTerminalInput: (
+    id: string,
+    terminalId: string,
+    value: string,
+  ) => Promise<void>;
+  resizePearlTerminal: (
+    id: string,
+    terminalId: string,
+    cols: number,
+    rows: number,
+  ) => Promise<void>;
+  stopPearlTerminal: (id: string, terminalId: string) => Promise<PearlChat>;
   onPearlChatUpdate: (listener: (chat: PearlChat) => void) => () => void;
 };
 

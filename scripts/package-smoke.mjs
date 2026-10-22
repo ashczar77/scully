@@ -1,8 +1,9 @@
 import { _electron as electron } from "playwright";
-import { extractFile, listPackage } from "@electron/asar";
+import { extractFile, listPackage, statFile } from "@electron/asar";
 import assert from "node:assert/strict";
+import { fork } from "node:child_process";
 import { resolve } from "node:path";
-import { mkdir, readFile, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, readFile, mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 await mkdir("test-results", { recursive: true });
@@ -13,6 +14,7 @@ assert.deepEqual(
 );
 const entries = listPackage(`${bundle}/Contents/Resources/app.asar`);
 assert(entries.some((p) => p.endsWith("/main.cjs")));
+assert(entries.some((p) => p.endsWith("/pearl-terminal-supervisor.cjs")));
 const mainBundle = extractFile(
   `${bundle}/Contents/Resources/app.asar`,
   "dist/main.cjs",
@@ -24,13 +26,99 @@ assert(entries.some((p) => p.endsWith("/branding/scully.png")));
 assert(entries.some((p) => p.endsWith("/fonts/ChelseaMarket-OFL.txt")));
 assert(entries.some((p) => /\/index-[^/]+\.js$/.test(p)));
 assert(
-  !entries.some((p) =>
-    /\/(\.env|AGENTS\.md|.*\.local\.md|node_modules)(\/|$)/.test(p),
+  !entries.some((p) => /\/(\.env|AGENTS\.md|.*\.local\.md)(\/|$)/.test(p)),
+);
+assert(
+  !entries.some(
+    (path) =>
+      path.startsWith("/node_modules/") &&
+      statFile(`${bundle}/Contents/Resources/app.asar`, path.slice(1)).size !==
+        undefined &&
+      !/^\/node_modules\/(node-pty|node-addon-api)(\/|$)/.test(path),
   ),
 );
+const unpacked = `${bundle}/Contents/Resources/app.asar.unpacked/node_modules/node-pty`;
+assert((await stat(`${unpacked}/build/Release/pty.node`)).isFile());
+const helper = await stat(`${unpacked}/build/Release/spawn-helper`);
+assert(helper.isFile());
+assert(helper.mode & 0o111);
 const state = await mkdtemp(join(tmpdir(), "scully-package-test-"));
 let app;
+let supervisor;
+let commandPid;
 try {
+  const marker = join(state, "packaged-terminal.pid");
+  supervisor = fork(
+    `${bundle}/Contents/Resources/app.asar/dist/pearl-terminal-supervisor.cjs`,
+    [],
+    {
+      execPath: `${bundle}/Contents/MacOS/scully`,
+      execArgv: [],
+      cwd: state,
+      env: { ELECTRON_RUN_AS_NODE: "1" },
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
+    },
+  );
+  let supervisorError = "";
+  let terminalOutput = "";
+  supervisor.stderr.on("data", (chunk) => (supervisorError += chunk));
+  supervisor.stdout.on("data", (chunk) => (terminalOutput += chunk));
+  supervisor.send({
+    type: "start",
+    launch: {
+      executable: process.execPath,
+      args: [
+        "-e",
+        `process.stdin.setRawMode(true);require('node:fs').writeFileSync(${JSON.stringify(marker)},String(process.pid));process.stdout.write('READY:'+process.stdin.isTTY+','+process.stdout.isTTY+'\\n');process.stdin.on('data',x=>process.stdout.write('KEY:'+x.toString('hex')+'\\n'));process.on('SIGWINCH',()=>process.stdout.write('SIZE:'+process.stdout.columns+'x'+process.stdout.rows+'\\n'))`,
+      ],
+      env: {},
+    },
+    project: state,
+    scratch: join(state, ".scully-command-package"),
+  });
+  const deadline = Date.now() + 5000;
+  while (!commandPid) {
+    try {
+      commandPid = Number(await readFile(marker, "utf8"));
+    } catch {
+      if (Date.now() > deadline)
+        throw new Error(`Packaged terminal did not start: ${supervisorError}`);
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    }
+  }
+  const untilOutput = async (expected) => {
+    const outputDeadline = Date.now() + 5000;
+    while (!terminalOutput.includes(expected)) {
+      if (Date.now() > outputDeadline)
+        throw new Error(
+          `Packaged PTY output missing ${expected}: ${terminalOutput} ${supervisorError}`,
+        );
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    }
+  };
+  await untilOutput("READY:true,true");
+  supervisor.send({ type: "input", value: "\x1b[A" });
+  await untilOutput("KEY:1b5b41");
+  supervisor.send({ type: "resize", cols: 95, rows: 32 });
+  await untilOutput("SIZE:95x32");
+  supervisor.disconnect();
+  const stopDeadline = Date.now() + 5000;
+  let commandRunning = true;
+  while (commandRunning && Date.now() < stopDeadline) {
+    try {
+      process.kill(commandPid, 0);
+    } catch {
+      commandRunning = false;
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  }
+  assert.equal(
+    commandRunning,
+    false,
+    "packaged supervisor stopped its command",
+  );
+
   app = await electron.launch({
     executablePath: `${bundle}/Contents/MacOS/scully`,
     args: [`--user-data-dir=${state}`],
@@ -99,9 +187,17 @@ try {
     fullPage: true,
   });
   console.log(
-    "PASS: unsigned macOS ARM64 package launches; archive excludes credentials, local notes and node_modules.",
+    "PASS: unsigned macOS ARM64 package launches; PTY helper runs; archive excludes credentials, local notes and unrelated dependencies.",
   );
 } finally {
+  if (supervisor) supervisor.kill("SIGKILL");
+  if (commandPid) {
+    try {
+      process.kill(commandPid, "SIGKILL");
+    } catch {
+      // The packaged supervisor stopped the command.
+    }
+  }
   if (app) await app.close();
   await rm(state, { recursive: true, force: true });
 }

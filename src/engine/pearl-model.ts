@@ -238,6 +238,24 @@ export const pearlTools = [
     ["command", "args"],
   ),
   tool(
+    "start_terminal",
+    "Request one-use approval for an exact project command that may stay running until stopped or the app closes. Its bounded output tail appears in the Room. The process runs in the project sandbox with no external network. Use read_terminal to inspect output and stop_terminal when finished. This does not by itself count as a successful check.",
+    { command: string, args: { type: "array", items: string } },
+    ["command", "args"],
+  ),
+  tool(
+    "read_terminal",
+    "Read the latest bounded output and exit status of a terminal session started in this chat. Do not repeat unchanged reads; ask the user to continue later if the process is still busy.",
+    { terminalId: string },
+    ["terminalId"],
+  ),
+  tool(
+    "stop_terminal",
+    "Stop a terminal session started in this chat and its child processes.",
+    { terminalId: string },
+    ["terminalId"],
+  ),
+  tool(
     "complete_work",
     "Finish a coding turn with a user-facing summary and an honest status. This is checked against recorded writes, command results, and browser observations. Use after project edits instead of ending with plain text. A done status requires a successful command check after the latest edit, a clean browser check after the latest HTML or style edit, and no remaining work from the user's request. Use partial when checked work is only a slice of the requested scope.",
     {

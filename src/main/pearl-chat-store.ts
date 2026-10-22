@@ -76,6 +76,15 @@ export class PearlChatStore {
     }[];
     for (const { id } of rows) {
       const chat = this.get(id);
+      let terminalInterrupted = false;
+      for (const terminal of chat.terminals || []) {
+        if (terminal.status !== "running") continue;
+        terminal.status = "interrupted";
+        terminal.revision = (terminal.revision || 0) + 1;
+        terminal.endedAt = new Date().toISOString();
+        terminalInterrupted = true;
+      }
+      if (terminalInterrupted && chat.status !== "running") this.save(chat);
       if (chat.status !== "running") continue;
       const lastAction = [...chat.messages]
         .reverse()

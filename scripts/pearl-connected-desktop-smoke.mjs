@@ -179,6 +179,24 @@ const responses = [
     tool: ["run_command", { command: "node", args: ["--version"] }],
   },
   { content: "The approved runtime check completed." },
+  ...(process.platform === "darwin"
+    ? [
+        {
+          content: "I will start an interactive project process.",
+          tool: [
+            "start_terminal",
+            {
+              command: "node",
+              args: [
+                "-e",
+                "process.stdin.setRawMode(true);let line='';process.stdout.write('\\x1b[?1049h\\x1b[HINTERACTIVE VIEW\\nREADY:'+process.stdin.isTTY+','+process.stdout.isTTY+'\\n');process.stdin.on('data',x=>{const s=x.toString();if(s==='\\x1b[A')process.stdout.write('ARROW-UP\\n');else if(s==='\\r'){process.stdout.write('ECHO:'+line+'\\n');line=''}else line+=s});process.on('SIGWINCH',()=>process.stdout.write('SIZE:'+process.stdout.columns+'x'+process.stdout.rows+'\\n'))",
+              ],
+            },
+          ],
+        },
+        { content: "The terminal is available in this chat." },
+      ]
+    : []),
   { content: "The chat and project are still available after restart." },
 ];
 const requests = [];
@@ -508,6 +526,75 @@ try {
       ),
     ),
   );
+  if (process.platform === "darwin") {
+    const beforeTerminal = chat.messages.length;
+    await page
+      .getByRole("textbox", { name: "Message Pearl" })
+      .fill("Start an interactive project process.");
+    await page.getByRole("button", { name: "Send message" }).click();
+    await waitUntil(
+      (item) =>
+        item.messages.length > beforeTerminal &&
+        item.status === "awaiting_approval",
+      "terminal review",
+    );
+    await page.getByRole("button", { name: "Run once" }).click();
+    chat = await waitUntil(
+      (item) =>
+        item.status === "idle" && item.terminals?.[0]?.output.includes("READY"),
+      "terminal output",
+    );
+    const terminal = chat.terminals[0];
+    const input = page.locator(".pearl-terminal-screen .xterm-helper-textarea");
+    await input.waitFor();
+    assert(chat.terminals[0].output.includes("READY:true,true"));
+    await page.screenshot({ path: "test-results/pearl-terminal.png" });
+    await page.locator(".pearl-terminal-screen").click();
+    await page.keyboard.press("ArrowUp");
+    await waitUntil(
+      (item) => item.terminals?.[0]?.output.includes("ARROW-UP"),
+      "terminal arrow key",
+    );
+    await page.keyboard.type("hello");
+    await page.keyboard.press("Enter");
+    await waitUntil(
+      (item) => item.terminals?.[0]?.output.includes("ECHO:hello"),
+      "terminal input",
+    );
+    const priorSizes = (
+      (await current()).terminals[0].output.match(/SIZE:/g) || []
+    ).length;
+    await page
+      .locator(".pearl-terminal-screen")
+      .evaluate((element) => (element.style.height = "450px"));
+    await waitUntil(
+      (item) =>
+        (item.terminals?.[0]?.output.match(/SIZE:/g) || []).length > priorSizes,
+      "terminal resize",
+    );
+    const terminalCard = page.locator("details.pearl-terminal");
+    await terminalCard.locator("summary").click();
+    assert.equal(await terminalCard.evaluate((element) => element.open), false);
+    await page.evaluate(
+      async ([id, terminalId]) => {
+        await window.scully.sendPearlTerminalInput(id, terminalId, "more");
+        await window.scully.sendPearlTerminalInput(id, terminalId, "\r");
+      },
+      [chatId, terminal.id],
+    );
+    await waitUntil(
+      (item) => item.terminals?.[0]?.output.includes("ECHO:more"),
+      "collapsed terminal output",
+    );
+    assert.equal(await terminalCard.evaluate((element) => element.open), false);
+    await terminalCard.locator("summary").click();
+    await page.getByRole("button", { name: "Stop terminal" }).click();
+    await waitUntil(
+      (item) => item.terminals?.[0]?.status === "stopped",
+      "terminal stop",
+    );
+    assert.equal((await current()).terminals[0].id, terminal.id);
+  }
   await app.close();
   app = await launch();
   page = await app.firstWindow();
@@ -525,6 +612,10 @@ try {
     })
     .click();
   assert((await current()).project.approved);
+  if (process.platform === "darwin") {
+    assert.equal((await current()).terminals[0].status, "stopped");
+    assert.match((await current()).terminals[0].output, /ECHO:hello/);
+  }
   const restoredActivity = page
     .locator("details.pearl-activity")
     .filter({ hasText: "Apply patch" })

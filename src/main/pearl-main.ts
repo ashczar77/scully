@@ -225,6 +225,15 @@ app
     );
     handle("pearl:retry", (_event, id) => pearl!.retry(id));
     handle("pearl:stop", (_event, id) => pearl!.stop(id));
+    handle("pearl:terminal:input", (_event, id, terminalId, value) =>
+      pearl!.sendTerminalInput(id, terminalId, value),
+    );
+    handle("pearl:terminal:resize", (_event, id, terminalId, cols, rows) =>
+      pearl!.resizeTerminal(id, terminalId, cols, rows),
+    );
+    handle("pearl:terminal:stop", (_event, id, terminalId) =>
+      pearl!.stopTerminal(id, terminalId),
+    );
     ipcMain.handle("session:info", (event) => {
       trusted(event);
       return settings.info();
@@ -255,7 +264,9 @@ app.on("before-quit", (event) => {
   if (previewsClosed || !pearl) return;
   event.preventDefault();
   previewsClosed = true;
-  void pearl.closePreviews().finally(() => app.quit());
+  void Promise.all([pearl.closeTerminals(), pearl.closePreviews()]).finally(
+    () => app.quit(),
+  );
 });
 app.on("will-quit", () => {
   settings.close();

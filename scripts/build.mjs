@@ -10,6 +10,10 @@ await copyFile(
   "dist/branding/scully.png",
 );
 await copyFile("assets/fonts/OFL.txt", "dist/fonts/ChelseaMarket-OFL.txt");
+await copyFile(
+  "src/main/pearl-terminal-supervisor.cjs",
+  "dist/pearl-terminal-supervisor.cjs",
+);
 await bundle({
   entryPoints: {
     main: "src/main/pearl-main.ts",

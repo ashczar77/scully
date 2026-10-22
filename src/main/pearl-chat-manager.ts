@@ -12,6 +12,7 @@ import { delimiter, isAbsolute, join, resolve } from "node:path";
 import type {
   PearlChat,
   PearlMessage,
+  PearlTerminalState,
   PearlToolCall,
 } from "../shared/pearl-chat";
 import {
@@ -39,6 +40,7 @@ import {
 } from "./pearl-preview";
 import { validateBrowserSteps } from "./pearl-browser-steps";
 import { PearlWebAccess } from "./pearl-web";
+import { ManagedTerminal } from "./pearl-terminal";
 import type { PearlBrowser } from "./pearl-browser";
 import { nebiusPearlModel, type PearlModel } from "../engine/pearl-model";
 import { runPearlAgentTurn } from "./pearl-agent-runtime";
@@ -113,6 +115,60 @@ function retryableProvider(error: unknown): boolean {
 }
 
 export class PearlChatManager {
+  private readonly terminalsPerChatLimit = 8;
+  private readonly terminalsAppLimit = 16;
+  private terminals = new Map<string, Map<string, ManagedTerminal>>();
+  async closeTerminals(chatId?: string): Promise<void> {
+    const closing: Promise<void>[] = [];
+    for (const [owner, sessions] of this.terminals) {
+      if (chatId && owner !== chatId) continue;
+      for (const terminal of sessions.values()) closing.push(terminal.close());
+    }
+    await Promise.all(closing);
+  }
+  private terminal(chat: PearlChat, terminalId: unknown): PearlTerminalState {
+    if (typeof terminalId !== "string" || !/^[0-9a-f-]{36}$/.test(terminalId))
+      throw new Error("Invalid terminal session");
+    const state = chat.terminals?.find((item) => item.id === terminalId);
+    if (!state)
+      throw new Error("Terminal session does not belong to this chat");
+    return state;
+  }
+  sendTerminalInput(id: unknown, terminalId: unknown, value: unknown): void {
+    const chat = this.get(id);
+    this.activeChat(chat);
+    this.binding(chat);
+    const state = this.terminal(chat, terminalId);
+    const running = this.terminals.get(chat.id)?.get(state.id);
+    if (!running || state.status !== "running")
+      throw new Error("Terminal session has ended");
+    running.input(value as string);
+  }
+  resizeTerminal(
+    id: unknown,
+    terminalId: unknown,
+    cols: unknown,
+    rows: unknown,
+  ): void {
+    const chat = this.get(id);
+    this.activeChat(chat);
+    this.binding(chat);
+    const state = this.terminal(chat, terminalId);
+    const running = this.terminals.get(chat.id)?.get(state.id);
+    if (!running || state.status !== "running")
+      throw new Error("Terminal session has ended");
+    running.resize(cols as number, rows as number);
+  }
+  stopTerminal(id: unknown, terminalId: unknown): PearlChat {
+    const chat = this.get(id);
+    this.activeChat(chat);
+    const state = this.terminal(chat, terminalId);
+    const running = this.terminals.get(chat.id)?.get(state.id);
+    if (!running || state.status !== "running")
+      throw new Error("Terminal session has ended");
+    running.stop();
+    return this.get(chat.id);
+  }
   private previews = new Map<string, { id: string; running: RunningPreview }>();
   async closePreviews(chatId?: string): Promise<void> {
     const closing = [...this.previews.entries()].filter(
@@ -191,6 +247,7 @@ export class PearlChatManager {
       chat.status === "running" ||
       chat.status === "awaiting_approval" ||
       chat.pendingTool ||
+      chat.terminals?.some((terminal) => terminal.status === "running") ||
       this.active.has(chat.id)
     )
       throw new Error("Wait for Pearl's current action");
@@ -237,6 +294,29 @@ export class PearlChatManager {
   }
 
   private save(chat: PearlChat): PearlChat {
+    // Model turns and process output may save independent snapshots of this
+    // chat. Preserve the newest terminal observation across those writes.
+    const persisted = this.store.get(chat.id);
+    if (persisted.terminals?.length) {
+      const sessions = new Map(
+        (chat.terminals || []).map((item) => [item.id, item]),
+      );
+      for (const item of persisted.terminals) {
+        const proposed = sessions.get(item.id);
+        if (!proposed || (item.revision || 0) > (proposed.revision || 0))
+          sessions.set(item.id, item);
+      }
+      const retained = [...sessions.values()];
+      const liveIds = new Set(this.terminals.get(chat.id)?.keys());
+      while (retained.length > 20) {
+        const expired = retained.findIndex(
+          (item) => !liveIds.has(item.id) && item.status !== "running",
+        );
+        if (expired < 0) break;
+        retained.splice(expired, 1);
+      }
+      chat.terminals = retained;
+    }
     this.store.save(chat);
     this.publish(structuredClone(chat));
     return chat;
@@ -282,6 +362,8 @@ export class PearlChatManager {
     this.activeChat(chat);
     if (chat.status === "running" || chat.status === "awaiting_approval")
       throw new Error("Wait for Pearl's current action");
+    if (chat.terminals?.some((terminal) => terminal.status === "running"))
+      throw new Error("Stop running terminals before changing the project");
     void this.closePreviews(chat.id);
     const binding = bindProjectWorkspace(directory, "existing", this.dataRoot);
     chat.project = {
@@ -348,7 +430,9 @@ export class PearlChatManager {
       try {
         const current = this.get(chat.id);
         const result = approved
-          ? await this.command(current, call, controller.signal)
+          ? call.name === "start_terminal"
+            ? this.startTerminal(current, call)
+            : await this.command(current, call, controller.signal)
           : "User denied this command. Do not retry it without a new request.";
         if (controller.signal.aborted) {
           this.message(
@@ -757,6 +841,9 @@ export class PearlChatManager {
         "replace_in_file",
         "apply_patch",
         "run_command",
+        "start_terminal",
+        "read_terminal",
+        "stop_terminal",
         "complete_work",
       );
     if (chat.project?.approved && this.browser) names.push("browser_check");
@@ -899,7 +986,7 @@ export class PearlChatManager {
         return "continue";
       }
     }
-    if (call.name === "run_command" || call.name === "preview_app") {
+    if (["run_command", "preview_app", "start_terminal"].includes(call.name)) {
       const activeMessageIndex = chat.messages.findIndex(
         (message) => message.id === chat.activeUserMessageId,
       );
@@ -908,7 +995,9 @@ export class PearlChatManager {
         .filter(
           (message) =>
             message.role === "tool" &&
-            ["run_command", "preview_app"].includes(message.toolName || "") &&
+            ["run_command", "preview_app", "start_terminal"].includes(
+              message.toolName || "",
+            ) &&
             message.text.startsWith("User denied this command."),
         );
       const repeated = denied.some((result) => {
@@ -1272,6 +1361,28 @@ export class PearlChatManager {
   ): Promise<string> {
     const input = args(call);
     const binding = this.binding(chat);
+    if (call.name === "read_terminal") {
+      const saved = this.terminal(chat, input.terminalId);
+      const state = this.terminals.get(chat.id)?.get(saved.id)?.state ?? saved;
+      emitMetric(this.metricSink, {
+        version: 1,
+        operation: "terminal.read",
+        outcome: "returned",
+        durationMs: 0,
+      });
+      return JSON.stringify({
+        terminalId: state.id,
+        status: state.status,
+        exitCode: state.exitCode ?? null,
+        output: state.output.slice(-16_000),
+        truncated: state.truncated || state.output.length > 16_000,
+      });
+    }
+    if (call.name === "stop_terminal") {
+      this.stopTerminal(chat.id, input.terminalId);
+      this.terminal(chat, input.terminalId).status = "stopped";
+      return JSON.stringify({ terminalId: input.terminalId, stopped: true });
+    }
     if (call.name === "project_map") return JSON.stringify(projectMap(binding));
     if (call.name === "browser_check") {
       if (!this.browser) throw new Error("Browser check is unavailable");
@@ -1651,6 +1762,88 @@ export class PearlChatManager {
       }
     }
     throw new Error("Command executable is unavailable");
+  }
+  private startTerminal(chat: PearlChat, call: PearlToolCall): string {
+    this.validateCommand(chat, call);
+    const binding = this.binding(chat);
+    if (!call.executable) throw new Error("Review this command again");
+    const executable = statSync(call.executable.path);
+    if (
+      !executable.isFile() ||
+      executable.dev !== call.executable.dev ||
+      executable.ino !== call.executable.ino ||
+      executable.mtimeMs !== call.executable.mtimeMs ||
+      executable.size !== call.executable.size
+    )
+      throw new Error("Command executable changed since approval");
+    const running =
+      this.terminals.get(chat.id) || new Map<string, ManagedTerminal>();
+    if (running.size >= this.terminalsPerChatLimit)
+      throw new Error(
+        `This chat already has ${this.terminalsPerChatLimit} running terminals. Stop one before starting another.`,
+      );
+    const runningAcrossChats = [...this.terminals.values()].reduce(
+      (count, sessions) => count + sessions.size,
+      0,
+    );
+    if (runningAcrossChats >= this.terminalsAppLimit)
+      throw new Error(
+        `The application already has ${this.terminalsAppLimit} running terminals. Stop one before starting another.`,
+      );
+    const input = args(call);
+    const state: PearlTerminalState = {
+      id: randomUUID(),
+      revision: 0,
+      command: input.command as string,
+      args: input.args as string[],
+      status: "running",
+      startedAt: new Date().toISOString(),
+      output: "",
+      truncated: false,
+    };
+    chat.terminals ||= [];
+    chat.terminals.push(state);
+    let exitMetricSent = false;
+    const terminal = new ManagedTerminal(
+      state,
+      call.executable.path,
+      binding.path,
+      () => {
+        const current = this.get(chat.id);
+        const saved = current.terminals?.find((item) => item.id === state.id);
+        if (saved) Object.assign(saved, state);
+        this.save(current);
+        if (!exitMetricSent && state.endedAt) {
+          exitMetricSent = true;
+          this.terminals.get(chat.id)?.delete(state.id);
+          emitMetric(this.metricSink, {
+            version: 1,
+            operation: "terminal.exit",
+            outcome: state.exitCode === 0 ? "returned" : "threw",
+            durationMs: Math.max(
+              0,
+              Date.parse(state.endedAt) - Date.parse(state.startedAt),
+            ),
+          });
+        }
+      },
+    );
+    running.set(state.id, terminal);
+    this.terminals.set(chat.id, running);
+    this.save(chat);
+    emitMetric(this.metricSink, {
+      version: 1,
+      operation: "terminal.start",
+      outcome: "returned",
+      durationMs: 0,
+    });
+    return JSON.stringify({
+      terminalId: state.id,
+      status: state.status,
+      output: state.output,
+      instruction:
+        "Use read_terminal to inspect output. Stop the session when no longer needed.",
+    });
   }
   private async command(
     chat: PearlChat,

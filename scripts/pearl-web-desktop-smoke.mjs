@@ -142,15 +142,48 @@ try {
     const chat = await window.scully.getPearlChat(id);
     return (
       chat.status === "idle" &&
+      chat.messages.at(-1)?.role === "assistant" &&
+      !chat.messages.at(-1)?.toolCallId &&
+      !chat.messages.at(-1)?.toolCalls?.length &&
       chat.messages.at(-1)?.text.includes("https://example.org/releases/4")
     );
   }, chatId);
-  const chat = await page.evaluate(
+  let chat = await page.evaluate(
     (id) => window.scully.getPearlChat(id),
     chatId,
   );
+  if (chat.status !== "idle") {
+    await page.waitForFunction(async (id) => {
+      const current = await window.scully.getPearlChat(id);
+      return (
+        current.status === "idle" &&
+        current.messages.at(-1)?.role === "assistant"
+      );
+    }, chatId);
+    chat = await page.evaluate((id) => window.scully.getPearlChat(id), chatId);
+  }
   assert.equal(chat.project, undefined);
-  assert.equal(webRequests.length, 8);
+  assert.equal(
+    webRequests.length,
+    8,
+    JSON.stringify({
+      requests: webRequests.map((item) => ({
+        kind: item.kind,
+        query: item.body.query,
+        urls: item.body.urls,
+      })),
+      tools: chat.messages
+        .filter(
+          (item) =>
+            item.role === "tool" &&
+            ["search_web", "read_web_result"].includes(item.toolName),
+        )
+        .map((item) => ({
+          name: item.toolName,
+          text: item.text.slice(0, 200),
+        })),
+    }),
+  );
   for (let index = 0; index < 4; index++) {
     assert.equal(
       webRequests[index * 2].body.query,
@@ -161,7 +194,18 @@ try {
       `https://example.org/releases/${index + 1}`,
     );
   }
-  assert.equal(chat.status, "idle");
+  assert.equal(
+    chat.status,
+    "idle",
+    JSON.stringify({
+      modelIndex,
+      messages: chat.messages.slice(-5).map((item) => ({
+        role: item.role,
+        toolName: item.toolName,
+        text: item.text.slice(0, 120),
+      })),
+    }),
+  );
   assert.match(chat.messages.at(-1).text, /https:\/\/example.org\/releases\/4/);
   await page.getByText("Search web").first().waitFor({ state: "attached" });
   await page.getByRole("link", { name: "Release notes" }).waitFor();

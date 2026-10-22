@@ -31,6 +31,12 @@ const api: PearlDesktopAPI = {
     ipcRenderer.invoke("pearl:question:answer", id, questionId, answer),
   retryPearlChat: (id) => ipcRenderer.invoke("pearl:retry", id),
   stopPearlChat: (id) => ipcRenderer.invoke("pearl:stop", id),
+  sendPearlTerminalInput: (id, terminalId, value) =>
+    ipcRenderer.invoke("pearl:terminal:input", id, terminalId, value),
+  resizePearlTerminal: (id, terminalId, cols, rows) =>
+    ipcRenderer.invoke("pearl:terminal:resize", id, terminalId, cols, rows),
+  stopPearlTerminal: (id, terminalId) =>
+    ipcRenderer.invoke("pearl:terminal:stop", id, terminalId),
   onPearlChatUpdate: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, chat: PearlChat) =>
       listener(chat);

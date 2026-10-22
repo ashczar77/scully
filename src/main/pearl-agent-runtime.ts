@@ -119,6 +119,7 @@ function successfulWrite(
 
 const controlActions = new Set([
   "run_command",
+  "start_terminal",
   "preview_app",
   "ask_user",
   "answer_question",

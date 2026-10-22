@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -25,6 +27,10 @@ import { PearlMessageFrame } from "./PearlMessageFrame";
 import scullyLogo from "../../assets/branding/scully-friendly-nerd-transparent-v1.png";
 import pearlPortrait from "../../assets/team-portrait-coordinator-v1.png";
 import "./pearl.css";
+
+const PearlTerminalView = lazy(async () => ({
+  default: (await import("./PearlTerminalView")).PearlTerminalView,
+}));
 
 export function PearlApp({
   api: optionalApi = window.scully,
@@ -716,6 +722,41 @@ export function PearlApp({
                   </ul>
                 </details>
               )}
+              {chat?.terminals?.map((terminal) => (
+                <details
+                  className="pearl-card pearl-terminal"
+                  key={terminal.id}
+                  open={terminal.status === "running" ? true : undefined}
+                >
+                  <summary>
+                    Terminal: {terminal.command} ({terminal.status})
+                  </summary>
+                  {terminal.status === "running" && !chat.lifecycle && (
+                    <div className="pearl-terminal-controls">
+                      <span>Click the terminal to type.</span>
+                      <button
+                        onClick={() =>
+                          void action(() =>
+                            mutateChat(() =>
+                              api.stopPearlTerminal(chat.id, terminal.id),
+                            ),
+                          )
+                        }
+                      >
+                        Stop terminal
+                      </button>
+                    </div>
+                  )}
+                  <Suspense fallback={<p>Opening terminal...</p>}>
+                    <PearlTerminalView
+                      api={api}
+                      chatId={chat.id}
+                      terminal={terminal}
+                    />
+                  </Suspense>
+                  {terminal.truncated && <p>Earlier output was trimmed.</p>}
+                </details>
+              ))}
               {chat?.pendingTool && !chat.lifecycle && (
                 <section className="pearl-card" aria-label="Command approval">
                   <ShieldCheck size={20} />
@@ -724,7 +765,9 @@ export function PearlApp({
                     <p>
                       {chat.pendingTool.name === "preview_app"
                         ? "Start the project server and an isolated browser for this turn, up to ten minutes. Pearl can continue interacting with it; form actions can change project data. Stop ends the preview."
-                        : "This runs once inside the selected project."}
+                        : chat.pendingTool.name === "start_terminal"
+                          ? "Start this command in an interactive terminal until you stop it or close the app. Only you can type into it; your input can run further commands inside the project sandbox."
+                          : "This runs once inside the selected project."}
                     </p>
                     <pre>
                       {command
