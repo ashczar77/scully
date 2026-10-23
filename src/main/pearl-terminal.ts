@@ -5,7 +5,7 @@ import { StringDecoder } from "node:string_decoder";
 import { isolatedCommand } from "./pearl-command-sandbox";
 import type { PearlTerminalState } from "../shared/pearl-chat";
 
-const outputLimit = 32_000;
+const outputLimit = 128_000;
 const updateIntervalMs = 100;
 type SupervisorLauncher = (
   modulePath: string,
@@ -34,6 +34,9 @@ export class ManagedTerminal {
     let launch: ReturnType<typeof isolatedCommand>;
     try {
       launch = isolatedCommand(executable, state.args, project, this.scratch);
+      // A pager launched from an existing prompt should repaint from the top.
+      // Scrolling repaint can leave a short page at the bottom of a tall PTY.
+      launch.env.LESS = "-c";
       this.child = supervisorLauncher(supervisorPath, [], {
         execPath: process.execPath,
         execArgv: [],

@@ -499,6 +499,12 @@
 .pearl-terminal-screen .xterm {
   height: 100%;
 }
+.pearl-terminal-screen .xterm-viewport {
+  scrollbar-width: none;
+}
+.pearl-terminal-screen .xterm-viewport::-webkit-scrollbar {
+  display: none;
+}
 .pearl-terminal-error {
   color: #f4aca5;
 }

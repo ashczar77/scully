@@ -548,6 +548,12 @@ try {
     const input = page.locator(".pearl-terminal-screen .xterm-helper-textarea");
     await input.waitFor();
     assert(chat.terminals[0].output.includes("READY:true,true"));
+    assert.equal(
+      await page
+        .locator(".pearl-terminal-screen .xterm-viewport")
+        .evaluate((element) => getComputedStyle(element).scrollbarWidth),
+      "none",
+    );
     await page.screenshot({ path: "test-results/pearl-terminal.png" });
     await page.locator(".pearl-terminal-screen").click();
     await page.keyboard.press("ArrowUp");

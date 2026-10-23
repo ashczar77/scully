@@ -1,7 +1,13 @@
 // @vitest-environment node
 import { afterEach, expect, it, vi } from "vitest";
 import { fork, type ChildProcess } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PearlChatManager } from "../src/main/pearl-chat-manager";
@@ -162,6 +168,90 @@ it("provides a PTY with raw keys and resize", async () => {
   expect(state.exitCode).toBe(0);
 });
 
+it.skipIf(process.platform !== "darwin")(
+  "draws a short pager page from the top and retains its output",
+  async () => {
+    const root = mkdtempSync(join(tmpdir(), "scully-terminal-pager-"));
+    roots.push(root);
+    writeFileSync(
+      join(root, "sample.txt"),
+      "First line\nSecond line\nThird line\n",
+    );
+    const state: PearlTerminalState = {
+      id: "pager-test",
+      revision: 0,
+      command: "node",
+      args: [],
+      status: "running",
+      startedAt: new Date().toISOString(),
+      output: "",
+      truncated: false,
+    };
+    const terminal = new ManagedTerminal(
+      state,
+      process.execPath,
+      root,
+      () => {},
+    );
+    terminals.push(terminal);
+    await vi.waitFor(() =>
+      expect(state.output).toContain("Welcome to Node.js"),
+    );
+    terminal.resize(95, 39);
+    for (let index = 0; index < 3; index++) {
+      const priorPages = (state.output.match(/sample\.txt \(END\)/g) || [])
+        .length;
+      const priorExits = (state.output.match(/status:/g) || []).length;
+      terminal.input(
+        "require('node:child_process').spawnSync('less', ['sample.txt'], {stdio:'inherit'})\r",
+      );
+      await vi.waitFor(() =>
+        expect(
+          (state.output.match(/sample\.txt \(END\)/g) || []).length,
+        ).toBeGreaterThan(priorPages),
+      );
+      terminal.input("q");
+      await vi.waitFor(() =>
+        expect((state.output.match(/status:/g) || []).length).toBeGreaterThan(
+          priorExits,
+        ),
+      );
+    }
+    const lastPage = state.output.slice(
+      state.output.lastIndexOf("\x1b[?1049h"),
+    );
+    const beforeFile = lastPage.slice(0, lastPage.indexOf("First line"));
+    expect(beforeFile).toMatch(/\x1b\[(?:H|2J|1;1H)/);
+    expect(state.truncated).toBe(false);
+    expect(state.output).toContain("First line");
+  },
+);
+
+it("retains a moderate terminal session without a trim notice", async () => {
+  const root = mkdtempSync(join(tmpdir(), "scully-terminal-moderate-"));
+  roots.push(root);
+  const state: PearlTerminalState = {
+    id: "moderate-test",
+    revision: 0,
+    command: "node",
+    args: [
+      "-e",
+      "process.stdout.write('X'.repeat(64000));process.stdin.resume()",
+    ],
+    status: "running",
+    startedAt: new Date().toISOString(),
+    output: "",
+    truncated: false,
+  };
+  const terminal = new ManagedTerminal(state, process.execPath, root, () => {});
+  terminals.push(terminal);
+  await vi.waitFor(() =>
+    expect(state.output.length).toBeGreaterThanOrEqual(64_000),
+  );
+  expect(state.truncated).toBe(false);
+  expect(state.outputStart ?? 0).toBe(0);
+});
+
 it("lets Pearl inspect and stop only a session from its approved chat", async () => {
   const f = fixture([
     tool("start", "node", [
@@ -283,7 +373,7 @@ it("bounds retained output without stopping a flooding process", async () => {
     timeout: 5000,
   });
   expect(state.status).toBe("running");
-  expect(state.output.length).toBeLessThanOrEqual(32_000);
+  expect(state.output.length).toBeLessThanOrEqual(128_000);
   terminal.input("hello\n");
   await vi.waitFor(() => expect(state.output).toContain("ECHO:hello"));
   terminal.stop();
@@ -299,7 +389,7 @@ it("keeps Unicode intact when trimming terminal output", async () => {
     command: "node",
     args: [
       "-e",
-      "process.stdout.write('😀'.repeat(20000));setInterval(()=>{},1000)",
+      "process.stdout.write('😀'.repeat(80000));setInterval(()=>{},1000)",
     ],
     status: "running",
     startedAt: new Date().toISOString(),
@@ -309,7 +399,7 @@ it("keeps Unicode intact when trimming terminal output", async () => {
   const terminal = new ManagedTerminal(state, process.execPath, root, () => {});
   terminals.push(terminal);
   await vi.waitFor(() => expect(state.truncated).toBe(true));
-  expect(state.output.length).toBeLessThanOrEqual(32_000);
+  expect(state.output.length).toBeLessThanOrEqual(128_000);
   expect(state.output).not.toContain("\ufffd");
   expect(state.output.codePointAt(0)).toBe("😀".codePointAt(0));
 });

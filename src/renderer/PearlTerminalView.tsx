@@ -17,8 +17,10 @@ export function PearlTerminalView({
   const host = useRef<HTMLDivElement>(null);
   const instance = useRef<Terminal | null>(null);
   const outputEnd = useRef<number | null>(null);
+  const latestTerminal = useRef(terminal);
   const running = useRef(terminal.status === "running");
   const [error, setError] = useState("");
+  latestTerminal.current = terminal;
   running.current = terminal.status === "running";
 
   useEffect(() => {
@@ -44,8 +46,6 @@ export function PearlTerminalView({
       `Interactive ${terminal.command} terminal`,
     );
     instance.current = view;
-    view.write(terminal.output);
-    outputEnd.current = (terminal.outputStart || 0) + terminal.output.length;
     view.options.disableStdin = !running.current;
 
     let live = true;
@@ -77,6 +77,11 @@ export function PearlTerminalView({
       if (!live || element.clientWidth < 80 || element.clientHeight < 50)
         return;
       fit.fit();
+      if (outputEnd.current === null) {
+        const current = latestTerminal.current;
+        view.write(current.output);
+        outputEnd.current = (current.outputStart || 0) + current.output.length;
+      }
       if (!running.current) return;
       const cols = Math.max(20, Math.min(300, view.cols));
       const rows = Math.max(5, Math.min(120, view.rows));
@@ -97,7 +102,7 @@ export function PearlTerminalView({
     window.addEventListener("resize", fitAndResize);
     const frame = requestAnimationFrame(() => {
       fitAndResize();
-      if (running.current) element.scrollIntoView({ block: "nearest" });
+      if (running.current) element.scrollIntoView({ block: "center" });
     });
     return () => {
       live = false;
@@ -118,10 +123,13 @@ export function PearlTerminalView({
     const start = terminal.outputStart || 0;
     const end = start + terminal.output.length;
     const seen = outputEnd.current;
-    if (seen === null) {
-      view.write(terminal.output);
-    } else if (seen < start || seen > end) {
+    if (seen === null) return;
+    if (seen > end) {
       view.reset();
+      view.write(terminal.output);
+    } else if (seen < start) {
+      // Keep the live screen when the persisted tail advances past our cursor.
+      // Resetting would replay an incomplete ANSI stream into an empty screen.
       view.write(terminal.output);
     } else if (end > seen) {
       view.write(terminal.output.slice(seen - start));
