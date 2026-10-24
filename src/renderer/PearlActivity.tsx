@@ -15,6 +15,7 @@ export type ActivityGroup = {
   id: string;
   actions: ActivityAction[];
   entries: ActivityEntry[];
+  fallbackModels: string[];
 };
 
 export type RoomTimelineItem =
@@ -51,9 +52,19 @@ export function roomTimeline(messages: PearlMessage[]): RoomTimelineItem[] {
   let byCallId = new Map<string, ActivityAction>();
   function activity(message: PearlMessage): ActivityGroup {
     if (!group) {
-      group = { id: `activity-${message.id}`, actions: [], entries: [] };
+      group = {
+        id: `activity-${message.id}`,
+        actions: [],
+        entries: [],
+        fallbackModels: [],
+      };
       items.push({ kind: "activity", group });
     }
+    if (
+      message.fallbackModel &&
+      !group.fallbackModels.includes(message.fallbackModel)
+    )
+      group.fallbackModels.push(message.fallbackModel);
     return group;
   }
   for (const message of messages) {
@@ -214,6 +225,7 @@ function failedResult(message: PearlMessage): boolean {
     const result = JSON.parse(message.text) as Record<string, unknown>;
     return (
       result.ok === false ||
+      result.isError === true ||
       result.success === false ||
       (typeof result.exitCode === "number" && result.exitCode !== 0) ||
       (typeof result.error === "string" && result.error.length > 0) ||
@@ -223,7 +235,7 @@ function failedResult(message: PearlMessage): boolean {
     );
   } catch {
     return (
-      /^(Action rejected:|Action failed:|Completion rejected:|Approved command could not start:|The command was stopped\.|Command review limit reached|User denied this command\.|Error:)/i.test(
+      /^(Action rejected:|Action failed:|Completion rejected:|Approved command could not start:|The command was stopped\.|Command review limit reached|User denied this command\.|User denied this remote MCP call\.|Error:)/i.test(
         message.text,
       ) ||
       (["browser_check", "preview_app"].includes(message.toolName || "") &&
@@ -234,6 +246,8 @@ function failedResult(message: PearlMessage): boolean {
 
 function label(name: string): string {
   const names: Record<string, string> = {
+    mcp_list_tools: "List remote tools",
+    mcp_call_tool: "Call remote tool",
     update_plan: "Update plan",
     project_map: "Inspect project",
     list_files: "List files",
@@ -245,6 +259,7 @@ function label(name: string): string {
     write_file: "Write file",
     replace_in_file: "Edit file",
     apply_patch: "Apply patch",
+    edit_files: "Edit files",
     run_command: "Run command",
     preview_app: "Start preview",
     browser_check: "Check in browser",
@@ -259,6 +274,7 @@ function countLabel(actions: ActivityAction[]): string {
     "write_file",
     "replace_in_file",
     "apply_patch",
+    "edit_files",
   ]);
   const counts = [
     ["file action", actions.filter((item) => fileNames.has(item.name)).length],
@@ -294,6 +310,9 @@ export function PearlActivity({ group }: { group: ActivityGroup }) {
       <summary>
         <span>Activity</span>
         <small>{countLabel(group.actions)}</small>
+        {group.fallbackModels.map((model) => (
+          <small key={model}>Fallback: {model}</small>
+        ))}
         {latestAction && (
           <span className="pearl-activity-status">
             Latest: {label(latestAction.name)}

@@ -13,7 +13,7 @@
     "build": "node scripts/prepare-pty.mjs && tsc --noEmit && node scripts/build.mjs",
     "start": "npm run build && electron .",
     "test": "vitest run",
-    "test:desktop": "npm run build && node scripts/pearl-command-sandbox-smoke.mjs && node scripts/pearl-terminal-smoke.mjs && node scripts/pearl-terminal-crash-smoke.mjs && node scripts/pearl-terminal-electron-crash-smoke.mjs && node scripts/pearl-desktop-smoke.mjs && node scripts/pearl-connected-desktop-smoke.mjs && node scripts/pearl-web-desktop-smoke.mjs && node scripts/pearl-browser-sanity-smoke.mjs && node scripts/pearl-preview-smoke.mjs && node scripts/pearl-keyboard-smoke.mjs",
+    "test:desktop": "npm run build && node scripts/pearl-command-sandbox-smoke.mjs && node scripts/pearl-terminal-smoke.mjs && node scripts/pearl-terminal-crash-smoke.mjs && node scripts/pearl-terminal-electron-crash-smoke.mjs && node scripts/pearl-desktop-smoke.mjs && node scripts/pearl-connected-desktop-smoke.mjs && node scripts/pearl-web-desktop-smoke.mjs && node scripts/pearl-mcp-desktop-smoke.mjs && node scripts/pearl-browser-sanity-smoke.mjs && node scripts/pearl-preview-smoke.mjs && node scripts/pearl-keyboard-smoke.mjs",
     "test:live:pearl": "SCULLY_DEV_HARNESS=1 npm run build && node scripts/live-pearl-chat.manual.mjs",
     "test:package:mac": "node scripts/package-smoke.mjs",
     "format:check": "prettier --check src scripts tests index.html package.json tsconfig.json vite.config.ts vitest.config.ts forge.config.cjs",
@@ -41,12 +41,15 @@
     "vitest": "5.0.3"
   },
   "dependencies": {
+    "@modelcontextprotocol/client": "2.3.1",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
+    "ipaddr.js": "2.2.0",
     "node-pty": "^1.1.0",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "remark-parse": "^11.0.0",
+    "undici": "7.30.1",
     "unified": "^11.0.5"
   }
 }

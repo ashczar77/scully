@@ -186,12 +186,18 @@ export function canStartInitialPlanning(
 export type SessionConfig = {
   key: string;
   model: string;
+  fallbackModel?: string;
   outputTokens: number;
 };
 export type SessionInfo = {
   configured: boolean;
   model: string;
+  fallbackModel?: string;
   outputTokens: number;
+};
+export type SessionModelSelection = {
+  model: string;
+  fallbackModel?: string;
 };
 export type ModelOption = {
   id: string;
@@ -511,6 +517,7 @@ export type RunAPI = {
 };
 export function validateSession(value: unknown): SessionConfig {
   const v = value as SessionConfig;
+  const fallback = v?.fallbackModel;
   if (
     !v ||
     typeof v.key !== "string" ||
@@ -526,7 +533,19 @@ export function validateSession(value: unknown): SessionConfig {
     throw new Error(
       "Enter a valid key, model ID and output limit (512-32768).",
     );
-  return { key: v.key.trim(), model: v.model, outputTokens: v.outputTokens };
+  if (
+    fallback !== undefined &&
+    (typeof fallback !== "string" ||
+      !/^[\w./:-]{1,160}$/.test(fallback) ||
+      fallback === v.model)
+  )
+    throw new Error("Enter a distinct, valid fallback model ID.");
+  return {
+    key: v.key.trim(),
+    model: v.model,
+    ...(fallback ? { fallbackModel: fallback } : {}),
+    outputTokens: v.outputTokens,
+  };
 }
 export function safePath(path: unknown): asserts path is string {
   if (

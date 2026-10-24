@@ -16,12 +16,14 @@ export function PearlMessageFrame({
   at,
   progress = false,
   draft = false,
+  fallbackModel,
   children,
 }: {
   role: "user" | "assistant";
   at?: string;
   progress?: boolean;
   draft?: boolean;
+  fallbackModel?: string;
   children: ReactNode;
 }) {
   const time = messageTime(at);
@@ -39,6 +41,11 @@ export function PearlMessageFrame({
             {role === "user" ? "You" : "Pearl"}
           </span>
           {time && <time dateTime={at}>{time}</time>}
+          {fallbackModel && (
+            <span className="pearl-fallback-model">
+              Fallback: {fallbackModel}
+            </span>
+          )}
         </div>
         <div className="pearl-message-bubble">{children}</div>
       </div>

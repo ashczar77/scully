@@ -17,7 +17,9 @@ import { IsolatedPearlBrowser } from "./pearl-browser";
 import { PearlChatStore } from "./pearl-chat-store";
 import { roomChat, roomResult } from "./pearl-chat-view";
 import { PearlSession } from "./pearl-session";
+import { fetchModelCatalog } from "./model-catalog";
 import { PearlWebAccess, PearlWebConnection } from "./pearl-web";
+import { RemoteMcpConnection } from "./pearl-mcp";
 import { TavilyWebProvider } from "./pearl-tavily";
 import { cappedPearlModel, liveModelRequestLimit } from "./pearl-test-model";
 
@@ -37,6 +39,24 @@ const webConnection = new PearlWebConnection();
 const appIcon = join(__dirname, "branding", "scully.png");
 const testingPath = process.env.SCULLY_TEST_DATA;
 if (testingPath && !app.isPackaged) app.setPath("userData", testingPath);
+const mcpTestEndpoint =
+  testingPath && !app.isPackaged
+    ? process.env.SCULLY_PEARL_MCP_TEST_ENDPOINT
+    : undefined;
+if (mcpTestEndpoint) {
+  const url = new URL(mcpTestEndpoint);
+  if (url.protocol !== "http:" || url.hostname !== "127.0.0.1")
+    throw new Error("Invalid local MCP test endpoint");
+}
+const remoteMcp = new RemoteMcpConnection(
+  mcpTestEndpoint
+    ? (input, init) =>
+        fetch(
+          new URL(new URL(String(input)).pathname, mcpTestEndpoint),
+          init as RequestInit,
+        ) as never
+    : undefined,
+);
 const webTestEndpoint =
   testingPath && !app.isPackaged
     ? process.env.SCULLY_PEARL_WEB_TEST_ENDPOINT
@@ -175,7 +195,27 @@ app
       undefined,
       webAccess,
       () => webConnection.info().configured,
+      undefined,
+      undefined,
+      remoteMcp,
     );
+
+    ipcMain.handle("pearl:mcp:info", (event) => {
+      trusted(event);
+      return remoteMcp.info();
+    });
+    handle("pearl:mcp:connect", async (_event, endpoint, token) => {
+      try {
+        return await remoteMcp.connect(endpoint, token);
+      } finally {
+        pearl!.invalidateRemoteMcpApprovals();
+      }
+    });
+    handle("pearl:mcp:disconnect", async () => {
+      const info = await remoteMcp.disconnect();
+      pearl!.invalidateRemoteMcpApprovals();
+      return info;
+    });
 
     ipcMain.handle("pearl:web:info", (event) => {
       trusted(event);
@@ -199,7 +239,6 @@ app
       return roomChat(pearl!.get(id));
     });
     handle("pearl:archive", (_event, id) => pearl!.archive(id));
-    handle("pearl:trash", (_event, id) => pearl!.trash(id));
     handle("pearl:restore", (_event, id) => pearl!.restore(id));
     handle("pearl:permanent-delete", (_event, id) =>
       pearl!.deletePermanently(id),
@@ -239,6 +278,14 @@ app
       return settings.info();
     });
     handle("session:configure", (_event, value) => settings.configure(value));
+    handle("session:pearl-model-choice", (_event, value) =>
+      settings.selectModels(value),
+    );
+    handle("session:pearl-models", () => {
+      const key = settings.current()?.key;
+      if (!key) throw new Error("Connect Nebius before loading models.");
+      return fetchModelCatalog(key);
+    });
     ipcMain.handle("metrics:read", (event) => {
       trusted(event);
       return metrics.snapshot();
@@ -271,5 +318,6 @@ app.on("before-quit", (event) => {
 app.on("will-quit", () => {
   settings.close();
   webConnection.close();
+  void remoteMcp.disconnect();
   chats?.close();
 });

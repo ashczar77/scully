@@ -20,6 +20,7 @@ import { PearlChatManager } from "../src/main/pearl-chat-manager";
 import type { startProjectPreview } from "../src/main/pearl-preview";
 import type { PearlBrowser } from "../src/main/pearl-browser";
 import { PearlWebAccess, type PearlWebProvider } from "../src/main/pearl-web";
+import type { RemoteMcpConnection } from "../src/main/pearl-mcp";
 import type { CommandRunner } from "../src/main/pearl-command-sandbox";
 import type { PearlModel, PearlModelResult } from "../src/engine/pearl-model";
 import {
@@ -43,6 +44,7 @@ function fixture(
   previewStarter?: typeof startProjectPreview,
   web?: PearlWebAccess,
   webEnabled: () => boolean = () => true,
+  remoteMcp?: RemoteMcpConnection,
 ) {
   const root = mkdtempSync(join(tmpdir(), "scully-pearl-"));
   roots.push(root);
@@ -78,6 +80,9 @@ function fixture(
     previewStarter,
     web,
     webEnabled,
+    undefined,
+    undefined,
+    remoteMcp,
   );
   return { root, data, project, store, manager, complete };
 }
@@ -168,6 +173,205 @@ const tool = (
   call: { id, name, arguments: JSON.stringify(input) },
 });
 
+it("requires exact approval before a remote MCP call and binds it to the connection", async () => {
+  const call = vi.fn(
+    async () => '{"isError":false,"content":[{"type":"text","text":"found"}]}',
+  );
+  const remote = {
+    info: () => ({
+      connected: true,
+      endpoint: "https://example.com/mcp",
+      revision: "rev-1",
+      tools: [
+        {
+          name: "lookup",
+          description: "Find sample",
+          inputSchema: { type: "object" },
+        },
+      ],
+    }),
+    validateCall: (name: unknown, input: unknown) => {
+      if (name !== "lookup" || !input || typeof input !== "object")
+        throw new Error("Invalid remote tool");
+      return { revision: "rev-1", name, arguments: input };
+    },
+    call,
+  } as unknown as RemoteMcpConnection;
+  const f = fixture(
+    [
+      tool(
+        "mcp_call_tool",
+        { name: "lookup", arguments: { term: "sample" } },
+        "remote-1",
+      ),
+      reply("The server found the sample."),
+    ],
+    undefined,
+    undefined,
+    undefined,
+    () => true,
+    remote,
+  );
+  const chat = f.manager.create();
+  f.manager.send(chat.id, "Look up the sample remotely");
+  const pending = await settled(f.store, chat.id);
+  expect(pending.status).toBe("awaiting_approval");
+  expect(pending.pendingTool?.remoteEndpoint).toBe("https://example.com/mcp");
+  expect(call).not.toHaveBeenCalled();
+  f.manager.decideTool(chat.id, "remote-1", true);
+  const done = await settled(f.store, chat.id);
+  expect(done.status).toBe("idle");
+  expect(call).toHaveBeenCalledOnce();
+  expect(done.messages.at(-1)?.text).toContain("found the sample");
+  expect(() => f.manager.decideTool(chat.id, "remote-1", true)).toThrow(
+    "no longer current",
+  );
+});
+
+it("does not run a remote MCP call after a connection change", async () => {
+  let revision = "rev-1";
+  const call = vi.fn(async () => "result");
+  const remote = {
+    info: () => ({
+      connected: true,
+      endpoint: "https://example.com/mcp",
+      revision,
+      tools: [
+        { name: "lookup", description: "", inputSchema: { type: "object" } },
+      ],
+    }),
+    validateCall: (name: unknown, input: unknown) => ({
+      revision,
+      name,
+      arguments: input,
+    }),
+    call,
+  } as unknown as RemoteMcpConnection;
+  const f = fixture(
+    [
+      tool(
+        "mcp_call_tool",
+        { name: "lookup", arguments: { term: "sample" } },
+        "remote-2",
+      ),
+      reply("The remote connection changed, so I did not run the tool."),
+    ],
+    undefined,
+    undefined,
+    undefined,
+    () => true,
+    remote,
+  );
+  const chat = f.manager.create();
+  f.manager.send(chat.id, "Use the remote lookup");
+  await settled(f.store, chat.id);
+  revision = "rev-2";
+  f.manager.decideTool(chat.id, "remote-2", true);
+  const done = await settled(f.store, chat.id);
+  expect(done.status).toBe("idle");
+  expect(
+    done.messages.some((message) =>
+      message.text.includes("connection changed"),
+    ),
+  ).toBe(true);
+  expect(call).not.toHaveBeenCalled();
+});
+
+it("keeps a denied remote MCP call from reaching the server", async () => {
+  const call = vi.fn(async () => "result");
+  const remote = {
+    info: () => ({
+      connected: true,
+      endpoint: "https://example.com/mcp",
+      revision: "rev-1",
+      tools: [
+        { name: "lookup", description: "", inputSchema: { type: "object" } },
+      ],
+    }),
+    validateCall: (name: unknown, input: unknown) => ({
+      revision: "rev-1",
+      name,
+      arguments: input,
+    }),
+    call,
+  } as unknown as RemoteMcpConnection;
+  const f = fixture(
+    [
+      tool(
+        "mcp_call_tool",
+        { name: "lookup", arguments: { term: "sample" } },
+        "remote-denied",
+      ),
+      reply("I did not run the remote lookup."),
+    ],
+    undefined,
+    undefined,
+    undefined,
+    () => true,
+    remote,
+  );
+  const chat = f.manager.create();
+  f.manager.send(chat.id, "Use the remote lookup");
+  await settled(f.store, chat.id);
+  f.manager.decideTool(chat.id, "remote-denied", false);
+  const done = await settled(f.store, chat.id);
+  expect(done.status).toBe("idle");
+  expect(call).not.toHaveBeenCalled();
+  expect(
+    done.messages.some((message) =>
+      message.text.includes("User denied this remote MCP call"),
+    ),
+  ).toBe(true);
+});
+
+it("clears a pending remote approval after restart without sending the call", async () => {
+  const call = vi.fn(async () => "result");
+  const remote = {
+    info: () => ({
+      connected: true,
+      endpoint: "https://example.com/mcp",
+      revision: "rev-1",
+      tools: [
+        { name: "lookup", description: "", inputSchema: { type: "object" } },
+      ],
+    }),
+    validateCall: (name: unknown, input: unknown) => ({
+      revision: "rev-1",
+      name,
+      arguments: input,
+    }),
+    call,
+  } as unknown as RemoteMcpConnection;
+  const f = fixture(
+    [
+      tool(
+        "mcp_call_tool",
+        { name: "lookup", arguments: { term: "sample" } },
+        "remote-restart",
+      ),
+    ],
+    undefined,
+    undefined,
+    undefined,
+    () => true,
+    remote,
+  );
+  const chat = f.manager.create();
+  f.manager.send(chat.id, "Use the remote lookup");
+  expect((await settled(f.store, chat.id)).status).toBe("awaiting_approval");
+  const reopened = new PearlChatManager(
+    f.store,
+    f.data,
+    () => null,
+    () => {},
+  );
+  const saved = reopened.get(chat.id);
+  expect(saved.status).toBe("failed");
+  expect(saved.pendingTool).toBeUndefined();
+  expect(saved.messages.at(-1)?.text).toContain("No remote call was sent");
+  expect(call).not.toHaveBeenCalled();
+});
+
 it("reuses one pristine new chat across repeated requests and restart", () => {
   const f = fixture([]);
   const first = f.manager.openNewChat();
@@ -251,19 +455,39 @@ it("archives and restores a saved chat without losing its messages", () => {
   expect(f.manager.get(chat.id).messages[0].text).toBe("Keep this history");
 });
 
-it("moves chats to Trash, restores them, and deletes permanently only from Trash", () => {
+it("deletes only archived chats and keeps active chats protected", () => {
   const f = fixture([]);
   const chat = f.manager.create();
-  expect(() => f.manager.deletePermanently(chat.id)).toThrow(/Trash/i);
-  f.manager.trash(chat.id);
+  expect(() => f.manager.deletePermanently(chat.id)).toThrow(
+    /Archive this chat/i,
+  );
+  f.manager.archive(chat.id);
   expect(f.manager.list()).toEqual([]);
-  expect(f.manager.list("trash").map((item) => item.id)).toEqual([chat.id]);
-  expect(() => f.manager.send(chat.id, "Forged send")).toThrow(/Trash/i);
+  expect(f.manager.list("archived").map((item) => item.id)).toEqual([chat.id]);
+  expect(() => f.manager.send(chat.id, "Forged send")).toThrow(/archived/i);
   f.manager.restore(chat.id);
   expect(f.manager.list().map((item) => item.id)).toEqual([chat.id]);
-  f.manager.trash(chat.id);
+  f.manager.archive(chat.id);
   f.manager.deletePermanently(chat.id);
   expect(() => f.manager.get(chat.id)).toThrow("Chat not found");
+});
+
+it("moves legacy Trash chats into Archive on startup", () => {
+  const f = fixture([]);
+  const chat = f.manager.create();
+  chat.lifecycle = "trash";
+  f.store.save(chat);
+  const restarted = new PearlChatManager(
+    f.store,
+    f.data,
+    () => null,
+    () => {},
+  );
+  expect(restarted.list("archived").map((item) => item.id)).toEqual([chat.id]);
+  expect(restarted.get(chat.id).lifecycle).toBe("archived");
+  expect(() => restarted.list("trash" as "archived")).toThrow(
+    /Invalid chat list/,
+  );
 });
 
 it("does not move a running or approval-pending chat out of the Room", () => {
@@ -272,12 +496,10 @@ it("does not move a running or approval-pending chat out of the Room", () => {
   chat.status = "running";
   f.store.save(chat);
   expect(() => f.manager.archive(chat.id)).toThrow(/current action/i);
-  expect(() => f.manager.trash(chat.id)).toThrow(/current action/i);
   chat.status = "awaiting_approval";
   f.store.save(chat);
   expect(() => f.manager.archive(chat.id)).toThrow(/current action/i);
-  expect(() => f.manager.trash(chat.id)).toThrow(/current action/i);
-  chat.lifecycle = "trash";
+  chat.lifecycle = "archived";
   f.store.save(chat);
   expect(() => f.manager.restore(chat.id)).toThrow(/current action/i);
   expect(() => f.manager.deletePermanently(chat.id)).toThrow(/current action/i);
@@ -2338,6 +2560,257 @@ it("applies a revision-checked multi-edit patch and records its exact hunks", as
   expect(done.messages.at(-1)?.evidence?.filesWritten).toBe(1);
 });
 
+it("reviews and applies a revision-bound multi-file transaction once", async () => {
+  const original = "old\n";
+  const expectedSha256 = createHash("sha256").update(original).digest("hex");
+  const f = fixture([
+    tool("read_file", { path: "one.txt" }, "read-one"),
+    tool(
+      "edit_files",
+      {
+        files: [
+          {
+            path: "one.txt",
+            operation: "patch",
+            expectedSha256,
+            edits: [{ oldText: "old", newText: "new" }],
+          },
+          { path: "nested/two.txt", operation: "create", content: "second\n" },
+        ],
+      },
+      "batch-one",
+    ),
+    tool(
+      "complete_work",
+      { status: "unverified", summary: "The two files were changed." },
+      "finish-one",
+    ),
+  ]);
+  writeFileSync(join(f.project, "one.txt"), original);
+  const chat = f.manager.create();
+  f.manager.chooseProject(chat.id, f.project);
+  f.manager.approveProject(chat.id, true);
+  f.manager.send(chat.id, "Update both files together");
+  const pending = await settled(f.store, chat.id);
+  expect(pending.status).toBe("awaiting_approval");
+  expect(pending.pendingTool?.review?.diff).toContain("-old");
+  expect(pending.pendingTool?.review?.diff).toContain("+second");
+  expect(readFileSync(join(f.project, "one.txt"), "utf8")).toBe(original);
+  expect(() => readFileSync(join(f.project, "nested/two.txt"))).toThrow();
+  f.manager.decideTool(chat.id, "batch-one", true);
+  expect(() => f.manager.decideTool(chat.id, "batch-one", true)).toThrow(
+    "no longer current",
+  );
+  const done = await settled(f.store, chat.id);
+  expect(readFileSync(join(f.project, "one.txt"), "utf8")).toBe("new\n");
+  expect(readFileSync(join(f.project, "nested/two.txt"), "utf8")).toBe(
+    "second\n",
+  );
+  expect(done.messages.at(-1)?.evidence?.filesWritten).toBe(2);
+  const result = JSON.parse(
+    done.messages.find(
+      (message) =>
+        message.toolCallId === "batch-one" && message.role === "tool",
+    )!.text,
+  );
+  expect(result.files).toEqual(["one.txt", "nested/two.txt"]);
+  expect(result.revisions[0].hunks).toEqual([
+    { line: 1, removed: "old", added: "new" },
+  ]);
+});
+
+it("rejects the entire reviewed batch if one file changed before approval", async () => {
+  const original = "old\n";
+  const expectedSha256 = createHash("sha256").update(original).digest("hex");
+  const f = fixture([
+    tool("read_file", { path: "one.txt" }, "read-one"),
+    tool(
+      "edit_files",
+      {
+        files: [
+          {
+            path: "one.txt",
+            operation: "write",
+            expectedSha256,
+            content: "new\n",
+          },
+          { path: "two.txt", operation: "create", content: "second\n" },
+        ],
+      },
+      "batch-one",
+    ),
+    reply("The first file changed externally, so I need to read it again."),
+  ]);
+  writeFileSync(join(f.project, "one.txt"), original);
+  const chat = f.manager.create();
+  f.manager.chooseProject(chat.id, f.project);
+  f.manager.approveProject(chat.id, true);
+  f.manager.send(chat.id, "Update both files together");
+  await settled(f.store, chat.id);
+  writeFileSync(join(f.project, "one.txt"), "external\n");
+  f.manager.decideTool(chat.id, "batch-one", true);
+  const done = await settled(f.store, chat.id);
+  expect(readFileSync(join(f.project, "one.txt"), "utf8")).toBe("external\n");
+  expect(() => readFileSync(join(f.project, "two.txt"))).toThrow();
+  expect(
+    done.messages.find(
+      (message) =>
+        message.toolCallId === "batch-one" && message.role === "tool",
+    )?.text,
+  ).toContain("changed since it was read");
+  expect(done.messages.at(-1)?.evidence?.filesWritten).toBe(0);
+});
+
+it("keeps a denied file transaction untouched and rejects a replayed approval", async () => {
+  const f = fixture([
+    tool(
+      "edit_files",
+      {
+        files: [
+          { path: "one.txt", operation: "create", content: "one" },
+          { path: "two.txt", operation: "create", content: "two" },
+        ],
+      },
+      "batch-one",
+    ),
+    reply("The file transaction was rejected."),
+  ]);
+  const chat = f.manager.create();
+  f.manager.chooseProject(chat.id, f.project);
+  f.manager.approveProject(chat.id, true);
+  f.manager.send(chat.id, "Create two files together");
+  await settled(f.store, chat.id);
+  f.manager.decideTool(chat.id, "batch-one", false);
+  expect(() => f.manager.decideTool(chat.id, "batch-one", true)).toThrow(
+    "no longer current",
+  );
+  const done = await settled(f.store, chat.id);
+  expect(() => readFileSync(join(f.project, "one.txt"))).toThrow();
+  expect(() => readFileSync(join(f.project, "two.txt"))).toThrow();
+  expect(done.messages.at(-1)?.evidence?.filesWritten).toBe(0);
+});
+
+it("recovers partial file writes before the Room resumes after restart", () => {
+  const f = fixture([]);
+  const chat = f.manager.create();
+  f.manager.chooseProject(chat.id, f.project);
+  f.manager.approveProject(chat.id, true);
+  writeFileSync(join(f.project, "one.txt"), "new");
+  const journal = join(
+    f.data,
+    "pearl-transactions",
+    chat.id,
+    "12345678-1234-1234-1234-123456789abc",
+  );
+  mkdirSync(journal, { recursive: true });
+  writeFileSync(
+    join(journal, "manifest.json"),
+    JSON.stringify({
+      version: 1,
+      project: { ...f.store.get(chat.id).project, kind: "existing" },
+      state: "pending",
+      files: [
+        { path: "one.txt", before: "old", content: "new" },
+        { path: "two.txt", before: null, content: "second" },
+      ],
+    }),
+  );
+  new PearlChatManager(
+    f.store,
+    f.data,
+    () => ({ key: "fixture-key", model: "fixture-model", outputTokens: 8192 }),
+    () => {},
+    { complete: f.complete },
+  );
+  expect(readFileSync(join(f.project, "one.txt"), "utf8")).toBe("old");
+  expect(() => readFileSync(join(f.project, "two.txt"))).toThrow();
+  expect(readdirSync(join(f.data, "pearl-transactions", chat.id))).toEqual([]);
+});
+
+it("blocks Room continuation and chat moves while transaction recovery conflicts", () => {
+  const f = fixture([]);
+  const chat = f.manager.create();
+  f.manager.chooseProject(chat.id, f.project);
+  f.manager.approveProject(chat.id, true);
+  const saved = f.store.get(chat.id);
+  saved.questions.push({
+    id: "pending-question",
+    topic: "scope",
+    text: "Which scope?",
+    options: ["Small", "Large"],
+    askedAt: new Date().toISOString(),
+    status: "pending",
+  });
+  f.store.save(saved);
+  writeFileSync(join(f.project, "one.txt"), "external");
+  const journal = join(
+    f.data,
+    "pearl-transactions",
+    chat.id,
+    "12345678-1234-1234-1234-123456789abc",
+  );
+  mkdirSync(journal, { recursive: true });
+  writeFileSync(
+    join(journal, "manifest.json"),
+    JSON.stringify({
+      version: 1,
+      project: { ...saved.project, kind: "existing" },
+      state: "pending",
+      files: [
+        { path: "one.txt", before: "old", content: "new" },
+        { path: "two.txt", before: null, content: "second" },
+      ],
+    }),
+  );
+  const reopened = new PearlChatManager(
+    f.store,
+    f.data,
+    () => ({ key: "fixture-key", model: "fixture-model", outputTokens: 8192 }),
+    () => {},
+    { complete: f.complete },
+  );
+  expect(f.store.get(chat.id).status).toBe("failed");
+  expect(() => reopened.send(chat.id, "Continue")).toThrow(/needs inspection/);
+  expect(() => reopened.retry(chat.id)).toThrow(/needs inspection/);
+  expect(() =>
+    reopened.answerQuestion(chat.id, "pending-question", "Small"),
+  ).toThrow(/needs inspection/);
+  expect(() => reopened.archive(chat.id)).toThrow(/needs inspection/);
+  expect(readFileSync(join(f.project, "one.txt"), "utf8")).toBe("external");
+  expect(() => readFileSync(join(f.project, "two.txt"))).toThrow();
+  expect(readdirSync(join(f.data, "pearl-transactions", chat.id))).toHaveLength(
+    1,
+  );
+  expect(f.complete).not.toHaveBeenCalled();
+});
+
+it("does not offer a file transaction before project approval", async () => {
+  const f = fixture([
+    tool(
+      "edit_files",
+      {
+        files: [
+          { path: "one.txt", operation: "create", content: "one" },
+          { path: "two.txt", operation: "create", content: "two" },
+        ],
+      },
+      "batch-one",
+    ),
+    reply("I need an approved project before changing files."),
+  ]);
+  const chat = f.manager.create();
+  f.manager.send(chat.id, "Create two files");
+  const done = await settled(f.store, chat.id);
+  expect(done.pendingTool).toBeUndefined();
+  expect(
+    done.messages.find(
+      (message) =>
+        message.toolCallId === "batch-one" && message.role === "tool",
+    )?.text,
+  ).toContain("Choose and approve a project");
+  expect(() => readFileSync(join(f.project, "one.txt"))).toThrow();
+});
+
 it("refuses a patch with a stale revision without changing the project", async () => {
   const f = fixture([
     tool("read_file", { path: "note.txt" }, "read-1"),
@@ -2580,7 +3053,466 @@ it("continues an incomplete provider response without duplicating the user turn"
   );
 });
 
-it("retries a timed-out provider response once without duplicating the user turn", async () => {
+it("recovers a failed network request from the saved user turn", async () => {
+  const f = fixture([]);
+  let requests = 0;
+  let recoverySystem = "";
+  const manager = new PearlChatManager(
+    f.store,
+    f.data,
+    () => ({ key: "fixture-key", model: "fixture-model", outputTokens: 8192 }),
+    () => {},
+    {
+      complete: async ({ system }) => {
+        requests++;
+        if (requests === 1) throw new TypeError("fetch failed");
+        recoverySystem = system;
+        return reply("I resumed the original request.");
+      },
+    },
+  );
+  const chat = manager.create();
+  manager.send(chat.id, "Change two project files together");
+  const failed = await settled(f.store, chat.id);
+  expect(failed.status).toBe("failed");
+  expect(failed.error).toMatch(/Nebius.*connection/i);
+  expect(requests).toBe(1);
+  manager.retry(chat.id);
+  const done = await settled(f.store, chat.id);
+  expect(done.status).toBe("idle");
+  expect(
+    done.messages.filter((message) => message.role === "user"),
+  ).toHaveLength(1);
+  expect(done.messages.at(-1)?.text).toBe("I resumed the original request.");
+  expect(recoverySystem).toContain(
+    "Continue the latest user request from saved messages",
+  );
+});
+
+it("continues a saved file read into a reviewed batch after network failure", async () => {
+  const f = fixture([]);
+  const original = "Alpha project\n";
+  const expectedSha256 = createHash("sha256").update(original).digest("hex");
+  writeFileSync(join(f.project, "README.md"), original);
+  let requests = 0;
+  const manager = new PearlChatManager(
+    f.store,
+    f.data,
+    () => ({ key: "fixture-key", model: "fixture-model", outputTokens: 8192 }),
+    () => {},
+    {
+      complete: async ({ messages }) => {
+        requests++;
+        if (requests === 1)
+          return tool("read_file", { path: "README.md" }, "read-one");
+        if (requests === 2) throw new TypeError("fetch failed");
+        if (requests === 3) {
+          expect(
+            messages.filter(
+              (message) =>
+                message.role === "tool" && message.toolCallId === "read-one",
+            ),
+          ).toHaveLength(1);
+          return tool(
+            "edit_files",
+            {
+              files: [
+                {
+                  path: "README.md",
+                  operation: "patch",
+                  expectedSha256,
+                  edits: [
+                    { oldText: "Alpha project", newText: "Beta project" },
+                  ],
+                },
+                {
+                  path: "NOTES.md",
+                  operation: "create",
+                  content: "Batch edit worked\n",
+                },
+              ],
+            },
+            "batch-one",
+          );
+        }
+        return tool(
+          "complete_work",
+          { status: "unverified", summary: "Both files changed." },
+          "finish-one",
+        );
+      },
+    },
+  );
+  const chat = manager.create();
+  manager.chooseProject(chat.id, f.project);
+  manager.approveProject(chat.id, true);
+  manager.send(chat.id, "Change two files together");
+  const failed = await settled(f.store, chat.id);
+  expect(failed.status).toBe("failed");
+  expect(
+    failed.messages.filter((message) => message.toolCallId === "read-one"),
+  ).toHaveLength(2);
+  manager.retry(chat.id);
+  const pending = await settled(f.store, chat.id);
+  expect(pending.status).toBe("awaiting_approval");
+  expect(pending.pendingTool?.review?.diff).toContain("+Beta project");
+  expect(readFileSync(join(f.project, "README.md"), "utf8")).toBe(original);
+  expect(() => readFileSync(join(f.project, "NOTES.md"))).toThrow();
+  manager.decideTool(chat.id, "batch-one", true);
+  const done = await settled(f.store, chat.id);
+  expect(done.status).toBe("idle");
+  expect(readFileSync(join(f.project, "README.md"), "utf8")).toBe(
+    "Beta project\n",
+  );
+  expect(readFileSync(join(f.project, "NOTES.md"), "utf8")).toBe(
+    "Batch edit worked\n",
+  );
+  expect(
+    done.messages.filter((message) => message.role === "user"),
+  ).toHaveLength(1);
+  expect(requests).toBe(4);
+});
+
+it("ends an unresponsive provider request and can resume after it", async () => {
+  const f = fixture([]);
+  let requests = 0;
+  let releaseLate!: (result: PearlModelResult) => void;
+  const manager = new PearlChatManager(
+    f.store,
+    f.data,
+    () => ({ key: "fixture-key", model: "fixture-model", outputTokens: 8192 }),
+    () => {},
+    {
+      complete: async () => {
+        requests++;
+        if (requests === 1)
+          return new Promise<PearlModelResult>((resolve) => {
+            releaseLate = resolve;
+          });
+        return reply("The saved request continued.");
+      },
+    },
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    () => false,
+    30,
+  );
+  const chat = manager.create();
+  manager.send(chat.id, "Continue this task");
+  const failed = await settled(f.store, chat.id);
+  expect(failed.status).toBe("failed");
+  expect(failed.error).toMatch(/Nebius.*timed out/i);
+  expect(failed.error).toContain("Continue starts a new request");
+  expect(requests).toBe(1);
+  releaseLate(tool("create_file", { path: "late.txt", content: "late" }));
+  await Promise.resolve();
+  expect(f.store.get(chat.id).messages).toHaveLength(1);
+  expect(() => readFileSync(join(f.project, "late.txt"))).toThrow();
+  manager.retry(chat.id);
+  const done = await settled(f.store, chat.id);
+  expect(done.status).toBe("idle");
+  expect(
+    done.messages.filter((message) => message.role === "user"),
+  ).toHaveLength(1);
+  expect(done.messages.at(-1)?.text).toBe("The saved request continued.");
+});
+
+it("uses an explicitly configured fallback when the primary gives no response and labels the reply", async () => {
+  const f = fixture([]);
+  const requested: string[] = [];
+  const manager = new PearlChatManager(
+    f.store,
+    f.data,
+    () => ({
+      key: "fixture-key",
+      model: "primary-model",
+      fallbackModel: "fallback-model",
+      outputTokens: 8192,
+    }),
+    () => {},
+    {
+      complete: ({ model, signal, onResponseStart }) => {
+        requested.push(model);
+        if (model === "fallback-model") {
+          onResponseStart?.();
+          return Promise.resolve(reply("5 + 7 = 12."));
+        }
+        return new Promise((_resolve, reject) => {
+          signal?.addEventListener(
+            "abort",
+            () => reject(new Error("aborted")),
+            {
+              once: true,
+            },
+          );
+        });
+      },
+    },
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    () => false,
+    100,
+    15,
+  );
+  const chat = manager.create();
+  manager.send(chat.id, "What is 5 + 7?");
+  const done = await settled(f.store, chat.id);
+  expect(done.status).toBe("idle");
+  expect(requested).toEqual(["primary-model", "fallback-model"]);
+  expect(done.messages.at(-1)?.text).toBe("5 + 7 = 12.");
+  expect(done.messages.at(-1)?.fallbackModel).toBe("fallback-model");
+  expect(
+    done.messages.filter((message) => message.role === "user"),
+  ).toHaveLength(1);
+});
+
+it("keeps the fallback for later actions in the same turn, then starts the next turn with the primary", async () => {
+  const f = fixture([]);
+  const requested: string[] = [];
+  let fallbackCalls = 0;
+  const manager = new PearlChatManager(
+    f.store,
+    f.data,
+    () => ({
+      key: "fixture-key",
+      model: "primary-model",
+      fallbackModel: "fallback-model",
+      outputTokens: 8192,
+    }),
+    () => {},
+    {
+      complete: ({ model, signal, onResponseStart }) => {
+        requested.push(model);
+        if (model === "primary-model")
+          return new Promise((_resolve, reject) => {
+            signal?.addEventListener(
+              "abort",
+              () => reject(new Error("aborted")),
+              {
+                once: true,
+              },
+            );
+          });
+        onResponseStart?.();
+        fallbackCalls++;
+        return Promise.resolve(
+          fallbackCalls === 1
+            ? tool("list_files", { path: "" })
+            : reply("I need an approved project."),
+        );
+      },
+    },
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    () => false,
+    100,
+    5,
+  );
+  const chat = manager.create();
+  manager.send(chat.id, "List files");
+  const done = await settled(f.store, chat.id);
+  expect(done.status).toBe("idle");
+  expect(requested).toEqual([
+    "primary-model",
+    "fallback-model",
+    "fallback-model",
+  ]);
+  manager.send(chat.id, "What is next?");
+  await settled(f.store, chat.id);
+  expect(requested.at(3)).toBe("primary-model");
+});
+
+it("continues a saved fallback turn after restart only when the fallback is still enabled", async () => {
+  const f = fixture([]);
+  const chat = f.manager.create();
+  chat.messages = [
+    { id: "user-1", role: "user", text: "List files", at: "now" },
+    {
+      id: "assistant-1",
+      role: "assistant",
+      text: "",
+      at: "now",
+      toolCallId: "list-1",
+      toolName: "list_files",
+      arguments: '{"path":""}',
+      fallbackModel: "fallback-model",
+    },
+    {
+      id: "result-1",
+      role: "tool",
+      text: "Choose and approve a project folder first",
+      at: "now",
+      toolCallId: "list-1",
+      toolName: "list_files",
+    },
+  ];
+  chat.activeUserMessageId = "user-1";
+  chat.status = "failed";
+  chat.error = "The app closed during Pearl's turn.";
+  f.store.save(chat);
+  const requested: string[] = [];
+  const resume = (fallbackModel?: string) =>
+    new PearlChatManager(
+      f.store,
+      f.data,
+      () => ({
+        key: "fixture-key",
+        model: "primary-model",
+        ...(fallbackModel ? { fallbackModel } : {}),
+        outputTokens: 8192,
+      }),
+      () => {},
+      {
+        complete: async ({ model }) => {
+          requested.push(model);
+          return reply("The saved turn continued.");
+        },
+      },
+    );
+  resume("fallback-model").retry(chat.id);
+  await settled(f.store, chat.id);
+  expect(requested).toEqual(["fallback-model"]);
+  const saved = f.store.get(chat.id);
+  saved.status = "failed";
+  saved.error = "Interrupted again";
+  f.store.save(saved);
+  resume().retry(chat.id);
+  await settled(f.store, chat.id);
+  expect(requested).toEqual(["fallback-model", "primary-model"]);
+});
+
+it("does not switch models after the primary starts responding or after an authentication failure", async () => {
+  const f = fixture([]);
+  const requests: string[] = [];
+  const session = () => ({
+    key: "fixture-key",
+    model: "primary-model",
+    fallbackModel: "fallback-model",
+    outputTokens: 8192,
+  });
+  const manager = new PearlChatManager(
+    f.store,
+    f.data,
+    session,
+    () => {},
+    {
+      complete: async ({ model, onResponseStart }) => {
+        requests.push(model);
+        onResponseStart?.();
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        return reply("The primary answered.");
+      },
+    },
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    () => false,
+    100,
+    5,
+  );
+  const chat = manager.create();
+  manager.send(chat.id, "Hello");
+  const done = await settled(f.store, chat.id);
+  expect(done.status).toBe("idle");
+  expect(requests).toEqual(["primary-model"]);
+  expect(done.messages.at(-1)?.fallbackModel).toBeUndefined();
+
+  const denied = new PearlChatManager(
+    f.store,
+    f.data,
+    session,
+    () => {},
+    {
+      complete: async ({ model }) => {
+        requests.push(model);
+        throw new Error(
+          "Nebius rejected the API key (HTTP 401). Check Settings.",
+        );
+      },
+    },
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    () => false,
+    100,
+    5,
+  );
+  const next = denied.create();
+  denied.send(next.id, "Another question");
+  const failed = await settled(f.store, next.id);
+  expect(failed.status).toBe("failed");
+  expect(requests).toEqual(["primary-model", "primary-model"]);
+});
+
+it("keeps project permissions when a fallback proposes a file action", async () => {
+  const f = fixture([]);
+  let fallbackCalls = 0;
+  const manager = new PearlChatManager(
+    f.store,
+    f.data,
+    () => ({
+      key: "fixture-key",
+      model: "primary-model",
+      fallbackModel: "fallback-model",
+      outputTokens: 8192,
+    }),
+    () => {},
+    {
+      complete: ({ model, signal, onResponseStart }) => {
+        if (model === "primary-model")
+          return new Promise((_resolve, reject) => {
+            signal?.addEventListener(
+              "abort",
+              () => reject(new Error("aborted")),
+              {
+                once: true,
+              },
+            );
+          });
+        onResponseStart?.();
+        fallbackCalls++;
+        return Promise.resolve(
+          fallbackCalls === 1
+            ? tool("create_file", { path: "unsafe.txt", content: "wrong" })
+            : reply("I need an approved project first."),
+        );
+      },
+    },
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    () => false,
+    100,
+    5,
+  );
+  const chat = manager.create();
+  manager.send(chat.id, "Create a file");
+  const done = await settled(f.store, chat.id);
+  expect(done.status).toBe("idle");
+  expect(
+    done.messages.some((message) =>
+      message.text.includes("Choose and approve a project folder first"),
+    ),
+  ).toBe(true);
+  expect(() => readFileSync(join(f.project, "unsafe.txt"))).toThrow();
+});
+
+it("requires an explicit Continue after a timed-out provider response", async () => {
   const f = fixture([]);
   let requests = 0;
   let recoverySystem = "";
@@ -2601,13 +3533,19 @@ it("retries a timed-out provider response once without duplicating the user turn
   );
   const chat = manager.create();
   manager.send(chat.id, "Build the app");
+  const failed = await settled(f.store, chat.id);
+  expect(failed.status).toBe("failed");
+  expect(requests).toBe(1);
+  manager.retry(chat.id);
   const done = await settled(f.store, chat.id);
   expect(done.status).toBe("idle");
   expect(requests).toBe(2);
   expect(
     done.messages.filter((message) => message.role === "user"),
   ).toHaveLength(1);
-  expect(recoverySystem).toContain("no action from it was applied");
+  expect(recoverySystem).toContain(
+    "Continue the latest user request from saved messages",
+  );
 });
 
 it("retries a rejected multi-action reply without applying either proposed action", async () => {

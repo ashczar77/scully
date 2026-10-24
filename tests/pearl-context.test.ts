@@ -55,6 +55,34 @@ it("replaces only old completed file groups and preserves requirements and revis
   expect(compacted[2]).toEqual(recent[0]);
   expect(JSON.stringify(compacted).length).toBeLessThan(5000);
 });
+it("compacts an old completed multi-file transaction without losing file revisions", () => {
+  const messages: PearlMessage[] = [
+    older[0],
+    {
+      ...older[1],
+      toolName: "edit_files",
+      arguments: JSON.stringify({
+        files: [{ path: "one.txt", content: "source ".repeat(10000) }],
+      }),
+    },
+    {
+      ...older[2],
+      toolName: "edit_files",
+      text: JSON.stringify({
+        written: true,
+        revisions: [
+          { path: "one.txt", sha256: "a".repeat(64) },
+          { path: "two.txt", sha256: "b".repeat(64) },
+        ],
+      }),
+    },
+    ...recent,
+  ];
+  const compacted = compactToolHistory(messages);
+  expect(compacted[1].text).toContain("one.txt");
+  expect(compacted[1].text).toContain("b".repeat(64));
+  expect(JSON.stringify(compacted)).not.toContain("source source source");
+});
 it("preserves recent source, incomplete tool groups and failed results", () => {
   expect(compactToolHistory(older)).toEqual(older);
   const missing = [...older.slice(0, 2), ...recent];

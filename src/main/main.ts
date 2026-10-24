@@ -200,10 +200,6 @@ app
       trusted(event);
       return pearl.archive(id);
     });
-    metricHandle("pearl:trash", (event, id) => {
-      trusted(event);
-      return pearl.trash(id);
-    });
     metricHandle("pearl:restore", (event, id) => {
       trusted(event);
       return pearl.restore(id);

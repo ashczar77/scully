@@ -8,7 +8,6 @@ const api: DesktopAPI = {
   createPearlChat: () => ipcRenderer.invoke("pearl:create"),
   getPearlChat: (id) => ipcRenderer.invoke("pearl:get", id),
   archivePearlChat: (id) => ipcRenderer.invoke("pearl:archive", id),
-  trashPearlChat: (id) => ipcRenderer.invoke("pearl:trash", id),
   restorePearlChat: (id) => ipcRenderer.invoke("pearl:restore", id),
   deletePearlChatPermanently: (id) =>
     ipcRenderer.invoke("pearl:permanent-delete", id),

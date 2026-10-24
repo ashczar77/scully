@@ -52,6 +52,69 @@ try {
   assert.match(branding.wordmarkFont, /Chelsea Market/);
   assert.equal(branding.brandFontLoaded, true);
   assert.equal(branding.newChatColor, "rgba(0, 0, 0, 0)");
+  const roomTheme = await page.evaluate(() => {
+    const style = (selector) =>
+      getComputedStyle(document.querySelector(selector));
+    return {
+      font: style(".pearl-shell").fontFamily,
+      brandFont: style(".pearl-brand strong").fontFamily,
+      corners: [
+        ".pearl-rail button",
+        ".pearl-new",
+        ".pearl-welcome-mark",
+        ".pearl-project-button",
+        ".pearl-composer",
+      ].map((selector) => style(selector).borderRadius),
+      palette: style(".pearl-shell").getPropertyValue("--pearl-teal").trim(),
+    };
+  });
+  assert.match(roomTheme.font, /monospace/i);
+  assert.match(roomTheme.brandFont, /Chelsea Market/);
+  assert.deepEqual(roomTheme.corners, ["0px", "0px", "0px", "0px", "0px"]);
+  assert.equal(roomTheme.palette, "#46dfcc");
+  const composerAndRail = await page.evaluate(() => {
+    const railButton = document.querySelector(".pearl-rail button.active");
+    const input = document.querySelector(".pearl-composer textarea");
+    const toolbar = document.querySelector(".pearl-composer-toolbar");
+    const send = toolbar.querySelector(".pearl-composer-send");
+    const railStyle = getComputedStyle(railButton);
+    return {
+      railBackground: railStyle.backgroundColor,
+      railShadow: railStyle.boxShadow,
+      toolbarBelowInput:
+        toolbar.getBoundingClientRect().top >=
+        input.getBoundingClientRect().bottom,
+      sendWidth: send.getBoundingClientRect().width,
+      addFilesDisabled: toolbar.querySelector(
+        '[aria-label="Add files (coming soon)"]',
+      ).disabled,
+      permissionsDisabled: toolbar.querySelector(
+        '[aria-label="Permissions (coming soon)"]',
+      ).disabled,
+    };
+  });
+  assert.equal(composerAndRail.railBackground, "rgba(0, 0, 0, 0)");
+  assert.match(composerAndRail.railShadow, /1px 0px 0px 0px inset/);
+  assert.equal(composerAndRail.toolbarBelowInput, true);
+  assert.equal(composerAndRail.sendWidth, 30);
+  assert.equal(composerAndRail.addFilesDisabled, true);
+  assert.equal(composerAndRail.permissionsDisabled, true);
+  await page.screenshot({ path: "test-results/pearl-terminal-welcome.png" });
+  const desktopViewport = page.viewportSize();
+  await page.setViewportSize({ width: 760, height: 720 });
+  const narrow = await page.evaluate(() => {
+    const shell = document.querySelector(".pearl-shell");
+    const composer = document.querySelector(".pearl-composer");
+    const rect = composer.getBoundingClientRect();
+    return {
+      horizontalOverflow: shell.scrollWidth > shell.clientWidth,
+      composerVisible: rect.width > 300 && rect.left >= 0 && rect.right <= 760,
+    };
+  });
+  assert.equal(narrow.horizontalOverflow, false);
+  assert.equal(narrow.composerVisible, true);
+  await page.screenshot({ path: "test-results/pearl-terminal-narrow.png" });
+  if (desktopViewport) await page.setViewportSize(desktopViewport);
   const layout = await page.evaluate(() => {
     const rect = (selector) =>
       document.querySelector(selector).getBoundingClientRect();
@@ -75,9 +138,29 @@ try {
   assert.equal(layout.contentBelowHeader, true);
   assert.equal(layout.brandInHeader, true);
   await page.getByRole("button", { name: "Settings" }).click();
-  await page.getByRole("complementary", { name: "Settings panel" }).waitFor();
+  const selectedTab = await page.evaluate(() => {
+    const active = document.querySelector(".pearl-settings-tabs button.active");
+    const style = getComputedStyle(active);
+    return { shadow: style.boxShadow, bottomBorder: style.borderBottomColor };
+  });
+  assert.equal(selectedTab.shadow, "none");
+  assert.equal(selectedTab.bottomBorder, "rgba(0, 0, 0, 0)");
+  await page.getByRole("heading", { level: 1, name: "Settings" }).waitFor();
+  await page.getByRole("heading", { name: "Pearl’s model" }).waitFor();
+  assert.equal(
+    await page
+      .locator(".pearl-settings-card")
+      .first()
+      .evaluate((element) => getComputedStyle(element).borderRadius),
+    "0px",
+  );
+  await page.screenshot({ path: "test-results/pearl-terminal-settings.png" });
   assert.equal(
     await page.getByRole("complementary", { name: "Chats panel" }).count(),
+    0,
+  );
+  assert.equal(
+    await page.getByRole("textbox", { name: "Message Pearl" }).count(),
     0,
   );
   await page.getByRole("button", { name: "Chats", exact: true }).click();
@@ -90,23 +173,27 @@ try {
     "choosePearlProject",
     "configureSession",
     "configureWebSearch",
+    "connectRemoteMcp",
     "createPearlChat",
     "decidePearlTool",
     "deletePearlChatPermanently",
+    "disconnectRemoteMcp",
     "disconnectWebSearch",
     "getPearlChat",
     "listPearlChats",
+    "listPearlModels",
     "metrics",
     "onPearlChatUpdate",
+    "remoteMcpInfo",
     "resizePearlTerminal",
     "restorePearlChat",
     "retryPearlChat",
+    "selectPearlModels",
     "sendPearlMessage",
     "sendPearlTerminalInput",
     "session",
     "stopPearlChat",
     "stopPearlTerminal",
-    "trashPearlChat",
     "webSearchInfo",
   ]);
   const channels = await app.evaluate(({ ipcMain }) => [
@@ -114,6 +201,7 @@ try {
   ]);
   assert(channels.includes("pearl:send"));
   assert(channels.includes("pearl:web:configure"));
+  assert(channels.includes("pearl:mcp:connect"));
   assert(
     ![
       "workspace:load",
@@ -276,7 +364,58 @@ try {
     chat.id,
   );
   assert.equal(restored.project.approved, true);
-  await page.getByRole("button", { name: `Options for ${chat.title}` }).click();
+  const chatOptions = page.getByRole("button", {
+    name: `Options for ${chat.title}`,
+  });
+  await chatOptions.click();
+  const chatMenuLayout = await page.evaluate(() => {
+    const row = document.querySelector(".pearl-chat-row:has(.pearl-chat-menu)");
+    const title = row.querySelector(".pearl-chat-title");
+    const options = row.querySelector(".pearl-chat-options");
+    const menu = row.querySelector(".pearl-chat-menu");
+    return {
+      iconGap:
+        options.getBoundingClientRect().left -
+        title.getBoundingClientRect().right,
+      menuGap:
+        menu.getBoundingClientRect().top - title.getBoundingClientRect().bottom,
+      iconBackground: getComputedStyle(options).backgroundColor,
+      iconOutline: getComputedStyle(options).outlineStyle,
+      selectedShadow: getComputedStyle(title).boxShadow,
+    };
+  });
+  assert.ok(chatMenuLayout.iconGap >= 6);
+  assert.ok(chatMenuLayout.menuGap >= 6);
+  assert.equal(chatMenuLayout.iconBackground, "rgba(0, 0, 0, 0)");
+  assert.equal(chatMenuLayout.iconOutline, "none");
+  assert.match(chatMenuLayout.selectedShadow, /inset/);
+  await page.keyboard.press("Shift+Tab");
+  const focusedChat = await page.evaluate(() => {
+    const title = document.querySelector(
+      ".pearl-chat-row:has(.pearl-chat-menu) .pearl-chat-title",
+    );
+    return {
+      focused: document.activeElement === title,
+      outline: getComputedStyle(title).outlineStyle,
+      shadow: getComputedStyle(title).boxShadow,
+    };
+  });
+  assert.equal(focusedChat.focused, true);
+  assert.equal(focusedChat.outline, "none");
+  assert.match(focusedChat.shadow, /inset/);
+  await page.screenshot({ path: "test-results/pearl-chat-menu.png" });
+  await page.getByRole("heading", { name: chat.title }).click();
+  assert.equal(
+    await page.getByRole("button", { name: "Archive", exact: true }).count(),
+    0,
+  );
+  await chatOptions.click();
+  await page.keyboard.press("Escape");
+  assert.equal(
+    await page.getByRole("button", { name: "Archive", exact: true }).count(),
+    0,
+  );
+  await chatOptions.click();
   await page.getByRole("button", { name: "Archive", exact: true }).click();
   await page.getByRole("button", { name: "Archived", exact: true }).click();
   await page.getByRole("button", { name: chat.title, exact: true }).click();
@@ -292,23 +431,66 @@ try {
   await page.getByRole("button", { name: `Options for ${chat.title}` }).click();
   await page.getByRole("button", { name: "Restore", exact: true }).click();
   await page.getByRole("button", { name: `Options for ${chat.title}` }).click();
-  await page.getByRole("button", { name: "Move to Trash" }).click();
-  await page.getByRole("button", { name: "Trash", exact: true }).click();
+  await page.getByRole("button", { name: "Archive", exact: true }).click();
+  await page.getByRole("button", { name: "Archived", exact: true }).click();
   await page.getByRole("button", { name: `Options for ${chat.title}` }).click();
   await page.getByRole("button", { name: "Delete permanently" }).click();
   assert.equal(
-    (await page.evaluate(async () => window.scully.listPearlChats("trash")))
+    (await page.evaluate(async () => window.scully.listPearlChats("archived")))
       .length,
     1,
   );
   await page.getByRole("button", { name: "Confirm deletion" }).click();
-  await page.getByText("Trash is empty").waitFor();
+  await page.getByText("No archived chats").waitFor();
   await assert.rejects(
     page.evaluate(async (id) => window.scully.getPearlChat(id), chat.id),
   );
+  await page.getByRole("button", { name: "Settings" }).click();
+  const fallbackChoice = page.getByRole("checkbox", {
+    name: "Use a fallback if the selected model does not respond",
+  });
+  assert.equal(await fallbackChoice.isChecked(), false);
+  await fallbackChoice.check();
+  await page
+    .getByRole("button", { name: "Fallback model: Choose a model" })
+    .click();
+  await page.getByRole("option", { name: "Nemotron 3 Super" }).click();
+  await page.getByRole("button", { name: "App & connection" }).click();
+  await page.getByLabel("Nebius API key").fill("desktop-test-key");
+  await page.getByRole("button", { name: "Connect Nebius" }).click();
+  const connected = await page.evaluate(() => window.scully.session());
+  assert.equal(connected.model, "Qwen/Qwen3-235B-A22B-Instruct-2507");
+  assert.equal(connected.fallbackModel, "nvidia/nemotron-3-super-120b-a12b");
+  assert.equal(JSON.stringify(connected).includes("desktop-test-key"), false);
+  await page.getByRole("button", { name: "Models", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Primary model: Qwen3 235B Instruct" })
+    .click();
+  await page.getByRole("option", { name: "GLM 5.3 Flash" }).click();
+  await page.getByRole("button", { name: "Save model choice" }).click();
+  assert.equal(
+    (await page.evaluate(() => window.scully.session())).model,
+    "zai-org/GLM-5.3-Flash",
+  );
+  await app.close();
+  app = await launch();
+  page = await app.firstWindow();
+  await page.getByRole("button", { name: "Settings" }).click();
+  assert.equal(
+    await page
+      .getByRole("checkbox", {
+        name: "Use a fallback if the selected model does not respond",
+      })
+      .isChecked(),
+    false,
+  );
+  assert.equal(
+    (await page.evaluate(() => window.scully.session())).configured,
+    false,
+  );
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: Pearl Room, one empty chat, archive, Trash, permanent delete, restart and forged-action rejection.",
+    "PASS: Pearl Room, one empty chat, archive, permanent delete, restart and forged-action rejection.",
   );
 } finally {
   if (app) await app.close();

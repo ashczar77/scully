@@ -15,6 +15,8 @@ export type PearlWorkState = {
 export type PearlMessage = {
   /** Backend-only provider protocol state; never render or use as authority. */
   providerContinuation?: PearlProviderContinuation;
+  /** Display provenance when an explicitly configured fallback answered. */
+  fallbackModel?: string;
   id: string;
   role: "user" | "assistant" | "tool";
   text: string;
@@ -58,6 +60,9 @@ export type PearlToolCall = {
   id: string;
   name: string;
   arguments: string;
+  remoteRevision?: string;
+  remoteEndpoint?: string;
+  review?: { diff: string; digest: string; files: number };
   executable?: {
     path: string;
     dev: number;
@@ -65,6 +70,13 @@ export type PearlToolCall = {
     mtimeMs: number;
     size: number;
   };
+};
+
+export type RemoteMcpInfo = {
+  connected: boolean;
+  endpoint?: string;
+  revision?: string;
+  tools: { name: string; description: string; inputSchema: object }[];
 };
 
 export type PearlPauseReason =
@@ -108,7 +120,7 @@ export type PearlChat = {
     approved: boolean;
   };
   pendingTool?: PearlToolCall;
-  retryHint?: "interrupted_response";
+  retryHint?: "interrupted_response" | "provider_connection";
   pauseKind?: PearlPauseReason;
   streamingText?: string;
   error?: string;
@@ -120,16 +132,25 @@ export type PearlChatSummary = Pick<
 >;
 
 export type PearlChatAPI = {
+  remoteMcpInfo?: () => Promise<RemoteMcpInfo>;
+  connectRemoteMcp?: (
+    endpoint: string,
+    bearerToken: string,
+  ) => Promise<RemoteMcpInfo>;
+  disconnectRemoteMcp?: () => Promise<RemoteMcpInfo>;
+  listPearlModels?: () => Promise<import("./runs").ModelOption[]>;
+  selectPearlModels?: (
+    value: import("./runs").SessionModelSelection,
+  ) => Promise<import("./runs").SessionInfo>;
   webSearchInfo: () => Promise<{ configured: boolean }>;
   configureWebSearch: (key: string) => Promise<{ configured: boolean }>;
   disconnectWebSearch: () => Promise<{ configured: boolean }>;
   listPearlChats: (
-    scope?: "active" | "archived" | "trash",
+    scope?: "active" | "archived",
   ) => Promise<PearlChatSummary[]>;
   createPearlChat: () => Promise<PearlChat>;
   getPearlChat: (id: string) => Promise<PearlChat>;
   archivePearlChat: (id: string) => Promise<PearlChat>;
-  trashPearlChat: (id: string) => Promise<PearlChat>;
   restorePearlChat: (id: string) => Promise<PearlChat>;
   deletePearlChatPermanently: (id: string) => Promise<void>;
   sendPearlMessage: (id: string, text: string) => Promise<PearlChat>;
@@ -185,9 +206,13 @@ export function currentTurnEvidence(chat: PearlChat): {
   for (const [index, message] of messages.entries()) {
     if (message.role !== "tool") continue;
     if (
-      !["create_file", "write_file", "replace_in_file", "apply_patch"].includes(
-        message.toolName || "",
-      ) &&
+      ![
+        "create_file",
+        "write_file",
+        "replace_in_file",
+        "apply_patch",
+        "edit_files",
+      ].includes(message.toolName || "") &&
       message.toolName !== "run_command" &&
       message.toolName !== "browser_check" &&
       message.toolName !== "preview_app"
@@ -222,12 +247,21 @@ export function currentTurnEvidence(chat: PearlChat): {
           )
             latestSuccessfulBrowser = index;
         }
-      } else if (result.written === true && typeof result.path === "string") {
-        filesWritten++;
+      } else if (
+        result.written === true &&
+        (typeof result.path === "string" || Array.isArray(result.files))
+      ) {
+        const paths =
+          typeof result.path === "string"
+            ? [result.path]
+            : (result.files as unknown[]).filter(
+                (item): item is string => typeof item === "string",
+              );
+        filesWritten += paths.length;
         latestWrite = index;
-        if (/\.(?:html|css|jsx|tsx|vue|svelte)$/iu.test(result.path)) {
-          uiFilesWritten++;
-        }
+        uiFilesWritten += paths.filter((path) =>
+          /\.(?:html|css|jsx|tsx|vue|svelte)$/iu.test(path),
+        ).length;
       }
     } catch {
       /* Invalid or denied action is not evidence of a completed operation. */
@@ -266,9 +300,13 @@ export function needsPostEditCheck(chat: PearlChat): boolean {
     const message = chat.messages[index];
     if (message.role !== "tool") continue;
     if (
-      ["create_file", "write_file", "replace_in_file", "apply_patch"].includes(
-        message.toolName || "",
-      )
+      [
+        "create_file",
+        "write_file",
+        "replace_in_file",
+        "apply_patch",
+        "edit_files",
+      ].includes(message.toolName || "")
     ) {
       try {
         if (JSON.parse(message.text).written === true) latestWrite = index;

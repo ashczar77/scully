@@ -11,6 +11,7 @@ export function ModelPicker({
   label = "Model",
   catalogStatus,
   onRetry,
+  recommendedIds,
 }: {
   value: string;
   options: ModelOption[];
@@ -19,6 +20,7 @@ export function ModelPicker({
   label?: string;
   catalogStatus?: "loading" | "ready" | "unavailable" | "disconnected";
   onRetry?: () => void;
+  recommendedIds?: string[];
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -35,7 +37,7 @@ export function ModelPicker({
     `${option.name} ${option.id}`.toLowerCase().includes(query.toLowerCase()),
   );
   const recommended = new Set<string>(
-    starterModelOptions.slice(0, 2).map((item) => item.id),
+    recommendedIds ?? starterModelOptions.slice(0, 2).map((item) => item.id),
   );
   useEffect(() => {
     if (open) search.current?.focus();
@@ -108,9 +110,9 @@ export function ModelPicker({
               {catalogStatus === "loading"
                 ? "Loading Nebius models…"
                 : catalogStatus === "unavailable"
-                  ? "Nebius model list could not be loaded. Only the two recommended defaults are shown."
+                  ? "Nebius model list could not be loaded. Suggested models are shown."
                   : catalogStatus === "disconnected"
-                    ? "Connect Nebius to browse its full model list. The two recommended defaults are shown."
+                    ? "Connect Nebius to browse its full model list. Suggested models are shown."
                     : `${options.length} models available`}
               {catalogStatus === "unavailable" && onRetry && (
                 <button type="button" className="text-button" onClick={onRetry}>
@@ -140,7 +142,13 @@ export function ModelPicker({
             >
               {filtered.map((option, index) => (
                 <div key={option.id} className="model-result-group">
-                  {index === 0 && !query && <h3>Recommended</h3>}
+                  {index === 0 && !query && (
+                    <h3>
+                      {recommended.has(option.id)
+                        ? "Recommended"
+                        : "Available models"}
+                    </h3>
+                  )}
                   {index > 0 &&
                     !query &&
                     !recommended.has(option.id) &&

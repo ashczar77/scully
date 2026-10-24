@@ -47,6 +47,7 @@ export function compactToolHistory(messages: PearlMessage[]): PearlMessage[] {
           "write_file",
           "replace_in_file",
           "apply_patch",
+          "edit_files",
         ].includes(call.name),
       )
     ) {
@@ -61,6 +62,27 @@ export function compactToolHistory(messages: PearlMessage[]): PearlMessage[] {
         try {
           const summaries = calls.map((call, offset) => {
             const observation = JSON.parse(observations[offset].text);
+            if (call.name === "edit_files" && observation.written === true) {
+              if (
+                !Array.isArray(observation.revisions) ||
+                observation.revisions.some(
+                  (item: { path?: unknown; sha256?: unknown }) =>
+                    typeof item.path !== "string" ||
+                    typeof item.sha256 !== "string",
+                )
+              )
+                throw new Error("Not a file transaction observation");
+              return {
+                tool: call.name,
+                files: observation.revisions.map(
+                  (item: { path: string; sha256: string }) => ({
+                    path: item.path,
+                    sha256: item.sha256,
+                  }),
+                ),
+                written: true,
+              };
+            }
             if (
               typeof observation.path !== "string" ||
               typeof observation.sha256 !== "string"

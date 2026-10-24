@@ -23,10 +23,11 @@ export type PearlAgentHost = {
     calls: PearlToolCall[],
     text: string,
     continuation?: PearlProviderContinuation,
+    fallbackModel?: string,
   ) => void;
   observe: (chat: PearlChat, call: PearlToolCall, observation: string) => void;
   execute: (chat: PearlChat, call: PearlToolCall) => Promise<ActionDisposition>;
-  finish: (chat: PearlChat, text: string) => void;
+  finish: (chat: PearlChat, text: string, fallbackModel?: string) => void;
   pause: (chat: PearlChat, reason: string, kind: PearlPauseReason) => void;
   needsCheck: (chat: PearlChat) => boolean;
   needsBrowserCheck?: (chat: PearlChat) => boolean;
@@ -105,9 +106,13 @@ function successfulWrite(
 ): boolean {
   if (
     !observation ||
-    !["create_file", "write_file", "replace_in_file", "apply_patch"].includes(
-      call.name,
-    )
+    ![
+      "create_file",
+      "write_file",
+      "replace_in_file",
+      "apply_patch",
+      "edit_files",
+    ].includes(call.name)
   )
     return false;
   try {
@@ -118,6 +123,8 @@ function successfulWrite(
 }
 
 const controlActions = new Set([
+  "mcp_call_tool",
+  "edit_files",
   "run_command",
   "start_terminal",
   "preview_app",
@@ -292,12 +299,18 @@ export async function runPearlAgentTurn(
         );
         return;
       }
-      host.finish(chat, result.text);
+      host.finish(chat, result.text, result.fallbackModel);
       return;
     }
     const calls = result.kind === "tool" ? [result.call] : result.calls;
     validateBatch(calls);
-    host.recordActions(chat, calls, result.text, result.providerContinuation);
+    host.recordActions(
+      chat,
+      calls,
+      result.text,
+      result.providerContinuation,
+      result.fallbackModel,
+    );
 
     // A plan is local working state, not authority. It can be saved immediately
     // before a final decision action. No file work may run around an approval,

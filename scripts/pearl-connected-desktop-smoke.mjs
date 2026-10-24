@@ -197,6 +197,45 @@ const responses = [
         { content: "The terminal is available in this chat." },
       ]
     : []),
+  {
+    content: "I will read the current README before proposing both changes.",
+    tool: ["read_file", { path: "README.md" }],
+  },
+  { transportFailure: true },
+  {
+    content: "I have prepared a two-file change for review.",
+    tool: [
+      "edit_files",
+      {
+        files: [
+          {
+            path: "README.md",
+            operation: "patch",
+            expectedSha256: createHash("sha256")
+              .update("Pearl project\n")
+              .digest("hex"),
+            edits: [{ oldText: "Pearl project", newText: "Reviewed project" }],
+          },
+          {
+            path: "notes.txt",
+            operation: "create",
+            content: "Both files reviewed.\n",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    content: "I will record that the two-file change is not command-verified.",
+    tool: [
+      "complete_work",
+      {
+        status: "unverified",
+        summary:
+          "Both reviewed files were changed; command verification remains open.",
+      },
+    ],
+  },
   { content: "The chat and project are still available after restart." },
 ];
 const requests = [];
@@ -209,6 +248,10 @@ const server = createServer(async (request, response) => {
   const fixture = responses[nextResponse++];
   if (!fixture) {
     response.writeHead(500).end();
+    return;
+  }
+  if (fixture.transportFailure) {
+    response.destroy();
     return;
   }
   const toolCall = fixture.tool && {
@@ -601,6 +644,65 @@ try {
     );
     assert.equal((await current()).terminals[0].id, terminal.id);
   }
+  const beforeBatch = (await current()).messages.length;
+  await page
+    .getByRole("textbox", { name: "Message Pearl" })
+    .fill("Update the README and add a notes file together.");
+  await page.getByRole("button", { name: "Send message" }).click();
+  chat = await waitUntil(
+    (item) => item.status === "failed",
+    "interrupted provider request",
+  );
+  assert.match(chat.error, /Nebius connection failed/);
+  assert.equal(
+    chat.messages
+      .slice(beforeBatch)
+      .filter(
+        (message) =>
+          message.role === "tool" && message.toolName === "read_file",
+      ).length,
+    1,
+  );
+  await page.getByRole("button", { name: "Continue" }).click();
+  chat = await waitUntil(
+    (item) =>
+      item.messages.length > beforeBatch && item.status === "awaiting_approval",
+    "file transaction review",
+  );
+  const review = page.getByRole("region", { name: "File transaction review" });
+  await review.getByText(/Review 2 file changes/).waitFor();
+  assert.match(
+    await review.locator("pre").textContent(),
+    /-Pearl project[\s\S]*\+Reviewed project[\s\S]*\+Both files reviewed/,
+  );
+  assert.equal(
+    await readFile(join(project, "README.md"), "utf8"),
+    "Pearl project\n",
+  );
+  await assert.rejects(readFile(join(project, "notes.txt"), "utf8"));
+  await review.getByRole("button", { name: "Apply changes" }).click();
+  chat = await waitUntil(
+    (item) => item.status === "idle",
+    "file transaction result",
+  );
+  assert.equal(
+    await readFile(join(project, "README.md"), "utf8"),
+    "Reviewed project\n",
+  );
+  assert.equal(
+    await readFile(join(project, "notes.txt"), "utf8"),
+    "Both files reviewed.\n",
+  );
+  assert.equal(chat.messages.at(-1).evidence.filesWritten, 2);
+  assert.equal(
+    chat.messages
+      .slice(beforeBatch)
+      .filter(
+        (message) =>
+          message.role === "tool" && message.toolName === "read_file",
+      ).length,
+    1,
+  );
   await app.close();
   app = await launch();
   page = await app.firstWindow();
@@ -618,6 +720,10 @@ try {
     })
     .click();
   assert((await current()).project.approved);
+  assert.equal(
+    await readFile(join(project, "notes.txt"), "utf8"),
+    "Both files reviewed.\n",
+  );
   if (process.platform === "darwin") {
     assert.equal((await current()).terminals[0].status, "stopped");
     assert.match((await current()).terminals[0].output, /ECHO:hello/);
@@ -636,7 +742,7 @@ try {
   assert.equal(chat.status, "idle");
   assert.equal(requests.length, responses.length);
   console.log(
-    "PASS: connected desktop fixture covers digression, linked answer, changed scope, browser input, visible patch, command denial, isolated approval and restart.",
+    "PASS: connected desktop fixture covers digression, linked answer, changed scope, browser input, visible patch, provider disconnect and Continue, reviewed file transaction, command denial, isolated approval and restart.",
   );
 } finally {
   if (app) await app.close();

@@ -10,6 +10,13 @@ type PearlDesktopAPI = PearlChatAPI & {
 };
 
 const api: PearlDesktopAPI = {
+  remoteMcpInfo: () => ipcRenderer.invoke("pearl:mcp:info"),
+  connectRemoteMcp: (endpoint, bearerToken) =>
+    ipcRenderer.invoke("pearl:mcp:connect", endpoint, bearerToken),
+  disconnectRemoteMcp: () => ipcRenderer.invoke("pearl:mcp:disconnect"),
+  listPearlModels: () => ipcRenderer.invoke("session:pearl-models"),
+  selectPearlModels: (value) =>
+    ipcRenderer.invoke("session:pearl-model-choice", value),
   webSearchInfo: () => ipcRenderer.invoke("pearl:web:info"),
   configureWebSearch: (key) => ipcRenderer.invoke("pearl:web:configure", key),
   disconnectWebSearch: () => ipcRenderer.invoke("pearl:web:disconnect"),
@@ -17,7 +24,6 @@ const api: PearlDesktopAPI = {
   createPearlChat: () => ipcRenderer.invoke("pearl:create"),
   getPearlChat: (id) => ipcRenderer.invoke("pearl:get", id),
   archivePearlChat: (id) => ipcRenderer.invoke("pearl:archive", id),
-  trashPearlChat: (id) => ipcRenderer.invoke("pearl:trash", id),
   restorePearlChat: (id) => ipcRenderer.invoke("pearl:restore", id),
   deletePearlChatPermanently: (id) =>
     ipcRenderer.invoke("pearl:permanent-delete", id),

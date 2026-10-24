@@ -1,28 +1,38 @@
 .pearl-shell {
   --pearl-teal: #46dfcc;
-  --pearl-divider: #ffffff14;
+  --pearl-divider: #ffffff12;
+  --pearl-font:
+    ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono",
+    monospace;
   display: flex;
   flex-direction: column;
   width: 100%;
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
-  background: #11171d;
+  background: #10171b;
   color: #e7edf3;
-  font-family:
-    Inter,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
+  font-family: var(--pearl-font);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  font-synthesis: none;
+  line-height: 1.5;
 }
 .pearl-shell button,
 .pearl-shell input,
-.pearl-shell textarea {
+.pearl-shell textarea,
+.pearl-shell select {
   font: inherit;
 }
 .pearl-shell button {
   cursor: pointer;
+}
+.pearl-shell button:not(:disabled),
+.pearl-shell summary {
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
 }
 .pearl-shell button:focus-visible,
 .pearl-shell input:focus-visible,
@@ -32,14 +42,14 @@
   outline-offset: 3px;
 }
 .pearl-header {
-  min-height: 57px;
+  min-height: 56px;
   flex: none;
   border-bottom: 1px solid var(--pearl-divider);
-  padding: 8px 24px 8px 12px;
+  padding: 8px 20px 8px 12px;
   display: flex;
   align-items: center;
   gap: 14px;
-  background: #151a1f;
+  background: #141b20;
 }
 .pearl-workspace {
   display: flex;
@@ -47,52 +57,56 @@
   min-height: 0;
 }
 .pearl-rail {
-  width: 48px;
+  width: 50px;
   flex: none;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 14px 6px 10px;
+  gap: 4px;
+  padding: 12px 6px 10px;
   border-right: 1px solid var(--pearl-divider);
-  background: #151a1f;
+  background: #141b20;
 }
 .pearl-rail button {
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
-  border: 0;
-  border-radius: 9px;
+  width: 38px;
+  height: 38px;
+  border: 1px solid transparent;
+  border-radius: 0;
   background: transparent;
   color: #9eafb8;
 }
 .pearl-rail button:hover,
 .pearl-rail button.active {
-  background: #26363a;
+  background: transparent;
   color: #d7f6ed;
 }
 .pearl-rail button.active {
-  box-shadow: inset 2px 0 var(--pearl-teal);
+  box-shadow: inset 1px 0 var(--pearl-teal);
+}
+.pearl-shell .pearl-rail button:focus-visible {
+  outline: none;
+  box-shadow: inset 1px 0 var(--pearl-teal);
 }
 .pearl-rail .pearl-rail-settings {
   margin-top: auto;
 }
 .pearl-sidebar {
-  width: 250px;
+  width: 268px;
   flex: none;
-  background: #151a1f;
+  background: #141b20;
   border-right: 1px solid var(--pearl-divider);
   display: flex;
   flex-direction: column;
-  padding: 13px 12px 14px;
-  gap: 12px;
+  padding: 12px 10px 14px;
+  gap: 10px;
 }
 .pearl-brand {
   display: flex;
   align-items: center;
   gap: 5px;
-  width: 286px;
+  width: 292px;
   flex: none;
   padding: 0 9px;
 }
@@ -110,35 +124,35 @@
   color: #f0f8f5;
 }
 .pearl-new {
-  border: 1px solid transparent;
-  border-radius: 8px;
+  border: 1px solid #2e4546;
+  border-radius: 0;
   background: transparent;
   color: #d9e8e5;
   text-align: left;
-  padding: 9px 11px;
+  padding: 10px 11px;
   display: flex;
   align-items: center;
   justify-content: flex-start;
   gap: 9px;
   width: 100%;
-  font-weight: 500;
+  font-weight: 600;
 }
 .pearl-new:hover {
-  background: #25343a;
-  border-color: #334b4a;
+  background: #1e3434;
+  border-color: #4c8a80;
 }
 .pearl-sidebar-heading {
   color: #8a9ba3;
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.12em;
   padding: 12px 10px 0;
 }
 .pearl-chat-list {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   overflow: auto;
   flex: 1;
   min-height: 0;
@@ -149,9 +163,9 @@
   border: 0;
   color: #afbec9;
   background: transparent;
-  border-radius: 8px;
+  border-radius: 0;
   text-align: left;
-  padding: 10px 12px;
+  padding: 9px 10px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -160,6 +174,8 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
+  column-gap: 7px;
+  row-gap: 7px;
   position: relative;
   min-width: 0;
 }
@@ -179,16 +195,28 @@
 }
 .pearl-chat-row .pearl-chat-options {
   flex: none;
-  width: 30px;
-  padding: 7px;
+  width: 24px;
+  height: 32px;
+  padding: 4px;
   display: grid;
   place-items: center;
   opacity: 0;
+  color: #9eafb8;
 }
 .pearl-chat-row:hover .pearl-chat-options,
 .pearl-chat-options:focus-visible,
 .pearl-chat-options[aria-expanded="true"] {
   opacity: 1;
+}
+.pearl-chat-row .pearl-chat-options:hover,
+.pearl-chat-row .pearl-chat-options:focus-visible,
+.pearl-chat-row .pearl-chat-options[aria-expanded="true"] {
+  background: transparent;
+  color: var(--pearl-teal);
+}
+.pearl-chat-row .pearl-chat-options:focus-visible {
+  outline: none;
+  filter: drop-shadow(0 0 2px var(--pearl-teal));
 }
 .pearl-chat-menu {
   width: 100%;
@@ -196,10 +224,10 @@
   flex-direction: column;
   gap: 2px;
   padding: 5px;
-  background: #213037;
+  background: #19282c;
   border: 1px solid #3a5054;
-  border-radius: 9px;
-  box-shadow: 0 10px 25px #0008;
+  border-radius: 0;
+  box-shadow: 0 12px 28px #0007;
 }
 .pearl-chat-menu button {
   width: 100%;
@@ -214,21 +242,27 @@
 .pearl-read-only {
   margin-bottom: 16px;
 }
-.pearl-chat-list button:hover,
-.pearl-chat-list button.selected {
+.pearl-chat-list .pearl-chat-title:hover,
+.pearl-chat-list .pearl-chat-title.selected,
+.pearl-chat-list .pearl-chat-menu button:hover {
   background: #22333a;
   color: #fff;
 }
-.pearl-chat-list button.selected {
+.pearl-chat-list .pearl-chat-title.selected {
   box-shadow: inset 2px 0 #46dfcc;
+}
+.pearl-chat-list .pearl-chat-title:focus-visible {
+  outline: none;
+  background: #2b4247;
+  color: #fff;
+  box-shadow: inset 3px 0 var(--pearl-teal);
 }
 .pearl-main {
   display: flex;
   flex-direction: column;
   min-width: 0;
   flex: 1;
-  background:
-    radial-gradient(ellipse at 50% 0%, #1a2a2b66, transparent 48%), #11171d;
+  background: #10171b;
 }
 .pearl-header-context {
   min-width: 0;
@@ -240,7 +274,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: #dce8e6;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
 }
 .pearl-project-button {
@@ -249,8 +283,8 @@
   gap: 8px;
   color: #b8cfca;
   border: 1px solid #344947;
-  border-radius: 8px;
-  background: #1b272b;
+  border-radius: 0;
+  background: #172529;
   padding: 7px 10px;
   max-width: 260px;
   white-space: nowrap;
@@ -280,7 +314,7 @@
   scrollbar-color: #365851 transparent;
 }
 .pearl-messages {
-  max-width: 850px;
+  max-width: 900px;
   margin: 0 auto;
   padding: 28px 25px 30px;
 }
@@ -296,15 +330,15 @@
   height: 74px;
   margin: 0 auto 20px;
   border: 2px solid #5cae9f;
-  border-radius: 18px;
+  border-radius: 0;
   object-fit: cover;
   object-position: center 20%;
-  box-shadow: 0 12px 36px #05121188;
+  box-shadow: none;
 }
 .pearl-welcome h1 {
-  font-size: clamp(27px, 3vw, 36px);
-  font-weight: 700;
-  letter-spacing: -0.04em;
+  font-size: clamp(25px, 2.7vw, 34px);
+  font-weight: 650;
+  letter-spacing: -0.035em;
   margin: 8px 0;
 }
 .pearl-welcome p {
@@ -318,8 +352,8 @@
   align-items: flex-start;
   gap: 10px;
   max-width: 100%;
-  margin: 0 0 20px;
-  line-height: 1.55;
+  margin: 0 0 22px;
+  line-height: 1.6;
 }
 .pearl-message-avatar {
   width: 34px;
@@ -328,7 +362,7 @@
   object-fit: cover;
   object-position: center 20%;
   border: 1px solid #77a4bd;
-  border-radius: 50%;
+  border-radius: 0;
 }
 .pearl-message-content {
   display: flex;
@@ -349,12 +383,15 @@
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
+.pearl-message-meta .pearl-speaker {
+  letter-spacing: 0.02em;
+}
 .pearl-message-bubble {
   width: fit-content;
   max-width: 100%;
-  padding: 17px 20px;
+  padding: 15px 18px;
   border: 1px solid #4c7892;
-  border-radius: 4px 16px 16px 16px;
+  border-radius: 0;
   background: #1d3040;
   overflow-wrap: anywhere;
 }
@@ -374,7 +411,7 @@
 .pearl-message.user .pearl-message-bubble {
   background: #25433f;
   border-color: #41766d;
-  border-radius: 16px 16px 5px 16px;
+  border-radius: 0;
   color: #e2f8f0;
 }
 .pearl-message.user .pearl-speaker {
@@ -387,8 +424,9 @@
   margin-bottom: 0;
 }
 .pearl-message.assistant .rich-text {
-  max-width: 72ch;
-  line-height: 1.75;
+  max-width: 80ch;
+  line-height: 1.7;
+  font-size: 13px;
 }
 .pearl-message.assistant .rich-text h1,
 .pearl-message.assistant .rich-text h2,
@@ -398,13 +436,13 @@
   margin: 1.25em 0 0.55em;
 }
 .pearl-message.assistant .rich-text h1 {
-  font-size: 22px;
+  font-size: 20px;
 }
 .pearl-message.assistant .rich-text h2 {
-  font-size: 18px;
+  font-size: 17px;
 }
 .pearl-message.assistant .rich-text h3 {
-  font-size: 15px;
+  font-size: 14px;
 }
 .pearl-message.assistant .rich-text p {
   margin: 0 0 1em;
@@ -460,7 +498,7 @@
   border-left: 3px solid #5bdccc;
   color: #bbd3d2;
   background: #1b2b30;
-  border-radius: 0 7px 7px 0;
+  border-radius: 0;
   font-size: 12px;
 }
 .pearl-card summary {
@@ -474,7 +512,7 @@
   background: #102026;
   border: 1px solid #304947;
   padding: 12px;
-  border-radius: 7px;
+  border-radius: 0;
 }
 .pearl-card.pearl-terminal {
   display: block;
@@ -492,7 +530,7 @@
   overflow: hidden;
   resize: vertical;
   border: 1px solid #304947;
-  border-radius: 7px;
+  border-radius: 0;
   background: #0d171c;
   padding: 8px;
 }
@@ -523,8 +561,8 @@
 .pearl-activity {
   margin: 8px 0 22px 44px;
   border: 1px solid #355651;
-  border-radius: 11px;
-  background: #18282c;
+  border-radius: 0;
+  background: #17262a;
   color: #b8d5d0;
   font-size: 12px;
 }
@@ -557,6 +595,7 @@
 .pearl-activity > summary > span {
   color: #e6f7f1;
   font-weight: 700;
+  letter-spacing: 0.02em;
 }
 .pearl-activity > summary > small {
   color: #a4c0bd;
@@ -619,7 +658,7 @@
   margin: 0 0 6px;
   padding: 12px;
   border: 1px solid #304947;
-  border-radius: 7px;
+  border-radius: 0;
   background: #102026;
   color: #d2e6e0;
 }
@@ -630,7 +669,7 @@
 .pearl-working .pearl-stop {
   margin-left: 12px;
   border: 1px solid #50786f;
-  border-radius: 7px;
+  border-radius: 0;
   background: #27443f;
   color: #e8fff8;
   padding: 5px 10px;
@@ -640,10 +679,10 @@
   gap: 14px;
   border: 1px solid #3a5b56;
   background: #1b2b30;
-  border-radius: 13px;
+  border-radius: 0;
   padding: 18px;
   margin: 18px 0;
-  box-shadow: 0 10px 30px #07121655;
+  box-shadow: none;
 }
 .pearl-card > svg {
   flex: none;
@@ -683,12 +722,18 @@
 .pearl-card button,
 .pearl-settings-panel button {
   border: 1px solid #57b4a5;
-  border-radius: 8px;
+  border-radius: 0;
   color: #072521;
   background: #5bdccc;
   font-weight: 650;
   padding: 8px 13px;
   margin-right: 9px;
+}
+.pearl-card button:hover:not(:disabled),
+.pearl-settings-primary:hover:not(:disabled),
+.pearl-settings-actions button:hover:not(:disabled),
+.pearl-composer button:hover:not(:disabled) {
+  filter: brightness(1.08);
 }
 .pearl-card button.quiet {
   color: #d9e8e5;
@@ -713,7 +758,7 @@
   flex: 1;
   min-width: 0;
   border: 1px solid #4a6d68;
-  border-radius: 8px;
+  border-radius: 0;
   background: #112127;
   color: #f2faf7;
   padding: 9px;
@@ -724,21 +769,18 @@
 }
 .pearl-composer {
   display: flex;
-  align-items: end;
-  gap: 10px;
-  width: min(850px, calc(100% - 48px));
+  flex-direction: column;
+  width: min(900px, calc(100% - 48px));
   margin: 0 auto;
   border: 1px solid #416961;
-  border-radius: 17px;
-  background: #16262b;
-  padding: 10px 12px;
-  box-shadow: 0 8px 28px #07121888;
+  border-radius: 0;
+  background: #142429;
+  padding: 10px 12px 8px;
+  box-shadow: none;
 }
 .pearl-composer:focus-within {
   border-color: #69cbb9;
-  box-shadow:
-    0 0 0 1px #69cbb955,
-    0 8px 28px #07121888;
+  box-shadow: inset 0 0 0 1px #69cbb955;
 }
 .pearl-composer textarea {
   resize: none;
@@ -746,7 +788,7 @@
   max-height: 210px;
   overflow-y: auto;
   scrollbar-width: none;
-  flex: 1;
+  width: 100%;
   min-width: 0;
   border: 0;
   outline: 0;
@@ -760,16 +802,37 @@
 .pearl-composer textarea:focus-visible {
   outline: none;
 }
-.pearl-composer button {
+.pearl-composer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border-top: 1px solid #35504e;
+  padding-top: 7px;
+}
+.pearl-composer-toolbar button {
   border: 0;
-  border-radius: 9px;
+  border-radius: 0;
+  background: transparent;
+  color: #afc9c8;
+  min-width: 30px;
+  height: 30px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 6px;
+}
+.pearl-composer-toolbar button:hover:not(:disabled) {
+  background: #24413f;
+}
+.pearl-composer-toolbar .pearl-composer-send {
+  margin-left: auto;
   background: #5bdccc;
   color: #092923;
-  width: 37px;
-  height: 37px;
-  flex: none;
-  display: grid;
-  place-items: center;
+  width: 30px;
+  padding: 0;
 }
 .pearl-composer button:disabled {
   opacity: 0.45;
@@ -781,54 +844,288 @@
   font-size: 11px;
   padding: 11px;
 }
-.pearl-settings-panel {
-  overflow-y: auto;
-}
-.pearl-settings-panel h2 {
-  margin: 4px 4px 10px;
-  font-size: 16px;
-}
-.pearl-settings-panel form {
+.pearl-settings-page {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  background: #10171b;
 }
-.pearl-settings-panel h3 {
-  margin: 0;
+.pearl-settings-scroll {
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: #365851 transparent;
+}
+.pearl-settings-inner {
+  width: min(100%, 850px);
+  margin: 0 auto;
+  padding: 30px 30px 70px;
+}
+.pearl-settings-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 0;
+  border: 0;
+  background: transparent;
+  color: #a9c8c3;
+  font-size: 12px;
+}
+.pearl-settings-back:hover {
+  color: #e8fff7;
+}
+.pearl-settings-heading {
+  margin: 24px 0 28px;
+}
+.pearl-settings-heading span {
+  color: #76bdb0;
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  font-weight: 700;
+}
+.pearl-settings-heading h1 {
+  margin: 8px 0 6px;
+  font-size: clamp(28px, 3vw, 38px);
+  letter-spacing: -0.03em;
+}
+.pearl-settings-heading p,
+.pearl-settings-card p {
+  color: #a9bec5;
+  line-height: 1.55;
   font-size: 13px;
 }
-.pearl-settings-panel p {
-  color: #acc3c6;
+.pearl-settings-heading p {
   margin: 0;
-  font-size: 12px;
-  line-height: 1.5;
 }
-.pearl-settings-panel label {
+.pearl-settings-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  margin-bottom: 22px;
+  border: 1px solid #35504e;
+  border-radius: 0;
+  background: #152329;
+}
+.pearl-settings-tabs button {
   display: flex;
-  flex-direction: column;
-  gap: 5px;
-  color: #cad9dc;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 42px;
+  border: 1px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: #aabec7;
+  font-weight: 600;
   font-size: 12px;
 }
-.pearl-settings-panel input {
-  border: 1px solid #4a6d68;
-  border-radius: 7px;
-  background: #102026;
-  color: white;
-  padding: 8px;
+.pearl-settings-tabs button:hover {
+  color: #e4f8f3;
+}
+.pearl-settings-tabs button.active {
+  color: #f1fffa;
+  border-color: transparent;
+  background: #285047;
+  box-shadow: none;
+}
+.pearl-settings-tabs button.active svg {
+  color: #5ce1cb;
+}
+.pearl-settings-card {
+  margin-bottom: 18px;
+  padding: 24px;
+  border: 1px solid #33444a;
+  border-radius: 0;
+  background: #172329;
+}
+.pearl-settings-card h2 {
+  margin: 0 0 10px;
+  font-size: 17px;
+  letter-spacing: -0.025em;
+}
+.pearl-settings-card p {
+  margin: 0 0 16px;
+}
+.pearl-model-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 65px;
+  margin: 15px 0;
+  padding: 11px 14px;
+  border: 1px solid #394c52;
+  border-radius: 0;
+  background: #142126;
+}
+.pearl-model-row > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+.pearl-model-row strong {
+  font-size: 13px;
+  color: #e4f3ef;
+}
+.pearl-model-row small {
+  color: #9eb4b8;
+  font-size: 12px;
+}
+.pearl-model-row .model-picker-trigger {
+  padding: 9px 11px;
+  border: 1px solid #43776b;
+  background: #25413d;
+  color: #ecfff9;
+}
+.pearl-fallback-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 18px 0;
+  color: #d8e8e6;
+  font-size: 13px;
+}
+.pearl-fallback-toggle input {
+  accent-color: #46dfcc;
+}
+.pearl-settings-card .pearl-settings-hint {
+  color: #94adb3;
+  font-size: 12px;
+}
+.pearl-settings-card form {
+  display: grid;
+  gap: 14px;
+}
+.pearl-settings-card form label {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  color: #d6e7e5;
+  font-size: 13px;
+}
+.pearl-settings-card input:not([type="radio"]):not([type="checkbox"]) {
+  margin: 0;
+}
+.pearl-settings-card input[type="password"],
+.pearl-settings-card .model-search input {
   width: 100%;
   min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #4a6d68;
+  border-radius: 0;
+  background: #102026;
+  color: #f0fffa;
 }
-.pearl-settings-panel button {
-  margin-right: 0;
+.pearl-settings-primary,
+.pearl-settings-actions button {
+  width: fit-content;
+  padding: 9px 13px;
+  border: 1px solid #5ab8aa;
+  border-radius: 0;
+  background: #42d6c1;
+  color: #102627;
+  font-weight: 700;
+  font-size: 13px;
+}
+.pearl-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.pearl-settings-actions button:not(.pearl-settings-primary) {
+  border-color: #49635f;
+  background: #1d3435;
+  color: #d2e9e4;
+}
+.pearl-settings-page button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.pearl-connection-status {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px 16px;
+  margin: 16px 0 20px;
+  border: 1px solid #405462;
+  border-radius: 0;
+  background: #172832;
+  color: #c5d7df;
+}
+.pearl-connection-status.connected {
+  border-color: #35796f;
+  background: #17342f;
+}
+.pearl-connection-status svg {
+  flex: none;
+}
+.pearl-connection-status.connected svg {
+  color: #63ddc5;
+}
+.pearl-connection-status strong {
+  font-size: 13px;
+}
+.pearl-connection-status p {
+  margin: 4px 0 0;
+}
+.pearl-settings-error,
+.pearl-settings-notice {
+  padding: 11px 14px;
+  border-radius: 0;
+  font-size: 13px;
+}
+.pearl-settings-error {
+  color: #f5b6aa;
+  background: #3a2528;
+}
+.pearl-settings-notice {
+  color: #c5f3e5;
+  background: #1d3b35;
+}
+.pearl-shell .model-picker-modal {
+  background: #141f25;
+  border-color: #3b5b5a;
+  box-shadow: 0 20px 70px #0009;
+}
+.pearl-shell .model-picker-results button:hover:not(:disabled),
+.pearl-shell .model-picker-results button:focus-visible {
+  border-color: #4f827a;
+  background: #1d3434;
+}
+.pearl-shell .rich-text code,
+.pearl-shell .rich-text pre {
+  background: #102026;
+}
+/* A square silhouette is a theme invariant, including shared dialogs and Markdown. */
+.pearl-shell * {
+  border-radius: 0 !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pearl-shell button,
+  .pearl-shell summary {
+    transition: none;
+  }
 }
 @media (max-width: 700px) {
+  .pearl-settings-inner {
+    padding: 22px 16px 48px;
+  }
+  .pearl-model-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .pearl-model-row .model-picker-trigger {
+    width: 100%;
+  }
   .pearl-sidebar {
     width: 185px;
     padding-inline: 9px;
   }
   .pearl-brand {
-    width: 221px;
+    width: 209px;
   }
   .pearl-messages {
     padding: 20px 15px;

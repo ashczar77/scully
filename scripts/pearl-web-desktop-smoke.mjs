@@ -127,9 +127,10 @@ try {
     }),
   );
   await page.getByRole("button", { name: "Settings" }).click();
+  await page.getByRole("button", { name: "App & connection" }).click();
   await page.getByLabel("Tavily API key").fill("tvly-fixture-secret");
   await page.getByRole("button", { name: "Connect web search" }).click();
-  await page.getByText("Connected for this app session.").first().waitFor();
+  await page.getByText("Web search connected for this app session.").waitFor();
   await page.getByRole("button", { name: "Chats" }).click();
   await page.getByRole("button", { name: "New chat" }).click();
   const chatId = (await page.evaluate(() => window.scully.listPearlChats()))[0]

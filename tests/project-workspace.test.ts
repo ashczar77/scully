@@ -3,6 +3,7 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -15,6 +16,10 @@ import {
   verifyProjectWorkspace,
   writeProjectWorkspace,
 } from "../src/main/project-workspace";
+import {
+  recoverFileTransactions,
+  writeProjectTransaction,
+} from "../src/main/pearl-file-transaction";
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "scully-project-workspace-"));
@@ -92,6 +97,194 @@ it("refuses stale source content and symlink parents without changing other file
         { path: "src/app.ts", content: "bad", before: null },
       ]),
     ).toThrow(/symlink/i);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+it("commits two files together and keeps recoverable originals", () => {
+  const f = fixture();
+  try {
+    writeFileSync(join(f.project, "one.txt"), "old");
+    const binding = bindProjectWorkspace(f.project, "existing", f.privateRoot);
+    writeProjectTransaction(
+      binding,
+      [
+        { path: "one.txt", before: "old", content: "new" },
+        { path: "nested/two.txt", before: null, content: "created" },
+      ],
+      join(f.privateRoot, "journals"),
+      join(f.privateRoot, "backups"),
+    );
+    expect(readFileSync(join(f.project, "one.txt"), "utf8")).toBe("new");
+    expect(readFileSync(join(f.project, "nested/two.txt"), "utf8")).toBe(
+      "created",
+    );
+    expect(
+      readFileSync(join(f.privateRoot, "backups/originals/one.txt"), "utf8"),
+    ).toBe("old");
+    expect(readdirSync(join(f.privateRoot, "journals"))).toEqual([]);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+it("rolls back an early promotion when a later file fails", () => {
+  const f = fixture();
+  try {
+    writeFileSync(join(f.project, "one.txt"), "old");
+    const binding = bindProjectWorkspace(f.project, "existing", f.privateRoot);
+    expect(() =>
+      writeProjectTransaction(
+        binding,
+        [
+          { path: "one.txt", before: "old", content: "new" },
+          { path: "nested/two.txt", before: null, content: "created" },
+        ],
+        join(f.privateRoot, "journals"),
+        join(f.privateRoot, "backups"),
+        (index) => {
+          if (index === 1) throw new Error("simulated failure");
+        },
+      ),
+    ).toThrow("simulated failure");
+    expect(readFileSync(join(f.project, "one.txt"), "utf8")).toBe("old");
+    expect(() => readFileSync(join(f.project, "nested/two.txt"))).toThrow();
+    expect(() => readdirSync(join(f.project, "nested"))).toThrow();
+    expect(readdirSync(join(f.privateRoot, "journals"))).toEqual([]);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+it("rejects a stale or unsafe second file before changing the first", () => {
+  const f = fixture();
+  try {
+    writeFileSync(join(f.project, "one.txt"), "old");
+    const binding = bindProjectWorkspace(f.project, "existing", f.privateRoot);
+    expect(() =>
+      writeProjectTransaction(
+        binding,
+        [
+          { path: "one.txt", before: "old", content: "new" },
+          { path: "nested/two.txt", before: "expected", content: "new" },
+        ],
+        join(f.privateRoot, "journals"),
+        join(f.privateRoot, "backups"),
+      ),
+    ).toThrow(/baseline/);
+    expect(readFileSync(join(f.project, "one.txt"), "utf8")).toBe("old");
+    symlinkSync(f.privateRoot, join(f.project, "nested"));
+    expect(() =>
+      writeProjectTransaction(
+        binding,
+        [
+          { path: "one.txt", before: "old", content: "new" },
+          { path: "nested/two.txt", before: null, content: "new" },
+        ],
+        join(f.privateRoot, "journals"),
+        join(f.privateRoot, "backups"),
+      ),
+    ).toThrow(/symlink/i);
+    expect(readFileSync(join(f.project, "one.txt"), "utf8")).toBe("old");
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+it("recovers an interrupted partial file transaction on restart", () => {
+  const f = fixture();
+  try {
+    const binding = bindProjectWorkspace(f.project, "existing", f.privateRoot);
+    writeFileSync(join(f.project, "one.txt"), "new");
+    const journal = join(
+      f.privateRoot,
+      "journals",
+      "12345678-1234-1234-1234-123456789abc",
+    );
+    mkdirSync(journal, { recursive: true });
+    writeFileSync(
+      join(journal, "manifest.json"),
+      JSON.stringify({
+        version: 1,
+        project: binding,
+        state: "pending",
+        files: [
+          { path: "one.txt", before: "old", content: "new" },
+          { path: "two.txt", before: null, content: "created" },
+        ],
+      }),
+    );
+    recoverFileTransactions(join(f.privateRoot, "journals"));
+    expect(readFileSync(join(f.project, "one.txt"), "utf8")).toBe("old");
+    expect(() => readFileSync(join(f.project, "two.txt"))).toThrow();
+    expect(readdirSync(join(f.privateRoot, "journals"))).toEqual([]);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+it("leaves an externally changed file untouched when recovery conflicts", () => {
+  const f = fixture();
+  try {
+    const binding = bindProjectWorkspace(f.project, "existing", f.privateRoot);
+    writeFileSync(join(f.project, "one.txt"), "external");
+    const journal = join(
+      f.privateRoot,
+      "journals",
+      "12345678-1234-1234-1234-123456789abc",
+    );
+    mkdirSync(journal, { recursive: true });
+    writeFileSync(
+      join(journal, "manifest.json"),
+      JSON.stringify({
+        version: 1,
+        project: binding,
+        state: "pending",
+        files: [
+          { path: "one.txt", before: "old", content: "new" },
+          { path: "two.txt", before: null, content: "created" },
+        ],
+      }),
+    );
+    expect(() =>
+      recoverFileTransactions(join(f.privateRoot, "journals")),
+    ).toThrow(/needs inspection/);
+    expect(readFileSync(join(f.project, "one.txt"), "utf8")).toBe("external");
+    expect(readdirSync(join(f.privateRoot, "journals"))).toHaveLength(1);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+it("rejects a journal that attempts to recover a private project path", () => {
+  const f = fixture();
+  try {
+    const binding = bindProjectWorkspace(f.project, "existing", f.privateRoot);
+    writeFileSync(join(f.project, ".env"), "private");
+    const journal = join(
+      f.privateRoot,
+      "journals",
+      "12345678-1234-1234-1234-123456789abc",
+    );
+    mkdirSync(journal, { recursive: true });
+    writeFileSync(
+      join(journal, "manifest.json"),
+      JSON.stringify({
+        version: 1,
+        project: binding,
+        state: "pending",
+        files: [
+          { path: ".env", before: "old", content: "private" },
+          { path: "other.txt", before: null, content: "new" },
+        ],
+      }),
+    );
+    expect(() =>
+      recoverFileTransactions(join(f.privateRoot, "journals")),
+    ).toThrow(/private file path|Invalid file transaction journal/);
+    expect(readFileSync(join(f.project, ".env"), "utf8")).toBe("private");
+    expect(readdirSync(join(f.privateRoot, "journals"))).toHaveLength(1);
   } finally {
     rmSync(f.root, { recursive: true, force: true });
   }

@@ -122,5 +122,9 @@ it("requests fresh verification after a later successful edit", async () => {
   expect(request).toHaveBeenCalledTimes(5);
   expect(request.mock.calls[2][3]).toContain("run_command");
   expect(request.mock.calls[4][3]).toContain("run_command");
-  expect(finish).toHaveBeenCalledWith(chat, "Both edits remain unverified.");
+  expect(finish).toHaveBeenCalledWith(
+    chat,
+    "Both edits remain unverified.",
+    undefined,
+  );
 });

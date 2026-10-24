@@ -4,7 +4,9 @@ Scully opens a Room chat with Pearl. Pearl can answer ordinary questions, discus
 
 ## Connect a model
 
-Open **Settings** and enter a Nebius Token Factory API key and a compatible model ID. New connections default to `zai-org/GLM-5.3-Flash`. The key remains in memory for this app session and is needed again after restart. Do not paste keys into chat or project files. A provider failure keeps the user's message and shows a recoverable error; select **Continue** after the connection is restored.
+Open the full-page **Settings** view, choose a primary model on **Models**, then enter a Nebius Token Factory API key under **App & connection**. New connections suggest `Qwen/Qwen3-235B-A22B-Instruct-2507`; you can choose another model before connecting. Once connected, Settings lists the models returned for that Nebius account. Switch the primary model on the Models tab without re-entering the key. The new choice applies to new turns; a turn already running keeps its current model. A model listing does not guarantee that a model responds quickly or uses coding tools well. The key remains in memory for this app session and is needed again after restart. Do not paste keys into chat or project files. A provider connection failure keeps the user's message and completed actions. Check the reported cause, then select **Continue** after the connection is restored. A model request that does not finish within 90 seconds ends with a timeout error; Continue starts a fresh request using saved context.
+
+If your selected model is slow or unavailable, you can explicitly enable a second Nebius model in **Settings**. This choice is off by default and must be made again after restart. Pearl uses the second model when the selected model fails to start responding within 25 seconds, loses its connection, is rate limited, returns a service error, or times out before an action is accepted. After a switch, later steps in that user turn stay on the fallback, including after an approval or restart if you reconnect with the same fallback enabled. The next user message starts with the selected primary model again. A rejected API key does not trigger a fallback. The Room labels replies and activity produced by the fallback model. Both models use the same Nebius key, and each request may incur model usage.
 
 ## Start a chat
 
@@ -14,9 +16,13 @@ A new requirement can change an earlier recommendation. Check that Pearl acknowl
 
 ## Search the public web
 
-Web search is optional. In **Settings**, enter a Tavily API key to let Pearl search current public information and read a page returned by that search. The key stays in memory for this app session. Pearl may send short queries and selected public result URLs to Tavily; the returned results are saved in the chat. Disconnect in Settings to stop further searches. Do not put credentials or private project content in a search request.
+Web search is optional. In **Settings**, open **App & connection** and enter a Tavily API key to let Pearl search current public information and read a page returned by that search. The key stays in memory for this app session. Pearl may send short queries and selected public result URLs to Tavily; the returned results are saved in the chat. Disconnect in Settings to stop further searches. Do not put credentials or private project content in a search request.
 
 Search is available without project approval. Each user turn permits at most 12 provider search attempts and 20 reads. Repeating an identical successful query reuses its result without another provider request or search slot. A read can open only a public HTTPS result from the current turn, and the returned content is bounded and may be truncated. Pearl should cite the source URL for information it uses. Web pages are treated as untrusted content and cannot grant project or command permissions.
+
+## Connect a remote MCP server
+
+Open **Settings**, then **App & connection**. Enter one public HTTPS Streamable HTTP endpoint and, if required, a bearer token. The connection and token last only until Scully closes. Settings shows the discovered tool names. Ask Pearl to use a tool; the Room will show the endpoint, tool name, and exact arguments before anything is sent. Choose **Call once** or **Deny**. The server can change external data regardless of its tool description. Approved call arguments go to the server; discovered tool details and results enter Pearl's chat context through Nebius. Replacing or disconnecting the server invalidates an approval that has not been used. OAuth login and multiple concurrent MCP connections are not supported yet.
 
 ## Work in a project
 

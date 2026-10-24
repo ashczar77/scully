@@ -150,6 +150,40 @@ it("rejects incomplete provider output without claiming a reply", async () => {
   await expect(model.complete(input)).rejects.toThrow("incomplete (length)");
 });
 
+it("explains a failed Nebius connection without exposing transport details", async () => {
+  const model = nebiusPearlModel(async () => {
+    throw new TypeError("fetch failed", {
+      cause: Object.assign(new Error("private transport path"), {
+        code: "EAI_AGAIN",
+      }),
+    });
+  });
+  await expect(model.complete(input)).rejects.toThrow(/Nebius.*DNS/i);
+  await expect(model.complete(input)).rejects.not.toThrow(
+    "private transport path",
+  );
+});
+
+it.each([
+  [401, /API key.*401.*Settings/i],
+  [429, /rate limiting.*429/i],
+  [503, /unavailable.*503/i],
+])(
+  "explains Nebius HTTP %i without exposing the response body",
+  async (status, expected) => {
+    const model = nebiusPearlModel(
+      async () =>
+        new Response("private response text", {
+          status,
+        }),
+    );
+    await expect(model.complete(input)).rejects.toThrow(expected);
+    await expect(model.complete(input)).rejects.not.toThrow(
+      "private response text",
+    );
+  },
+);
+
 it("treats a provider agent failure embedded in a successful HTTP reply as failure", async () => {
   const model = nebiusPearlModel(
     async () =>
