@@ -16,7 +16,10 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { roomChat } from "../src/main/pearl-chat-view";
 import { PearlChatStore } from "../src/main/pearl-chat-store";
-import { PearlChatManager } from "../src/main/pearl-chat-manager";
+import {
+  conciseChatTitle,
+  PearlChatManager,
+} from "../src/main/pearl-chat-manager";
 import type { startProjectPreview } from "../src/main/pearl-preview";
 import type { PearlBrowser } from "../src/main/pearl-browser";
 import { PearlWebAccess, type PearlWebProvider } from "../src/main/pearl-web";
@@ -33,6 +36,20 @@ import {
 const roots: string[] = [];
 const stores: PearlChatStore[] = [];
 const executeFixtureCommand = promisify(execFile);
+it("creates a concise title from the task instead of a clipped message", () => {
+  expect(
+    conciseChatTitle(
+      "Please change Alpha project to Beta project in README.md and create NOTES.md containing Batch edit worked.",
+    ),
+  ).toBe(
+    "change Alpha project to Beta project in README.md and create NOTES.md",
+  );
+  expect(
+    conciseChatTitle(
+      "Could you investigate the preview failure? Then repair it.",
+    ),
+  ).toBe("investigate the preview failure");
+});
 afterEach(() => {
   for (const store of stores.splice(0)) store.close();
   for (const root of roots.splice(0))
@@ -938,6 +955,28 @@ it("rejects a batch containing a command without applying its file edit or grant
     expect.stringContaining("not applied"),
     expect.stringContaining("not applied"),
   ]);
+});
+
+it("records project changes that occur outside file editing tools during a turn", async () => {
+  const f = fixture([reply("The project is updated.")]);
+  const chat = f.manager.create();
+  writeFileSync(join(f.project, "notes.txt"), "existing work\n");
+  f.manager.chooseProject(chat.id, f.project);
+  f.manager.approveProject(chat.id, true);
+  f.manager.send(chat.id, "Update the project");
+  writeFileSync(join(f.project, "notes.txt"), "changed by a command\n");
+  writeFileSync(join(f.project, "generated.txt"), "new output\n");
+  const done = await settled(f.store, chat.id);
+  expect(
+    done.taskChanges?.at(-1)?.files.map((file) => [file.path, file.kind]),
+  ).toEqual([
+    ["generated.txt", "added"],
+    ["notes.txt", "modified"],
+  ]);
+  f.manager.undoTask(chat.id, done.taskChanges![0].turnId);
+  expect(readFileSync(join(f.project, "notes.txt"), "utf8")).toBe(
+    "existing work\n",
+  );
 });
 
 it.each(["ask_user", "run_command"])(

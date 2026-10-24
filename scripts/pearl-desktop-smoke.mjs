@@ -2,6 +2,7 @@ import { _electron as electron } from "playwright";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 import assert from "node:assert/strict";
 
 const state = await mkdtemp(join(tmpdir(), "scully-pearl-desktop-"));
@@ -182,18 +183,26 @@ try {
     "getPearlChat",
     "listPearlChats",
     "listPearlModels",
+    "listPearlProjectFiles",
     "metrics",
     "onPearlChatUpdate",
+    "pearlGitCommitFiles",
+    "pearlGitDiff",
+    "pearlGitView",
+    "readPearlProjectFile",
     "remoteMcpInfo",
+    "renamePearlChat",
     "resizePearlTerminal",
     "restorePearlChat",
     "retryPearlChat",
+    "reviewPearlTaskFile",
     "selectPearlModels",
     "sendPearlMessage",
     "sendPearlTerminalInput",
     "session",
     "stopPearlChat",
     "stopPearlTerminal",
+    "undoPearlTask",
     "webSearchInfo",
   ]);
   const channels = await app.evaluate(({ ipcMain }) => [
@@ -327,6 +336,82 @@ try {
     chat.id,
   );
   assert.equal(afterApproval.project.approved, true);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole("button", { name: "Files", exact: true }).click();
+  await page.getByRole("complementary", { name: "Files" }).waitFor();
+  await page
+    .locator(".pearl-inspector")
+    .evaluate((element) =>
+      Promise.all(
+        element
+          .getAnimations()
+          .map((animation) => animation.finished.catch(() => {})),
+      ),
+    );
+  const inspectorBeforeResize = await page
+    .locator(".pearl-inspector")
+    .evaluate((element) => element.getBoundingClientRect().width);
+  const grip = await page
+    .getByRole("separator", { name: "Resize panel" })
+    .boundingBox();
+  assert(grip);
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + 80);
+  await page.mouse.down();
+  await page.mouse.move(grip.x + 80, grip.y + 80);
+  await page.mouse.up();
+  const inspectorAfterResize = await page
+    .locator(".pearl-inspector")
+    .evaluate((element) => element.getBoundingClientRect().width);
+  assert(
+    inspectorAfterResize < inspectorBeforeResize,
+    `Inspector should resize by dragging its edge (${inspectorBeforeResize} -> ${inspectorAfterResize})`,
+  );
+  await page.getByRole("button", { name: "README.md" }).click();
+  const fileSelection = await page
+    .getByRole("button", { name: "README.md" })
+    .evaluate((element) => ({
+      outline: getComputedStyle(element).outlineStyle,
+      shadow: getComputedStyle(element).boxShadow,
+      icon: Boolean(element.querySelector(".pearl-file-icon svg")),
+    }));
+  assert.equal(fileSelection.outline, "none");
+  assert.match(fileSelection.shadow, /inset/);
+  assert.equal(fileSelection.icon, true);
+  await page
+    .getByRole("region", { name: "File preview" })
+    .getByText("Project fixture")
+    .waitFor();
+  assert.equal(
+    await page.getByRole("region", { name: "Code preview" }).count(),
+    1,
+  );
+  await page.screenshot({ path: "test-results/pearl-files.png" });
+  await page.getByRole("button", { name: "Refresh panel" }).click();
+  await page.getByRole("button", { name: "Close panel" }).click();
+  await page.locator(".pearl-inspector.is-closing").waitFor();
+  await page.locator(".pearl-inspector").waitFor({ state: "detached" });
+  execFileSync("git", ["init", "-q", project]);
+  execFileSync("git", ["-C", project, "add", "README.md"]);
+  execFileSync("git", [
+    "-C",
+    project,
+    "-c",
+    "user.name=Fixture",
+    "-c",
+    "user.email=fixture@example.invalid",
+    "commit",
+    "-qm",
+    "Initial project",
+  ]);
+  await writeFile(join(project, "README.md"), "Project fixture\nUpdated\n");
+  await page.getByRole("button", { name: "Git changes" }).click();
+  await page.getByRole("complementary", { name: "Git history" }).waitFor();
+  await page.getByText("Initial project").waitFor();
+  await page.getByText("Current branch").waitFor();
+  assert.equal(await page.getByText("Working changes").count(), 1);
+  await page.screenshot({ path: "test-results/pearl-git.png" });
+  await page.getByRole("button", { name: "Close panel" }).click();
+  if (desktopViewport) await page.setViewportSize(desktopViewport);
   await assert.rejects(
     page.evaluate(
       async (id) => window.scully.answerPearlQuestion(id, "forged", "yes"),
@@ -364,6 +449,23 @@ try {
     chat.id,
   );
   assert.equal(restored.project.approved, true);
+  await page.getByRole("button", { name: "New chat", exact: true }).click();
+  await page.getByRole("button", { name: "Options for New chat" }).click();
+  await page.getByRole("button", { name: "Rename", exact: true }).click();
+  const neighborGap = await page
+    .locator(".pearl-chat-rename")
+    .evaluate((form) => {
+      const next = form.closest(".pearl-chat-row")?.nextElementSibling;
+      return next
+        ? next.getBoundingClientRect().top - form.getBoundingClientRect().bottom
+        : null;
+    });
+  assert.ok(
+    neighborGap !== null && neighborGap >= 4,
+    `Renaming must leave space before the next chat (${neighborGap})`,
+  );
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await page.getByRole("button", { name: chat.title, exact: true }).click();
   const chatOptions = page.getByRole("button", {
     name: `Options for ${chat.title}`,
   });
@@ -415,6 +517,51 @@ try {
     await page.getByRole("button", { name: "Archive", exact: true }).count(),
     0,
   );
+  await chatOptions.click();
+  await page.getByRole("button", { name: "Rename", exact: true }).click();
+  const renameLayout = await page
+    .locator(".pearl-chat-rename")
+    .evaluate((form) => {
+      const row = form.closest(".pearl-chat-row");
+      const next = row?.nextElementSibling;
+      return {
+        gap: next
+          ? next.getBoundingClientRect().top -
+            form.getBoundingClientRect().bottom
+          : null,
+        rowMargin: Number.parseFloat(getComputedStyle(row).marginBottom),
+        outline: getComputedStyle(form.querySelector("textarea")).outlineStyle,
+        border: getComputedStyle(form.querySelector("textarea")).borderTopStyle,
+        titleFits:
+          form.querySelector("textarea").scrollHeight <=
+          form.querySelector("textarea").clientHeight,
+      };
+    });
+  assert.ok(renameLayout.rowMargin >= 4);
+  if (renameLayout.gap !== null) assert.ok(renameLayout.gap >= 4);
+  assert.equal(renameLayout.outline, "none");
+  assert.equal(renameLayout.border, "none");
+  assert.equal(renameLayout.titleFits, true);
+  await page.screenshot({ path: "test-results/pearl-rename.png" });
+  await page
+    .getByRole("textbox", { name: "Chat title" })
+    .fill("Renamed desktop chat");
+  await page.getByRole("button", { name: "Save" }).click();
+  await page
+    .getByRole("button", { name: "Renamed desktop chat", exact: true })
+    .waitFor();
+  assert.equal(
+    (await page.evaluate(async (id) => window.scully.getPearlChat(id), chat.id))
+      .title,
+    "Renamed desktop chat",
+  );
+  await page
+    .getByRole("button", { name: "Options for Renamed desktop chat" })
+    .click();
+  await page.getByRole("button", { name: "Rename", exact: true }).click();
+  await page.getByRole("textbox", { name: "Chat title" }).fill(chat.title);
+  await page.getByRole("button", { name: "Save" }).click();
+  await chatOptions.waitFor();
   await chatOptions.click();
   await page.getByRole("button", { name: "Archive", exact: true }).click();
   await page.getByRole("button", { name: "Archived", exact: true }).click();

@@ -124,6 +124,7 @@ export type PearlChat = {
   pauseKind?: PearlPauseReason;
   streamingText?: string;
   error?: string;
+  taskChanges?: import("./pearl-workspace").TaskChangeSet[];
 };
 
 export type PearlChatSummary = Pick<
@@ -180,6 +181,25 @@ export type PearlChatAPI = {
     rows: number,
   ) => Promise<void>;
   stopPearlTerminal: (id: string, terminalId: string) => Promise<PearlChat>;
+  renamePearlChat: (id: string, title: string) => Promise<PearlChat>;
+  listPearlProjectFiles: (
+    id: string,
+    directory?: string,
+    offset?: number,
+  ) => Promise<import("./pearl-workspace").WorkspaceEntry[]>;
+  readPearlProjectFile: (id: string, path: string) => Promise<string>;
+  pearlGitView: (id: string) => Promise<import("./pearl-workspace").GitView>;
+  pearlGitDiff: (id: string, path: string, commit?: string) => Promise<string>;
+  pearlGitCommitFiles: (
+    id: string,
+    commit: string,
+  ) => Promise<{ status: string; path: string }[]>;
+  reviewPearlTaskFile: (
+    id: string,
+    turnId: string,
+    path: string,
+  ) => Promise<import("./pearl-workspace").FileReview>;
+  undoPearlTask: (id: string, turnId: string) => Promise<PearlChat>;
   onPearlChatUpdate: (listener: (chat: PearlChat) => void) => () => void;
 };
 

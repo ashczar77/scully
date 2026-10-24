@@ -28,6 +28,20 @@ const api: PearlDesktopAPI = {
   deletePearlChatPermanently: (id) =>
     ipcRenderer.invoke("pearl:permanent-delete", id),
   sendPearlMessage: (id, text) => ipcRenderer.invoke("pearl:send", id, text),
+  renamePearlChat: (id, title) => ipcRenderer.invoke("pearl:rename", id, title),
+  listPearlProjectFiles: (id, directory, offset) =>
+    ipcRenderer.invoke("pearl:workspace:list", id, directory, offset),
+  readPearlProjectFile: (id, path) =>
+    ipcRenderer.invoke("pearl:workspace:read", id, path),
+  pearlGitView: (id) => ipcRenderer.invoke("pearl:git:view", id),
+  pearlGitDiff: (id, path, commit) =>
+    ipcRenderer.invoke("pearl:git:diff", id, path, commit),
+  pearlGitCommitFiles: (id, commit) =>
+    ipcRenderer.invoke("pearl:git:commit-files", id, commit),
+  reviewPearlTaskFile: (id, turnId, path) =>
+    ipcRenderer.invoke("pearl:task:file", id, turnId, path),
+  undoPearlTask: (id, turnId) =>
+    ipcRenderer.invoke("pearl:task:undo", id, turnId),
   choosePearlProject: (id) => ipcRenderer.invoke("pearl:project:choose", id),
   approvePearlProject: (id, approved) =>
     ipcRenderer.invoke("pearl:project:approve", id, approved),

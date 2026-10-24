@@ -244,6 +244,30 @@ app
       pearl!.deletePermanently(id),
     );
     handle("pearl:send", (_event, id, text) => pearl!.send(id, text));
+    handle("pearl:rename", (_event, id, title) => pearl!.rename(id, title));
+    handle("pearl:workspace:list", (_event, id, directory, offset) =>
+      pearl!.projectFiles(
+        id,
+        directory as string | undefined,
+        offset as number | undefined,
+      ),
+    );
+    handle("pearl:workspace:read", (_event, id, path) =>
+      pearl!.projectFile(id, path),
+    );
+    handle("pearl:git:view", (_event, id) => pearl!.gitView(id));
+    handle("pearl:git:diff", (_event, id, path, commit) =>
+      pearl!.gitDiff(id, path, commit),
+    );
+    handle("pearl:git:commit-files", (_event, id, commit) =>
+      pearl!.gitCommitFiles(id, commit),
+    );
+    handle("pearl:task:file", (_event, id, turnId, path) =>
+      pearl!.taskFileReview(id, turnId, path),
+    );
+    handle("pearl:task:undo", (_event, id, turnId) =>
+      pearl!.undoTask(id, turnId),
+    );
     handle("pearl:project:choose", async (_event, id) => {
       const result = await dialog.showOpenDialog(win!, {
         title: "Choose a project for Pearl",

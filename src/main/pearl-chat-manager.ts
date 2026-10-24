@@ -47,6 +47,20 @@ import {
 import { validateBrowserSteps } from "./pearl-browser-steps";
 import { PearlWebAccess } from "./pearl-web";
 import { ManagedTerminal } from "./pearl-terminal";
+import {
+  beginTaskSnapshot,
+  finishTaskSnapshot,
+  readTaskFileReview,
+  readWorkspaceFile,
+  removeTaskSnapshots,
+  undoTaskSnapshot,
+  workspaceTree,
+} from "./pearl-workspace-review";
+import {
+  readGitHistory,
+  readPearlGitCommitFiles,
+  readPearlGitDiff,
+} from "./git-history";
 import type { PearlBrowser } from "./pearl-browser";
 import { nebiusPearlModel, type PearlModel } from "../engine/pearl-model";
 import { runPearlAgentTurn } from "./pearl-agent-runtime";
@@ -163,6 +177,22 @@ function publicProviderError(error: unknown): string {
     ? error.message
     : "Pearl could not complete this turn";
 }
+export function conciseChatTitle(input: string): string {
+  const plain = input
+    .replace(/^[\s>*#-]+/, "")
+    .replace(/^(?:please\s+|can you\s+|could you\s+|i want you to\s+)/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const first = plain
+    .split(/(?:[!?]\s+|\.\s+|\n)/, 1)[0]
+    .replace(/[,;:]$/, "")
+    .trim();
+  const words = first.split(/\s+/).filter(Boolean);
+  const title = words.slice(0, 11).join(" ");
+  const bounded =
+    title.length > 72 ? title.slice(0, 72).replace(/\s+\S*$/, "") : title;
+  return bounded.replace(/\s+(?:and|or|to|in|with|the)$/i, "") || "New chat";
+}
 function pristineDraft(chat: PearlChat): boolean {
   return (
     !chat.lifecycle &&
@@ -275,7 +305,8 @@ export class PearlChatManager {
     if (!running || state.status !== "running")
       throw new Error("Terminal session has ended");
     running.stop();
-    return this.get(chat.id);
+    this.finishTaskReview(chat);
+    return this.save(chat);
   }
   private previews = new Map<string, { id: string; running: RunningPreview }>();
   async closePreviews(chatId?: string): Promise<void> {
@@ -450,6 +481,147 @@ export class PearlChatManager {
     if (chat.lifecycle !== "archived")
       throw new Error("Archive this chat before permanent deletion");
     this.store.delete(chat.id);
+    removeTaskSnapshots(this.dataRoot, chat.id);
+  }
+
+  rename(id: unknown, value: unknown): PearlChat {
+    const chat = this.get(id);
+    this.activeChat(chat);
+    chat.title = text(value, 100, "title");
+    return this.save(chat);
+  }
+
+  projectFiles(id: unknown, directory = "", offset = 0) {
+    return workspaceTree(this.binding(this.get(id)), directory, offset);
+  }
+  projectFile(id: unknown, path: unknown) {
+    return readWorkspaceFile(this.binding(this.get(id)), path);
+  }
+  gitView(id: unknown) {
+    const binding = this.binding(this.get(id));
+    const view = readGitHistory(binding.path);
+    if (view.state !== "ready") return view;
+    return {
+      ...view,
+      changes: view.changes.filter((item) => {
+        try {
+          projectPath(item.path);
+          return true;
+        } catch {
+          return false;
+        }
+      }),
+    };
+  }
+  gitDiff(id: unknown, path: unknown, commit?: unknown) {
+    const binding = this.binding(this.get(id));
+    return readPearlGitDiff(binding.path, path, commit);
+  }
+  gitCommitFiles(id: unknown, commit: unknown) {
+    return readPearlGitCommitFiles(this.binding(this.get(id)).path, commit);
+  }
+  taskFileReview(id: unknown, turnId: unknown, path: unknown) {
+    const chat = this.get(id);
+    if (
+      typeof turnId !== "string" ||
+      !chat.taskChanges?.some((item) => item.turnId === turnId)
+    )
+      throw new Error("Task review not found in this chat");
+    return readTaskFileReview(
+      this.dataRoot,
+      chat.id,
+      turnId,
+      this.binding(chat),
+      path,
+    );
+  }
+  undoTask(id: unknown, turnId: unknown): PearlChat {
+    const chat = this.get(id);
+    this.activeChat(chat);
+    this.movable(chat);
+    if (
+      typeof turnId !== "string" ||
+      !chat.taskChanges?.some(
+        (item) => item.turnId === turnId && item.undoAvailable,
+      )
+    )
+      throw new Error("Task Undo is unavailable");
+    const result = undoTaskSnapshot(
+      this.dataRoot,
+      chat.id,
+      turnId,
+      this.binding(chat),
+    );
+    chat.taskChanges = chat.taskChanges.map((item) =>
+      item.turnId === turnId ? result : item,
+    );
+    return this.save(chat);
+  }
+
+  private beginTaskReview(chat: PearlChat): void {
+    if (!chat.project?.approved || !chat.activeUserMessageId) return;
+    try {
+      beginTaskSnapshot(
+        this.dataRoot,
+        chat.id,
+        chat.activeUserMessageId,
+        this.binding(chat),
+      );
+    } catch (error) {
+      const reason =
+        error instanceof Error ? error.message : "Checkpoint unavailable";
+      chat.taskChanges ||= [];
+      if (
+        !chat.taskChanges.some(
+          (item) => item.turnId === chat.activeUserMessageId,
+        )
+      )
+        chat.taskChanges.push({
+          turnId: chat.activeUserMessageId,
+          at: new Date().toISOString(),
+          files: [],
+          undoAvailable: false,
+          reason,
+        });
+    }
+  }
+  private finishTaskReview(chat: PearlChat): void {
+    if (!chat.project?.approved || !chat.activeUserMessageId) return;
+    if (
+      chat.taskChanges?.some(
+        (item) => item.turnId === chat.activeUserMessageId && item.reason,
+      )
+    )
+      return;
+    try {
+      const result = finishTaskSnapshot(
+        this.dataRoot,
+        chat.id,
+        chat.activeUserMessageId,
+        this.binding(chat),
+      );
+      if (!result) return;
+      chat.taskChanges ||= [];
+      chat.taskChanges = [
+        ...chat.taskChanges.filter((item) => item.turnId !== result.turnId),
+        result,
+      ];
+    } catch (error) {
+      chat.taskChanges ||= [];
+      chat.taskChanges = [
+        ...chat.taskChanges.filter(
+          (item) => item.turnId !== chat.activeUserMessageId,
+        ),
+        {
+          turnId: chat.activeUserMessageId,
+          at: new Date().toISOString(),
+          files: [],
+          undoAvailable: false,
+          reason:
+            error instanceof Error ? error.message : "Task review unavailable",
+        },
+      ];
+    }
   }
 
   private save(chat: PearlChat): PearlChat {
@@ -509,10 +681,11 @@ export class PearlChatManager {
     const content = text(value, 20_000, "message");
     chat.activeUserMessageId = this.message(chat, "user", content).id;
     chat.pauseKind = undefined;
-    if (chat.messages.length === 1)
-      chat.title = content.slice(0, 70).split("\n")[0];
+    if (chat.messages.length === 1 && chat.title === "New chat")
+      chat.title = conciseChatTitle(content);
     chat.error = undefined;
     chat.status = "running";
+    this.beginTaskReview(chat);
     this.save(chat);
     void this.turn(chat.id);
     return chat;
@@ -547,6 +720,7 @@ export class PearlChatManager {
     verifyProjectRoot({ ...chat.project, kind: "existing" });
     chat.project.approved = approved;
     if (!approved) chat.project = undefined;
+    if (approved) this.beginTaskReview(chat);
     return this.save(chat);
   }
   answerQuestion(id: unknown, questionId: unknown, value: unknown): PearlChat {
@@ -569,6 +743,7 @@ export class PearlChatManager {
     chat.activeUserMessageId = response.id;
     chat.pauseKind = undefined;
     chat.status = "running";
+    this.beginTaskReview(chat);
     this.save(chat);
     void this.turn(chat.id);
     return chat;
@@ -587,6 +762,7 @@ export class PearlChatManager {
     const call = chat.pendingTool;
     chat.pendingTool = undefined;
     chat.status = "running";
+    this.beginTaskReview(chat);
     this.save(chat);
     const controller = new AbortController();
     if (approved && call.name !== "edit_files")
@@ -1171,6 +1347,7 @@ export class PearlChatManager {
       ...(fallbackModel ? { fallbackModel } : {}),
     });
     chat.status = "idle";
+    this.finishTaskReview(chat);
     this.save(chat);
   }
   private async handleAction(
@@ -1691,6 +1868,7 @@ export class PearlChatManager {
             chat.status = "paused";
             chat.error = reason;
             chat.pauseKind = kind;
+            this.finishTaskReview(chat);
             this.save(chat);
             emitMetric(this.metricSink, {
               version: 1,
@@ -1722,6 +1900,7 @@ export class PearlChatManager {
     void this.closePreviews(chat.id);
     chat.status = "failed";
     chat.error = publicProviderError(error);
+    this.finishTaskReview(chat);
     this.save(chat);
   }
   private binding(chat: PearlChat) {
@@ -2233,6 +2412,7 @@ export class PearlChatManager {
         const current = this.get(chat.id);
         const saved = current.terminals?.find((item) => item.id === state.id);
         if (saved) Object.assign(saved, state);
+        if (state.endedAt) this.finishTaskReview(current);
         this.save(current);
         if (!exitMetricSent && state.endedAt) {
           exitMetricSent = true;

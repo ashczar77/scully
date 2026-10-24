@@ -449,6 +449,76 @@ it("keeps one pristine New chat row across repeated clicks", async () => {
   );
 });
 
+it("renames a chat through a contained editor with Save, Cancel and recoverable errors", async () => {
+  let chat: PearlChat = {
+    id: "12345678-1234-1234-1234-123456789abc",
+    title: "Change Alpha project to Beta project in README.md",
+    createdAt: "2026-10-22T00:00:00.000Z",
+    updatedAt: "2026-10-22T00:00:00.000Z",
+    status: "idle",
+    messages: [],
+    questions: [],
+  };
+  const renamePearlChat = vi.fn(async (_id: string, title: string) => {
+    chat = { ...chat, title };
+    return chat;
+  });
+  renamePearlChat.mockRejectedValueOnce(new Error("Storage unavailable"));
+  const api = {
+    listPearlChats: vi.fn(async (scope?: string) => (scope ? [] : [chat])),
+    session: vi.fn(async () => ({ configured: true, model: "fixture" })),
+    onPearlChatUpdate: vi.fn(() => () => {}),
+    renamePearlChat,
+  } as unknown as DesktopAPI;
+  render(<PearlApp api={api} />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: `Options for ${chat.title}` }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+  const title = screen.getByRole("textbox", { name: "Chat title" });
+  expect(title).toHaveValue(chat.title);
+  expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: `Options for ${chat.title}` }),
+  ).toBeNull();
+  fireEvent.change(title, { target: { value: "  " } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  expect(screen.getByRole("alert")).toHaveTextContent("Enter a chat title");
+  expect(renamePearlChat).not.toHaveBeenCalled();
+  fireEvent.change(title, { target: { value: "Polished project title" } });
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(renamePearlChat).not.toHaveBeenCalled();
+  fireEvent.click(
+    screen.getByRole("button", { name: `Options for ${chat.title}` }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Chat title" }), {
+    target: { value: "Polished project title" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() =>
+    expect(
+      screen.getByText("Could not rename this chat. Try again."),
+    ).toBeInTheDocument(),
+  );
+  expect(screen.getByRole("textbox", { name: "Chat title" })).toHaveValue(
+    "Polished project title",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() =>
+    expect(renamePearlChat).toHaveBeenCalledWith(
+      chat.id,
+      "Polished project title",
+    ),
+  );
+  await waitFor(() =>
+    expect(screen.queryByRole("textbox", { name: "Chat title" })).toBeNull(),
+  );
+  expect(
+    screen.getByRole("button", { name: "Polished project title" }),
+  ).toBeInTheDocument();
+});
+
 it("archives, restores and permanently deletes a chat only after confirmation", async () => {
   let chat: PearlChat = {
     id: "12345678-1234-1234-1234-123456789abc",

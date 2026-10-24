@@ -39,7 +39,7 @@
 .pearl-shell textarea:focus-visible,
 .pearl-shell summary:focus-visible {
   outline: 2px solid var(--pearl-teal);
-  outline-offset: 3px;
+  outline-offset: -2px;
 }
 .pearl-header {
   min-height: 56px;
@@ -93,7 +93,9 @@
   margin-top: auto;
 }
 .pearl-sidebar {
+  position: relative;
   width: 268px;
+  max-width: 460px;
   flex: none;
   background: #141b20;
   border-right: 1px solid var(--pearl-divider);
@@ -101,6 +103,15 @@
   flex-direction: column;
   padding: 12px 10px 14px;
   gap: 10px;
+}
+.pearl-sidebar-resize {
+  position: absolute;
+  z-index: 2;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
 }
 .pearl-brand {
   display: flex;
@@ -171,27 +182,71 @@
   white-space: nowrap;
 }
 .pearl-chat-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24px;
   align-items: center;
-  flex-wrap: wrap;
   column-gap: 7px;
-  row-gap: 7px;
+  row-gap: 8px;
   position: relative;
   min-width: 0;
+  margin-bottom: 5px;
 }
 .pearl-chat-row .pearl-chat-title {
-  flex: 1;
   min-width: 0;
-  width: 0;
+  width: 100%;
   display: flex;
   align-items: center;
+  white-space: normal;
+  text-overflow: clip;
 }
 .pearl-chat-title span {
   display: block;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow: visible;
+  white-space: normal;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.pearl-chat-rename {
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding: 4px;
+  background: #1a2b2f;
+  box-shadow: inset 2px 0 var(--pearl-teal);
+}
+.pearl-chat-rename textarea {
+  display: block;
+  width: 100%;
+  min-height: 58px;
+  resize: none;
+  border: 0;
+  background: transparent;
+  color: #e7edf3;
+  padding: 8px;
+  overflow-wrap: anywhere;
+}
+.pearl-shell .pearl-chat-rename textarea:focus-visible {
+  outline: none;
+}
+.pearl-chat-rename-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 6px;
+}
+.pearl-chat-rename-actions button {
+  border: 1px solid #3a5957;
+  padding: 4px 9px;
+}
+.pearl-chat-rename-actions button:first-child {
+  background: #2e6f66;
+  color: #effffb;
+}
+.pearl-chat-rename [role="alert"] {
+  display: block;
+  padding: 5px 2px 0;
+  color: #ffc5b8;
+  font-size: 11px;
 }
 .pearl-chat-row .pearl-chat-options {
   flex: none;
@@ -219,6 +274,7 @@
   filter: drop-shadow(0 0 2px var(--pearl-teal));
 }
 .pearl-chat-menu {
+  grid-column: 1 / -1;
   width: 100%;
   display: flex;
   flex-direction: column;
@@ -843,6 +899,427 @@
   color: #859ba4;
   font-size: 11px;
   padding: 11px;
+}
+.pearl-task-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid #3a5b56;
+  background: #17282b;
+}
+.pearl-task-summary span {
+  color: #ffc5b8;
+}
+.pearl-task-summary button {
+  border: 1px solid #4e827b;
+  background: #203e3c;
+  color: #d8f5ed;
+  padding: 5px 8px;
+}
+.pearl-inspector {
+  position: relative;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-width: 300px;
+  max-width: min(850px, 60vw, calc(100vw - 660px));
+  border-left: 1px solid #36514e;
+  background: #131d21;
+  overflow: hidden;
+  transform-origin: right center;
+}
+@keyframes pearl-panel-enter {
+  from {
+    opacity: 0.5;
+    transform: translateX(7px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.pearl-sidebar,
+.pearl-inspector {
+  animation: pearl-panel-enter 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition:
+    max-width 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    min-width 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    padding 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 180ms ease;
+}
+.pearl-sidebar.is-closing,
+.pearl-inspector.is-closing {
+  max-width: 0;
+  min-width: 0;
+  padding-left: 0;
+  padding-right: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    max-width 220ms cubic-bezier(0.4, 0, 1, 1),
+    min-width 220ms cubic-bezier(0.4, 0, 1, 1),
+    padding 220ms cubic-bezier(0.4, 0, 1, 1),
+    opacity 160ms ease;
+  animation: none;
+}
+.pearl-sidebar.is-closing {
+  overflow: hidden;
+  border-right-color: transparent;
+}
+.pearl-inspector.is-closing {
+  border-left-color: transparent;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pearl-sidebar,
+  .pearl-inspector {
+    animation: none;
+  }
+  .pearl-sidebar.is-closing,
+  .pearl-inspector.is-closing {
+    transition: none;
+  }
+}
+.pearl-inspector-resize {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 6px;
+  cursor: col-resize;
+}
+.pearl-inspector-header {
+  flex: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #36514e;
+  color: #e8f6f2;
+}
+.pearl-inspector-header button {
+  border: 0;
+  background: transparent;
+  color: #acc4c2;
+}
+.pearl-inspector-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pearl-inspector-list {
+  flex: 1;
+  min-height: 80px;
+  overflow: auto;
+  padding: 6px 0;
+  scrollbar-width: thin;
+}
+.pearl-inspector-section {
+  color: #6ed4c3;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 12px 14px 5px;
+}
+.pearl-inspector-item {
+  border: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  text-align: left;
+  padding: 7px 12px;
+  background: transparent;
+  color: #bed1cf;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.pearl-inspector-item:hover {
+  background: #21333a;
+  color: #fff;
+}
+.pearl-shell .pearl-inspector-item:focus-visible,
+.pearl-inspector-item.selected {
+  outline: none;
+  outline-offset: 0;
+  background: #21333a;
+  box-shadow: inset 2px 0 var(--pearl-teal);
+  color: #f2fffc;
+}
+.pearl-tree-item {
+  min-height: 31px;
+  white-space: nowrap;
+}
+.pearl-tree-item > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pearl-tree-chevron {
+  width: 13px;
+  flex: none;
+  display: inline-flex;
+  color: #8caaa9;
+}
+.pearl-file-icon {
+  flex: none;
+  width: 16px;
+  display: inline-flex;
+  color: #a9bdc5;
+}
+.pearl-file-folder {
+  color: #6baca9;
+}
+.pearl-file-js,
+.pearl-file-jsx,
+.pearl-file-mjs {
+  color: #e3c75d;
+}
+.pearl-file-ts,
+.pearl-file-tsx {
+  color: #7fafe7;
+}
+.pearl-file-css,
+.pearl-file-scss {
+  color: #8aace9;
+}
+.pearl-file-html,
+.pearl-file-svg {
+  color: #e5a775;
+}
+.pearl-file-json,
+.pearl-file-jsonc {
+  color: #d3bf74;
+}
+.pearl-file-md,
+.pearl-file-mdx {
+  color: #8bd0c5;
+}
+.pearl-git-branch {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  margin: 7px 10px 4px;
+  background: #1b2b2e;
+  border: 1px solid #324c4a;
+  color: #d8f4eb;
+  min-width: 0;
+}
+.pearl-git-branch span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pearl-git-branch small {
+  color: #83a5a1;
+  font-size: 10px;
+}
+.pearl-git-section {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border-bottom: 1px solid #273b3c;
+  margin: 4px 10px 3px;
+  padding: 11px 4px 7px;
+}
+.pearl-git-section > span {
+  margin-left: auto;
+  color: #93b4b0;
+  background: #213337;
+  padding: 1px 6px;
+}
+.pearl-git-file {
+  padding-left: 17px;
+}
+.pearl-file-label {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pearl-git-status {
+  flex: none;
+  min-width: 20px;
+  padding: 1px 4px;
+  text-align: center;
+  color: #b4e9d7;
+  background: #244037;
+  font-size: 10px;
+  font-weight: 700;
+}
+.pearl-git-commit-group {
+  position: relative;
+  margin-left: 20px;
+  border-left: 1px solid #355954;
+}
+.pearl-commit {
+  position: relative;
+  gap: 9px;
+  padding: 9px 10px 9px 17px;
+}
+.pearl-git-node {
+  position: absolute;
+  left: -5px;
+  top: 14px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--pearl-teal);
+  background: #152225;
+  border-radius: 50%;
+}
+.pearl-commit-body {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.pearl-commit-subject {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #dce9e7;
+}
+.pearl-commit code {
+  flex: none;
+  color: #8cb3ac;
+  font-size: 10px;
+}
+.pearl-commit-file {
+  padding-left: 17px;
+  font-size: 11px;
+}
+.pearl-commit {
+  display: flex;
+  align-items: center;
+}
+.pearl-commit small {
+  color: #819c9c;
+}
+.pearl-change-kind {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: #a9c5c1;
+}
+.pearl-change-kind.added {
+  color: #7ddd9d;
+}
+.pearl-change-kind.deleted {
+  color: #f3918b;
+}
+.pearl-inspector-undo {
+  margin: 12px;
+  padding: 8px 10px;
+  border: 1px solid #56b2a2;
+  background: #24504a;
+  color: #e9fff7;
+}
+.pearl-inspector-preview {
+  flex: 1;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid #36514e;
+  overflow: hidden;
+}
+.pearl-inspector-preview h3 {
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pearl-inspector-preview pre {
+  margin: 0;
+  padding: 10px 14px;
+  overflow: auto;
+  flex: 1;
+  font: 12px/1.5 var(--pearl-font);
+  white-space: pre;
+}
+.pearl-code-preview {
+  flex: 1;
+  overflow: auto;
+  background: #10191d;
+  font: 12px/1.55 var(--pearl-font);
+  scrollbar-width: thin;
+}
+.pearl-code-lines {
+  min-width: max-content;
+  padding: 8px 0 16px;
+}
+.pearl-code-line {
+  display: flex;
+  min-height: 19px;
+}
+.pearl-code-line:hover {
+  background: #1b2b2f;
+}
+.pearl-code-number {
+  position: sticky;
+  left: 0;
+  flex: none;
+  width: 42px;
+  padding: 0 9px 0 4px;
+  text-align: right;
+  color: #64817f;
+  border-right: 1px solid #29403f;
+  background: #131e22;
+  user-select: none;
+}
+.pearl-code-line code {
+  display: block;
+  padding: 0 14px;
+  white-space: pre;
+  color: #d6e6e3;
+}
+.pearl-token-comment {
+  color: #7e9b8d;
+}
+.pearl-token-string {
+  color: #d5ad83;
+}
+.pearl-token-number {
+  color: #b2bfec;
+}
+.pearl-token-keyword {
+  color: #7dd5c8;
+}
+.pearl-token-tag {
+  color: #e5a775;
+}
+.pearl-token-property {
+  color: #9dc5e6;
+}
+.pearl-diff div {
+  min-height: 18px;
+}
+.pearl-diff div.added {
+  background: #173b2b;
+  color: #b8eaca;
+}
+.pearl-diff div.removed {
+  background: #482926;
+  color: #ffd2c6;
+}
+.pearl-diff div span {
+  display: inline-block;
+  width: 18px;
+  user-select: none;
+}
+.pearl-inspector-note {
+  color: #91aaa9;
+  padding: 8px 14px;
+}
+.pearl-inspector-error {
+  color: #ffc5b8;
+  padding: 8px 14px;
 }
 .pearl-settings-page {
   flex: 1;

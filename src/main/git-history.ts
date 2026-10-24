@@ -1,11 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { lstatSync, realpathSync } from "node:fs";
+import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type {
   GitHistory,
   GitCommit,
   GitFileChange,
 } from "../shared/git-history";
+import { safePath } from "../shared/runs";
+import { blockedProjectPart } from "./pearl-project-map";
 
 function git(folder: string, args: string[]): string {
   return execFileSync(
@@ -156,4 +158,90 @@ export function initializeGit(folder: string): GitHistory {
   }
   git(folder, ["-c", "init.templateDir=/dev/null", "init", "--quiet"]);
   return readGitHistory(folder);
+}
+
+export function readPearlGitDiff(
+  folder: string,
+  path: unknown,
+  commit?: unknown,
+): string {
+  safePath(path);
+  if (path.split("/").some(blockedProjectPart))
+    throw new Error("That project path is private or unavailable");
+  if (
+    commit !== undefined &&
+    (typeof commit !== "string" || !/^[0-9a-f]{40,64}$/.test(commit))
+  )
+    throw new Error("Invalid commit");
+  const history = readGitHistory(folder);
+  if (history.state !== "ready") throw new Error("Git history is unavailable");
+  if (
+    !commit &&
+    history.changes.some((item) => item.path === path && item.status === "??")
+  ) {
+    const file = join(folder, path);
+    let ancestor = folder;
+    for (const part of path.split("/")) {
+      ancestor = join(ancestor, part);
+      const node = lstatSync(ancestor);
+      if (node.isSymbolicLink() || (node.isFile() && node.nlink > 1))
+        throw new Error("Unsafe project path");
+    }
+    const stat = lstatSync(file);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 512_000)
+      return "Untracked binary or large file. Open it from Files if it is readable text.";
+    try {
+      const value = new TextDecoder("utf-8", { fatal: true }).decode(
+        readFileSync(file),
+      );
+      return `--- /dev/null\n+++ b/${path}\n${value
+        .split("\n")
+        .map((line) => `+${line}`)
+        .join("\n")}`;
+    } catch {
+      return "Untracked binary file.";
+    }
+  }
+  const args = commit
+    ? ["show", "--format=", "--no-ext-diff", "--no-renames", commit, "--", path]
+    : ["diff", "HEAD", "--no-ext-diff", "--no-renames", "--", path];
+  try {
+    return git(folder, args).slice(0, 1_000_000);
+  } catch {
+    return "Diff unavailable for this file.";
+  }
+}
+
+export function readPearlGitCommitFiles(
+  folder: string,
+  commit: unknown,
+): GitFileChange[] {
+  if (typeof commit !== "string" || !/^[0-9a-f]{40,64}$/.test(commit))
+    throw new Error("Invalid commit");
+  if (readGitHistory(folder).state !== "ready")
+    throw new Error("Git history is unavailable");
+  const raw = git(folder, [
+    "diff-tree",
+    "--root",
+    "--no-commit-id",
+    "--name-status",
+    "-r",
+    "-z",
+    "--no-renames",
+    commit,
+  ]);
+  const parts = raw.split("\0");
+  const files: GitFileChange[] = [];
+  for (let i = 0; i + 1 < parts.length && files.length < 300; i += 2) {
+    const status = parts[i];
+    const path = parts[i + 1];
+    try {
+      safePath(path);
+      if (path.split("/").some(blockedProjectPart)) continue;
+      files.push({ status: bounded(status, 2), path });
+    } catch {
+      /* Do not expose private paths in the browser. */
+    }
+  }
+  return files;
 }
