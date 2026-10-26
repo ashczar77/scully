@@ -29,7 +29,9 @@ import { RichText } from "./RichText";
 import { PearlActivity, roomTimeline } from "./PearlActivity";
 import { PearlMessageFrame } from "./PearlMessageFrame";
 import { PearlSettings } from "./PearlSettings";
+import { PearlSandboxPanel } from "./PearlSandboxPanel";
 import { PearlWorkspacePanel, type Inspector } from "./PearlWorkspacePanel";
+import { PearlSandboxInspector } from "./PearlSandboxInspector";
 import scullyLogo from "../../assets/branding/scully-friendly-nerd-transparent-v1.png";
 import pearlPortrait from "../../assets/team-portrait-coordinator-v1.png";
 import "./pearl.css";
@@ -222,6 +224,16 @@ export function PearlApp({
     setPanel("chats");
     await action(refreshChats);
     setDraft("");
+  }
+  async function chooseProject() {
+    await action(async () => {
+      const updated = await api.choosePearlProject(chat?.id);
+      if (!updated) return;
+      activeId.current = updated.id;
+      setChat(updated);
+      setPanel("chats");
+      await refreshChats();
+    });
   }
   async function open(id: string) {
     setMenuId(null);
@@ -523,25 +535,20 @@ export function PearlApp({
             {panel === "settings" ? "Settings" : chat?.title || "Room"}
           </h2>
         </div>
-        {panel !== "settings" && chat && !chat.lifecycle && (
+        {panel !== "settings" && !chat?.lifecycle && (
           <button
             className="pearl-project-button pearl-project-icon"
             aria-label={
-              chat.project
+              chat?.project
                 ? `Change project: ${chat.project.path.split("/").at(-1)}`
                 : "Choose project"
             }
             title={
-              chat.project
+              chat?.project
                 ? chat.project.path.split("/").at(-1)
                 : "Choose project"
             }
-            onClick={() =>
-              void action(async () => {
-                const updated = await api.choosePearlProject(chat.id);
-                if (updated) setChat(updated);
-              })
-            }
+            onClick={() => void chooseProject()}
           >
             <Folder size={18} aria-hidden="true" />
           </button>
@@ -683,6 +690,15 @@ export function PearlApp({
                       Ask a question, discuss an idea, or choose a project and
                       build with Pearl.
                     </p>
+                    <button
+                      className="pearl-welcome-project"
+                      onClick={() => void chooseProject()}
+                    >
+                      <Folder size={16} aria-hidden="true" />
+                      {chat?.project
+                        ? chat.project.path.split("/").at(-1)
+                        : "Choose a project folder"}
+                    </button>
                     {!configured && (
                       <button
                         className="pearl-project-button"
@@ -980,9 +996,11 @@ export function PearlApp({
                       aria-label={
                         chat.pendingTool.name === "edit_files"
                           ? "File transaction review"
-                          : chat.pendingTool.name === "mcp_call_tool"
-                            ? "Remote MCP tool approval"
-                            : "Command approval"
+                          : chat.pendingTool.name === "sandbox_run_check"
+                            ? "Sandbox check approval"
+                            : chat.pendingTool.name === "mcp_call_tool"
+                              ? "Remote MCP tool approval"
+                              : "Command approval"
                       }
                     >
                       <ShieldCheck size={20} />
@@ -990,53 +1008,59 @@ export function PearlApp({
                         <strong>
                           {chat.pendingTool.name === "edit_files"
                             ? `Review ${chat.pendingTool.review?.files || 0} file changes`
-                            : chat.pendingTool.name === "mcp_call_tool"
-                              ? "Approve remote tool call?"
-                              : "Approve command?"}
+                            : chat.pendingTool.name === "sandbox_run_check"
+                              ? "Approve remote Sandbox check?"
+                              : chat.pendingTool.name === "mcp_call_tool"
+                                ? "Approve remote tool call?"
+                                : "Approve command?"}
                         </strong>
                         <p>
                           {chat.pendingTool.name === "edit_files"
                             ? "Pearl proposes one file transaction. Review the complete diff. The backend checks every file again before applying it; a changed file rejects the batch."
-                            : chat.pendingTool.name === "mcp_call_tool"
-                              ? `Send these arguments to ${chat.pendingTool.remoteEndpoint || "the remote MCP server"} and run this tool once. The server may change external data. Its result will enter Pearl's chat context and go to the selected Nebius model. Approve only if you trust the endpoint and arguments.`
-                              : chat.pendingTool.name === "preview_app"
-                                ? "Start the project server and an isolated browser for this turn, up to ten minutes. Pearl can continue interacting with it; form actions can change project data. Stop ends the preview."
-                                : chat.pendingTool.name === "start_terminal"
-                                  ? "Start this command in an interactive terminal until you stop it or close the app. Only you can type into it; your input can run further commands inside the project sandbox."
-                                  : "This runs once inside the selected project."}
+                            : chat.pendingTool.name === "sandbox_run_check"
+                              ? `Run this exact command once in the selected Nebius Sandbox checkpoint (${chat.pendingTool.remoteRevision || "unknown"}). File writes from this check are discarded. Its output enters Pearl's chat context.`
+                              : chat.pendingTool.name === "mcp_call_tool"
+                                ? `Send these arguments to ${chat.pendingTool.remoteEndpoint || "the remote MCP server"} and run this tool once. The server may change external data. Its result will enter Pearl's chat context and go to the selected Nebius model. Approve only if you trust the endpoint and arguments.`
+                                : chat.pendingTool.name === "preview_app"
+                                  ? "Start the project server and an isolated browser for this turn, up to ten minutes. Pearl can continue interacting with it; form actions can change project data. Stop ends the preview."
+                                  : chat.pendingTool.name === "start_terminal"
+                                    ? "Start this command in an interactive terminal until you stop it or close the app. Only you can type into it; your input can run further commands inside the project sandbox."
+                                    : "This runs once inside the selected project."}
                         </p>
                         <pre>
                           {chat.pendingTool.name === "edit_files"
                             ? chat.pendingTool.review?.diff ||
                               "Diff unavailable"
-                            : chat.pendingTool.name === "mcp_call_tool"
-                              ? JSON.stringify(
-                                  JSON.parse(chat.pendingTool.arguments),
-                                  null,
-                                  2,
-                                )
-                              : command
+                            : chat.pendingTool.name === "sandbox_run_check"
+                              ? chat.pendingTool.arguments
+                              : chat.pendingTool.name === "mcp_call_tool"
                                 ? JSON.stringify(
-                                    {
-                                      executable:
-                                        chat.pendingTool.executable?.path,
-                                      argv: [
-                                        command.command,
-                                        ...(command.args || []),
-                                      ],
-                                      ...(chat.pendingTool.name ===
-                                      "preview_app"
-                                        ? {
-                                            browser: JSON.parse(
-                                              chat.pendingTool.arguments,
-                                            ),
-                                          }
-                                        : {}),
-                                    },
+                                    JSON.parse(chat.pendingTool.arguments),
                                     null,
                                     2,
                                   )
-                                : chat.pendingTool.arguments}
+                                : command
+                                  ? JSON.stringify(
+                                      {
+                                        executable:
+                                          chat.pendingTool.executable?.path,
+                                        argv: [
+                                          command.command,
+                                          ...(command.args || []),
+                                        ],
+                                        ...(chat.pendingTool.name ===
+                                        "preview_app"
+                                          ? {
+                                              browser: JSON.parse(
+                                                chat.pendingTool.arguments,
+                                              ),
+                                            }
+                                          : {}),
+                                      },
+                                      null,
+                                      2,
+                                    )
+                                  : chat.pendingTool.arguments}
                         </pre>
                         <button
                           onClick={() =>
@@ -1141,6 +1165,12 @@ export function PearlApp({
                               : "Turn interrupted"}
                           </strong>
                           <p>{chat.error}</p>
+                          {chat.status === "paused" && chat.pausedDraft && (
+                            <details className="pearl-paused-draft">
+                              <summary>View Pearl's unverified draft</summary>
+                              <RichText text={chat.pausedDraft} readableProse />
+                            </details>
+                          )}
                           <button
                             onClick={() =>
                               void action(() =>
@@ -1160,6 +1190,16 @@ export function PearlApp({
                 <div className="pearl-error" role="alert">
                   {error}
                 </div>
+              )}
+              {chat && (
+                <PearlSandboxPanel
+                  key={`${chat.id}:${chat.sandbox?.baseImage || ""}`}
+                  api={api}
+                  chat={chat}
+                  onChange={setChat}
+                  onSettings={() => setPanel("settings")}
+                  onInspect={() => openInspector({ kind: "sandbox" })}
+                />
               )}
               <form
                 className="pearl-composer"
@@ -1209,6 +1249,8 @@ export function PearlApp({
                       Boolean(chat?.lifecycle) ||
                       chat?.status === "running" ||
                       chat?.status === "awaiting_approval" ||
+                      chat?.sandbox?.status === "uploading" ||
+                      chat?.sandbox?.status === "uncertain" ||
                       busy
                     }
                   >
@@ -1221,28 +1263,39 @@ export function PearlApp({
                 requests.
               </div>
             </main>
-            {chat && shownInspector && (
-              <PearlWorkspacePanel
-                api={api}
-                chat={chat}
-                inspector={shownInspector}
-                closing={!inspector}
-                width={inspectorWidth}
-                onResizeStart={startResize}
-                onClose={() => setInspector(null)}
-                onUndo={(turnId) => {
-                  if (
-                    !window.confirm(
-                      "Undo this task's file changes? Newer edits will stop the action.",
+            {chat &&
+              shownInspector &&
+              (shownInspector.kind === "sandbox" ? (
+                <PearlSandboxInspector
+                  api={api}
+                  chat={chat}
+                  closing={!inspector}
+                  width={inspectorWidth}
+                  onResizeStart={startResize}
+                  onClose={() => setInspector(null)}
+                />
+              ) : (
+                <PearlWorkspacePanel
+                  api={api}
+                  chat={chat}
+                  inspector={shownInspector}
+                  closing={!inspector}
+                  width={inspectorWidth}
+                  onResizeStart={startResize}
+                  onClose={() => setInspector(null)}
+                  onUndo={(turnId) => {
+                    if (
+                      !window.confirm(
+                        "Undo this task's file changes? Newer edits will stop the action.",
+                      )
                     )
-                  )
-                    return;
-                  void action(() =>
-                    mutateChat(() => api.undoPearlTask(chat.id, turnId)),
-                  );
-                }}
-              />
-            )}
+                      return;
+                    void action(() =>
+                      mutateChat(() => api.undoPearlTask(chat.id, turnId)),
+                    );
+                  }}
+                />
+              ))}
           </>
         )}
       </div>

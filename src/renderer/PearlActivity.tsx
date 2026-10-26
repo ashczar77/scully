@@ -212,12 +212,27 @@ function browserPreview(value: string): string | null {
   }
 }
 
+function formattedJson(value: string): string {
+  const trimmed = value.trim();
+  if (
+    trimmed.length > 200_000 ||
+    (!trimmed.startsWith("{") && !trimmed.startsWith("["))
+  )
+    return value;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    return JSON.stringify(parsed, null, 2);
+  } catch {
+    return value;
+  }
+}
+
 function resultText(message: PearlMessage): string {
   if (message.toolName === "apply_patch")
-    return patchPreview(message.text) ?? message.text;
+    return patchPreview(message.text) ?? formattedJson(message.text);
   if (["browser_check", "preview_app"].includes(message.toolName || ""))
-    return browserPreview(message.text) ?? message.text;
-  return message.text;
+    return browserPreview(message.text) ?? formattedJson(message.text);
+  return formattedJson(message.text);
 }
 
 function failedResult(message: PearlMessage): boolean {
@@ -347,7 +362,7 @@ export function PearlActivity({ group }: { group: ActivityGroup }) {
               {action.arguments && (
                 <details className="pearl-activity-detail">
                   <summary>Request details</summary>
-                  <pre>{action.arguments}</pre>
+                  <pre>{formattedJson(action.arguments)}</pre>
                 </details>
               )}
               {action.results.map((result) => (

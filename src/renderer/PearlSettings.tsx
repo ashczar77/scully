@@ -42,6 +42,9 @@ export function PearlSettings({
   });
   const [mcpEndpoint, setMcpEndpoint] = useState("");
   const [mcpToken, setMcpToken] = useState("");
+  const [sandboxConfigured, setSandboxConfigured] = useState(false);
+  const [sandboxProjectId, setSandboxProjectId] = useState("");
+  const [sandboxKey, setSandboxKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -65,12 +68,16 @@ export function PearlSettings({
       api.session(),
       api.webSearchInfo?.() ?? Promise.resolve({ configured: false }),
       api.remoteMcpInfo?.() ?? Promise.resolve({ connected: false, tools: [] }),
+      api.pearlSandboxConnection?.() ??
+        Promise.resolve({ configured: false, projectId: "" }),
     ])
-      .then(([info, web, remote]) => {
+      .then(([info, web, remote, sandbox]) => {
         if (!live) return;
         setSession(info);
         setWebConfigured(web.configured);
         setMcp(remote);
+        setSandboxConfigured(sandbox.configured);
+        setSandboxProjectId(sandbox.projectId);
         if (info.model) setModel(info.model);
         if (info.fallbackModel) {
           setFallbackEnabled(true);
@@ -288,6 +295,62 @@ export function PearlSettings({
           )}
           {section === "connections" && (
             <>
+              <section
+                className="pearl-settings-card"
+                aria-label="Nebius Sandbox connection"
+              >
+                <h2>Nebius Sandbox</h2>
+                <p>
+                  {sandboxConfigured
+                    ? "Connected for this app session."
+                    : "Connect Sandbox to run Pearl tasks in remote checkpoints."}{" "}
+                  Source files are uploaded only after a separate task review.
+                  The key stays in memory until Scully closes.
+                </p>
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void act(async () => {
+                      const connection = await api.configurePearlSandbox(
+                        sandboxKey,
+                        sandboxProjectId,
+                      );
+                      setSandboxConfigured(connection.configured);
+                      setSandboxProjectId(connection.projectId);
+                      setSandboxKey("");
+                      setNotice(
+                        "Nebius Sandbox connection saved for this session.",
+                      );
+                    });
+                  }}
+                >
+                  <label>
+                    Sandbox project ID
+                    <input
+                      value={sandboxProjectId}
+                      onChange={(event) =>
+                        setSandboxProjectId(event.target.value)
+                      }
+                      required
+                      maxLength={200}
+                    />
+                  </label>
+                  <label>
+                    Sandbox API key
+                    <input
+                      type="password"
+                      autoComplete="off"
+                      value={sandboxKey}
+                      onChange={(event) => setSandboxKey(event.target.value)}
+                      required
+                      maxLength={4096}
+                    />
+                  </label>
+                  <button className="pearl-settings-primary" disabled={busy}>
+                    Connect Sandbox
+                  </button>
+                </form>
+              </section>
               <section
                 className="pearl-settings-card"
                 aria-label="Nebius connection"

@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import {
   sandboxClient,
   SandboxRequestError,
+  SandboxWorkspaceMissingError,
   type SandboxStatus,
 } from "../engine/sandbox";
 import { safePath, type SourceFile } from "../shared/runs";
@@ -185,6 +186,7 @@ export function sandboxCollaborationWorkspace(
     revision: string,
     stage: string,
     publish: OperationUpdate,
+    cwd = "/workspace",
   ) {
     const record = operation(actor, stage, revision);
     publish(record);
@@ -194,7 +196,7 @@ export function sandboxCollaborationWorkspace(
           image: imageId,
           command,
           args,
-          cwd: "/workspace",
+          cwd,
           timeoutSeconds: 120,
           saveChanges,
           files: attached,
@@ -268,7 +270,34 @@ export function sandboxCollaborationWorkspace(
     async prepare(files, imageId, actor, revision, publish) {
       if (!imageId) throw new Error("Choose a starting Sandbox image");
       await client.inspectImage(imageId);
-      const prepared = await transfer(imageId, files, actor, revision, publish);
+      let head = imageId;
+      try {
+        if ((await client.listFiles(head)).length)
+          throw new Error(
+            "Choose a Sandbox image with an empty /workspace directory",
+          );
+      } catch (error) {
+        if (!(error instanceof SandboxWorkspaceMissingError)) throw error;
+        const result = await submit(
+          head,
+          {},
+          "/bin/mkdir",
+          ["-p", "/workspace"],
+          true,
+          actor,
+          revision,
+          "bootstrap",
+          publish,
+          "/",
+        );
+        if (!result.commandPassed || !result.resultImage)
+          throw new Error("Sandbox workspace could not be created");
+        await client.inspectImage(result.resultImage);
+        head = result.resultImage;
+        if ((await client.listFiles(head)).length)
+          throw new Error("Created Sandbox workspace is not empty");
+      }
+      const prepared = await transfer(head, files, actor, revision, publish);
       for (const file of files)
         if ((await client.downloadFile(prepared, file.path)) !== file.content)
           throw new Error(

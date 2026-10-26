@@ -287,6 +287,18 @@ export const pearlTools = [
     ["command", "args"],
   ),
   tool(
+    "sandbox_run_check",
+    "Request one-use approval for an exact check in the selected Nebius Sandbox branch. The check runs remotely with no network and its file writes are discarded. Only a zero exit code is a passing command check.",
+    { command: string, args: { type: "array", items: string } },
+    ["command", "args"],
+  ),
+  tool(
+    "sandbox_fork",
+    "Fork the selected Sandbox checkpoint into a new branch within the approved project scope, and select it.",
+    { name: string },
+    ["name"],
+  ),
+  tool(
     "start_terminal",
     "Request one-use approval for an exact project command that may stay running until stopped or the app closes. Its bounded output tail appears in the Room. The process runs in the project sandbox with no external network. Use read_terminal to inspect output and stop_terminal when finished. This does not by itself count as a successful check.",
     { command: string, args: { type: "array", items: string } },
@@ -306,7 +318,7 @@ export const pearlTools = [
   ),
   tool(
     "complete_work",
-    "Finish a coding turn with a user-facing summary and an honest status. This is checked against recorded writes, command results, and browser observations. Use after project edits instead of ending with plain text. A done status requires a successful command check after the latest edit, a clean browser check after the latest HTML or style edit, and no remaining work from the user's request. Use partial when checked work is only a slice of the requested scope.",
+    "Finish a coding turn with a user-facing summary and an honest status. This is checked against recorded writes and checks. Use after edits instead of ending with plain text. A done status requires a successful command check after the latest edit and, in local mode when available, a clean browser check after the latest HTML or style edit. Sandbox mode uses an approved sandbox_run_check and keeps local project files unchanged until synchronization. Use partial when checked work is only a slice of the requested scope.",
     {
       status: {
         type: "string",

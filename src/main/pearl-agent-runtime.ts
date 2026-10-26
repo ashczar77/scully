@@ -28,7 +28,12 @@ export type PearlAgentHost = {
   observe: (chat: PearlChat, call: PearlToolCall, observation: string) => void;
   execute: (chat: PearlChat, call: PearlToolCall) => Promise<ActionDisposition>;
   finish: (chat: PearlChat, text: string, fallbackModel?: string) => void;
-  pause: (chat: PearlChat, reason: string, kind: PearlPauseReason) => void;
+  pause: (
+    chat: PearlChat,
+    reason: string,
+    kind: PearlPauseReason,
+    draft?: string,
+  ) => void;
   needsCheck: (chat: PearlChat) => boolean;
   needsBrowserCheck?: (chat: PearlChat) => boolean;
   needsCompletion: (chat: PearlChat) => boolean;
@@ -126,6 +131,7 @@ const controlActions = new Set([
   "mcp_call_tool",
   "edit_files",
   "run_command",
+  "sandbox_run_check",
   "start_terminal",
   "preview_app",
   "ask_user",
@@ -294,8 +300,9 @@ export async function runPearlAgentTurn(
         }
         host.pause(
           chat,
-          "Pearl changed project files but did not provide an evidence-backed completion. The actions are saved. Continue to finish or give a new instruction.",
+          "Pearl's remote file edits and check results are saved. Her draft reply was not a completion record, so the task paused before marking it done. Continue asks Pearl to finish from the saved checkpoint, or send a new instruction.",
           "completion_missing",
+          result.text,
         );
         return;
       }

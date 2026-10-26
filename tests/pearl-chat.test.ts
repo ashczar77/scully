@@ -2364,6 +2364,7 @@ it("requires an evidence-backed completion after project edits", async () => {
   const paused = await settled(f.store, chat.id);
   expect(paused.status).toBe("paused");
   expect(paused.pauseKind).toBe("completion_missing");
+  expect(paused.pausedDraft).toBe("The task is complete.");
   expect(
     paused.messages.some(
       (message) =>

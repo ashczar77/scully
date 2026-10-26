@@ -1,6 +1,30 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { DesktopAPI } from "../shared/contracts";
 const api: DesktopAPI = {
+  pearlSandboxConnection: () => ipcRenderer.invoke("pearl:sandbox:connection"),
+  configurePearlSandbox: (key, projectId) =>
+    ipcRenderer.invoke("pearl:sandbox:configure", key, projectId),
+  pearlSandboxImages: () => ipcRenderer.invoke("pearl:sandbox:images"),
+  preparePearlSandbox: (id, imageId) =>
+    ipcRenderer.invoke("pearl:sandbox:prepare", id, imageId),
+  startPearlSandbox: (id) => ipcRenderer.invoke("pearl:sandbox:start", id),
+  reconcilePearlSandbox: (id) =>
+    ipcRenderer.invoke("pearl:sandbox:reconcile", id),
+  forkPearlSandbox: (id, name) =>
+    ipcRenderer.invoke("pearl:sandbox:fork", id, name),
+  switchPearlSandboxBranch: (id, branchId) =>
+    ipcRenderer.invoke("pearl:sandbox:switch", id, branchId),
+  leavePearlSandbox: (id) => ipcRenderer.invoke("pearl:sandbox:leave", id),
+  reviewPearlSandboxSync: (id) =>
+    ipcRenderer.invoke("pearl:sandbox:review-sync", id),
+  approvePearlSandboxSync: (id, token) =>
+    ipcRenderer.invoke("pearl:sandbox:approve-sync", id, token),
+  reviewPearlSandboxFile: (id, path) =>
+    ipcRenderer.invoke("pearl:sandbox:file", id, path),
+  pearlSandboxSnapshot: (id) =>
+    ipcRenderer.invoke("pearl:sandbox:snapshot", id),
+  inspectPearlSandboxFile: (id, path) =>
+    ipcRenderer.invoke("pearl:sandbox:inspect-file", id, path),
   webSearchInfo: () => ipcRenderer.invoke("pearl:web:info"),
   configureWebSearch: (key) => ipcRenderer.invoke("pearl:web:configure", key),
   disconnectWebSearch: () => ipcRenderer.invoke("pearl:web:disconnect"),

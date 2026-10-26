@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Search, Sparkles } from "lucide-react";
+import type { ReactNode } from "react";
 import type { ModelOption } from "../shared/runs";
 import { starterModelOptions } from "../shared/model-options";
 
@@ -12,6 +13,8 @@ export function ModelPicker({
   catalogStatus,
   onRetry,
   recommendedIds,
+  noun = "model",
+  icon,
 }: {
   value: string;
   options: ModelOption[];
@@ -21,6 +24,8 @@ export function ModelPicker({
   catalogStatus?: "loading" | "ready" | "unavailable" | "disconnected";
   onRetry?: () => void;
   recommendedIds?: string[];
+  noun?: string;
+  icon?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -48,7 +53,7 @@ export function ModelPicker({
         ref={trigger}
         type="button"
         className="model-picker-trigger"
-        aria-label={`${label}: ${selected?.name || "Choose a model"}`}
+        aria-label={`${label}: ${selected?.name || `Choose a ${noun}`}`}
         aria-expanded={open}
         disabled={disabled || !choices.length}
         onClick={() => {
@@ -62,8 +67,8 @@ export function ModelPicker({
           setOpen(true);
         }}
       >
-        <Sparkles size={15} aria-hidden="true" />{" "}
-        <span>{selected?.name || "Choose a model"}</span>
+        {icon || <Sparkles size={15} aria-hidden="true" />}{" "}
+        <span>{selected?.name || `Choose a ${noun}`}</span>
       </button>
       {open && (
         <div
@@ -99,7 +104,7 @@ export function ModelPicker({
             </header>
             <label className="model-search">
               <Search size={16} aria-hidden="true" /> Search all available
-              models
+              {noun}s
               <input
                 ref={search}
                 value={query}
@@ -113,7 +118,7 @@ export function ModelPicker({
                   ? "Nebius model list could not be loaded. Suggested models are shown."
                   : catalogStatus === "disconnected"
                     ? "Connect Nebius to browse its full model list. Suggested models are shown."
-                    : `${options.length} models available`}
+                    : `${options.length} ${noun}s available`}
               {catalogStatus === "unavailable" && onRetry && (
                 <button type="button" className="text-button" onClick={onRetry}>
                   Retry
@@ -146,14 +151,14 @@ export function ModelPicker({
                     <h3>
                       {recommended.has(option.id)
                         ? "Recommended"
-                        : "Available models"}
+                        : `Available ${noun}s`}
                     </h3>
                   )}
                   {index > 0 &&
                     !query &&
                     !recommended.has(option.id) &&
                     recommended.has(filtered[index - 1].id) && (
-                      <h3>All models</h3>
+                      <h3>All {noun}s</h3>
                     )}
                   <button
                     type="button"
@@ -184,7 +189,7 @@ export function ModelPicker({
                   </button>
                 </div>
               ))}
-              {!filtered.length && <p>No models match this search.</p>}
+              {!filtered.length && <p>No {noun}s match this search.</p>}
             </div>
           </section>
         </div>

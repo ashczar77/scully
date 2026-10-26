@@ -199,3 +199,52 @@ it("flags denied commands and browser failures in the collapsed summary", () => 
   fireEvent.click(within(details).getByText("Activity"));
   expect(within(details).getAllByText(/needs attention/)).toHaveLength(2);
 });
+
+it("formats JSON request and result details while preserving non-JSON output", () => {
+  const timeline = roomTimeline([
+    { id: "user", role: "user", text: "Inspect", at },
+    {
+      id: "request",
+      role: "assistant",
+      text: "",
+      toolCalls: [
+        {
+          id: "file",
+          name: "read_file",
+          arguments: '{"path":"src/main.ts","options":{"lines":5}}',
+        },
+      ],
+      at,
+    },
+    {
+      id: "result",
+      role: "tool",
+      toolCallId: "file",
+      toolName: "read_file",
+      text: '{"ok":true,"lines":["one","two"]}',
+      at,
+    },
+    {
+      id: "raw",
+      role: "tool",
+      toolCallId: "raw",
+      toolName: "run_command",
+      text: "{not valid JSON}",
+      at,
+    },
+  ]);
+  const activity = timeline.find((item) => item.kind === "activity");
+  if (!activity || activity.kind !== "activity")
+    throw new Error("Expected activity");
+  render(<PearlActivity group={activity.group} />);
+  const previews = Array.from(
+    document.querySelectorAll(".pearl-activity-detail pre"),
+  ).map((item) => item.textContent);
+  expect(previews).toContain(
+    '{\n  "path": "src/main.ts",\n  "options": {\n    "lines": 5\n  }\n}',
+  );
+  expect(previews).toContain(
+    '{\n  "ok": true,\n  "lines": [\n    "one",\n    "two"\n  ]\n}',
+  );
+  expect(previews).toContain("{not valid JSON}");
+});

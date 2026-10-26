@@ -13,6 +13,7 @@ import { pathToFileURL } from "node:url";
 import { nebiusPearlModel } from "../engine/pearl-model";
 import { LocalMetrics, measured, type Operation } from "../shared/telemetry";
 import { PearlChatManager } from "./pearl-chat-manager";
+import { PearlSandboxService } from "./pearl-sandbox";
 import { IsolatedPearlBrowser } from "./pearl-browser";
 import { PearlChatStore } from "./pearl-chat-store";
 import { roomChat, roomResult } from "./pearl-chat-view";
@@ -198,6 +199,45 @@ app
       undefined,
       undefined,
       remoteMcp,
+      new PearlSandboxService(app.getPath("userData")),
+    );
+
+    ipcMain.handle("pearl:sandbox:connection", (event) => {
+      trusted(event);
+      return pearl!.sandboxConnection();
+    });
+    handle("pearl:sandbox:configure", (_event, key, projectId) =>
+      pearl!.configureSandbox(key, projectId),
+    );
+    handle("pearl:sandbox:images", () => pearl!.sandboxImages());
+    handle("pearl:sandbox:prepare", (_event, id, imageId) =>
+      pearl!.prepareSandbox(id, imageId),
+    );
+    handle("pearl:sandbox:start", (_event, id) => pearl!.startSandbox(id));
+    handle("pearl:sandbox:reconcile", (_event, id) =>
+      pearl!.reconcileSandbox(id),
+    );
+    handle("pearl:sandbox:fork", (_event, id, name) =>
+      pearl!.forkSandbox(id, name),
+    );
+    handle("pearl:sandbox:switch", (_event, id, branchId) =>
+      pearl!.switchSandboxBranch(id, branchId),
+    );
+    handle("pearl:sandbox:leave", (_event, id) => pearl!.leaveSandbox(id));
+    handle("pearl:sandbox:review-sync", (_event, id) =>
+      pearl!.reviewSandboxSync(id),
+    );
+    handle("pearl:sandbox:approve-sync", (_event, id, token) =>
+      pearl!.approveSandboxSync(id, token),
+    );
+    handle("pearl:sandbox:file", (_event, id, path) =>
+      pearl!.reviewSandboxFile(id, path),
+    );
+    handle("pearl:sandbox:snapshot", (_event, id) =>
+      pearl!.sandboxSnapshot(id),
+    );
+    handle("pearl:sandbox:inspect-file", (_event, id, path) =>
+      pearl!.inspectSandboxFile(id, path),
     );
 
     ipcMain.handle("pearl:mcp:info", (event) => {
@@ -275,7 +315,10 @@ app
       });
       return result.canceled
         ? null
-        : pearl!.chooseProject(id, result.filePaths[0]);
+        : pearl!.chooseProject(
+            id == null ? pearl!.openNewChat().id : id,
+            result.filePaths[0],
+          );
     });
     handle("pearl:project:approve", (_event, id, approved) =>
       pearl!.approveProject(id, approved),

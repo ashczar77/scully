@@ -70,7 +70,7 @@ function fallbackFiles(binding: ProjectWorkspace): {
   };
 }
 
-function candidateFiles(binding: ProjectWorkspace): {
+export function candidateFiles(binding: ProjectWorkspace): {
   paths: string[];
   truncated: boolean;
 } {

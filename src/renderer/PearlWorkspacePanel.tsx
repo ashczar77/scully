@@ -23,7 +23,10 @@ import type {
 } from "../shared/pearl-workspace";
 import { PearlCodePreview } from "./PearlCodePreview";
 
-export type Inspector = { kind: "files" | "git" | "review"; turnId?: string };
+export type Inspector = {
+  kind: "files" | "git" | "review" | "sandbox";
+  turnId?: string;
+};
 type Line = { kind: "same" | "added" | "removed"; text: string };
 
 function fileIcon(path: string, size = 15) {

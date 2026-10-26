@@ -123,8 +123,10 @@ export type PearlChat = {
   retryHint?: "interrupted_response" | "provider_connection";
   pauseKind?: PearlPauseReason;
   streamingText?: string;
+  pausedDraft?: string;
   error?: string;
   taskChanges?: import("./pearl-workspace").TaskChangeSet[];
+  sandbox?: import("./pearl-sandbox").PearlSandboxState;
 };
 
 export type PearlChatSummary = Pick<
@@ -133,6 +135,38 @@ export type PearlChatSummary = Pick<
 >;
 
 export type PearlChatAPI = {
+  pearlSandboxConnection: () => Promise<
+    import("./pearl-sandbox").PearlSandboxConnection
+  >;
+  configurePearlSandbox: (
+    key: string,
+    projectId: string,
+  ) => Promise<import("./pearl-sandbox").PearlSandboxConnection>;
+  pearlSandboxImages: () => Promise<
+    import("./pearl-sandbox").PearlSandboxImageList
+  >;
+  preparePearlSandbox: (id: string, imageId: string) => Promise<PearlChat>;
+  startPearlSandbox: (id: string) => Promise<PearlChat>;
+  reconcilePearlSandbox: (id: string) => Promise<PearlChat>;
+  forkPearlSandbox: (id: string, name: string) => Promise<PearlChat>;
+  switchPearlSandboxBranch: (
+    id: string,
+    branchId: string,
+  ) => Promise<PearlChat>;
+  leavePearlSandbox: (id: string) => Promise<PearlChat>;
+  reviewPearlSandboxSync: (id: string) => Promise<PearlChat>;
+  approvePearlSandboxSync: (id: string, token: string) => Promise<PearlChat>;
+  reviewPearlSandboxFile: (
+    id: string,
+    path: string,
+  ) => Promise<import("./pearl-workspace").FileReview>;
+  pearlSandboxSnapshot: (
+    id: string,
+  ) => Promise<import("./pearl-sandbox").PearlSandboxSnapshot>;
+  inspectPearlSandboxFile: (
+    id: string,
+    path: string,
+  ) => Promise<import("./pearl-workspace").FileReview>;
   remoteMcpInfo?: () => Promise<RemoteMcpInfo>;
   connectRemoteMcp?: (
     endpoint: string,
@@ -155,7 +189,7 @@ export type PearlChatAPI = {
   restorePearlChat: (id: string) => Promise<PearlChat>;
   deletePearlChatPermanently: (id: string) => Promise<void>;
   sendPearlMessage: (id: string, text: string) => Promise<PearlChat>;
-  choosePearlProject: (id: string) => Promise<PearlChat | null>;
+  choosePearlProject: (id?: string) => Promise<PearlChat | null>;
   approvePearlProject: (id: string, approved: boolean) => Promise<PearlChat>;
   decidePearlTool: (
     id: string,
@@ -234,16 +268,20 @@ export function currentTurnEvidence(chat: PearlChat): {
         "edit_files",
       ].includes(message.toolName || "") &&
       message.toolName !== "run_command" &&
+      message.toolName !== "sandbox_run_check" &&
       message.toolName !== "browser_check" &&
       message.toolName !== "preview_app"
     )
       continue;
-    if (message.toolName === "run_command") latestSuccessfulCommand = -1;
+    if (["run_command", "sandbox_run_check"].includes(message.toolName || ""))
+      latestSuccessfulCommand = -1;
     if (["browser_check", "preview_app"].includes(message.toolName || ""))
       latestSuccessfulBrowser = -1;
     try {
       const result = JSON.parse(message.text) as Record<string, unknown>;
-      if (message.toolName === "run_command") {
+      if (
+        ["run_command", "sandbox_run_check"].includes(message.toolName || "")
+      ) {
         if (typeof result.exitCode === "number") {
           commandsCompleted++;
           latestSuccessfulCommand = result.exitCode === 0 ? index : -1;
@@ -334,7 +372,8 @@ export function needsPostEditCheck(chat: PearlChat): boolean {
         /* Rejected and invalid actions are not completed writes. */
       }
     }
-    if (message.toolName !== "run_command") continue;
+    if (!["run_command", "sandbox_run_check"].includes(message.toolName || ""))
+      continue;
     if (message.text.startsWith("User denied this command.")) {
       latestDenial = index;
       continue;

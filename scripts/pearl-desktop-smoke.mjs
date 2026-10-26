@@ -24,6 +24,12 @@ try {
   await page
     .getByRole("heading", { name: "What can I help you with?" })
     .waitFor();
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Choose a project folder" })
+      .isVisible(),
+    true,
+  );
   await page.waitForFunction(() =>
     [
       ...document.querySelectorAll(".pearl-brand img, .pearl-welcome-mark"),
@@ -170,8 +176,10 @@ try {
   assert.deepEqual(exposed, [
     "answerPearlQuestion",
     "approvePearlProject",
+    "approvePearlSandboxSync",
     "archivePearlChat",
     "choosePearlProject",
+    "configurePearlSandbox",
     "configureSession",
     "configureWebSearch",
     "connectRemoteMcp",
@@ -180,7 +188,10 @@ try {
     "deletePearlChatPermanently",
     "disconnectRemoteMcp",
     "disconnectWebSearch",
+    "forkPearlSandbox",
     "getPearlChat",
+    "inspectPearlSandboxFile",
+    "leavePearlSandbox",
     "listPearlChats",
     "listPearlModels",
     "listPearlProjectFiles",
@@ -189,19 +200,28 @@ try {
     "pearlGitCommitFiles",
     "pearlGitDiff",
     "pearlGitView",
+    "pearlSandboxConnection",
+    "pearlSandboxImages",
+    "pearlSandboxSnapshot",
+    "preparePearlSandbox",
     "readPearlProjectFile",
+    "reconcilePearlSandbox",
     "remoteMcpInfo",
     "renamePearlChat",
     "resizePearlTerminal",
     "restorePearlChat",
     "retryPearlChat",
+    "reviewPearlSandboxFile",
+    "reviewPearlSandboxSync",
     "reviewPearlTaskFile",
     "selectPearlModels",
     "sendPearlMessage",
     "sendPearlTerminalInput",
     "session",
+    "startPearlSandbox",
     "stopPearlChat",
     "stopPearlTerminal",
+    "switchPearlSandboxBranch",
     "undoPearlTask",
     "webSearchInfo",
   ]);
@@ -211,6 +231,10 @@ try {
   assert(channels.includes("pearl:send"));
   assert(channels.includes("pearl:web:configure"));
   assert(channels.includes("pearl:mcp:connect"));
+  assert(channels.includes("pearl:sandbox:prepare"));
+  assert(channels.includes("pearl:sandbox:snapshot"));
+  assert(channels.includes("pearl:sandbox:inspect-file"));
+  assert(channels.includes("pearl:sandbox:approve-sync"));
   assert(
     ![
       "workspace:load",

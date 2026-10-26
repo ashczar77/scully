@@ -190,6 +190,19 @@ export class SandboxRequestError extends Error {
     );
   }
 }
+export class SandboxHttpError extends Error {
+  constructor(
+    readonly status: number,
+    readonly operation: string,
+  ) {
+    super(`Sandbox ${operation} failed (HTTP ${status})`);
+  }
+}
+export class SandboxWorkspaceMissingError extends Error {
+  constructor() {
+    super("The selected Sandbox image has no /workspace directory");
+  }
+}
 export function imageTagPrefix(value: unknown): string {
   if (
     typeof value !== "string" ||
@@ -245,7 +258,14 @@ export function sandboxClient(
     });
     if (response.status !== (body ? 201 : 200) || !response.body) {
       await response.body?.cancel();
-      throw new Error("Sandbox HTTP failure");
+      const operation = path.startsWith("/inspect/")
+        ? "image inspection"
+        : path.startsWith("/images")
+          ? "image catalog"
+          : path.startsWith("/operations/")
+            ? "operation status"
+            : "request";
+      throw new SandboxHttpError(response.status, operation);
     }
     const reader = response.body.getReader();
     const chunks: Uint8Array[] = [];
@@ -268,9 +288,30 @@ export function sandboxClient(
       const id = uuid(imageId);
       if (directory !== "/workspace" && !directory.startsWith("/workspace/"))
         throw new Error("Image inspection is outside the project workspace");
-      const response = await request(
-        `/inspect/${id}/list?${new URLSearchParams({ path: directory })}`,
-      );
+      let response: unknown;
+      try {
+        response = await request(
+          `/inspect/${id}/list?${new URLSearchParams({ path: directory })}`,
+        );
+      } catch (error) {
+        if (
+          directory === "/workspace" &&
+          error instanceof SandboxHttpError &&
+          [404, 422].includes(error.status)
+        ) {
+          const root = record(await request(`/inspect/${id}/list?path=%2F`));
+          if (
+            root.path === "/" &&
+            Array.isArray(root.files) &&
+            !root.files.some((item) => {
+              const entry = record(item);
+              return entry.path === "workspace" && entry.is_dir === true;
+            })
+          )
+            throw new SandboxWorkspaceMissingError();
+        }
+        throw error;
+      }
       const value = record(response);
       if (
         value.path !== directory ||

@@ -11,6 +11,44 @@ import { PearlApp } from "../src/renderer/PearlApp";
 import type { DesktopAPI } from "../src/shared/contracts";
 import type { PearlChat } from "../src/shared/pearl-chat";
 
+it("shows project selection on the landing page and opens the picker for a fresh chat", async () => {
+  const created = {
+    id: "11111111-1111-1111-1111-111111111111",
+    title: "New chat",
+    createdAt: "now",
+    updatedAt: "now",
+    status: "idle",
+    questions: [],
+    messages: [],
+  } as PearlChat;
+  const createPearlChat = vi.fn(async () => created);
+  const choosePearlProject = vi.fn(
+    async () =>
+      ({
+        ...created,
+        project: { path: "/work/demo", dev: 1, ino: 1, approved: false },
+      }) as PearlChat,
+  );
+  const api = {
+    listPearlChats: vi.fn(async () => []),
+    session: vi.fn(async () => ({ configured: true })),
+    createPearlChat,
+    choosePearlProject,
+    onPearlChatUpdate: vi.fn(() => () => {}),
+  } as unknown as DesktopAPI;
+  render(<PearlApp api={api} />);
+  fireEvent.click(
+    screen.getByRole("button", { name: "Choose a project folder" }),
+  );
+  await waitFor(() =>
+    expect(choosePearlProject).toHaveBeenCalledWith(undefined),
+  );
+  expect(createPearlChat).not.toHaveBeenCalled();
+  expect(
+    screen.getByRole("button", { name: "Change project: demo" }),
+  ).toBeInTheDocument();
+});
+
 it("connects a remote MCP server in Settings without displaying its bearer token", async () => {
   const connectRemoteMcp = vi.fn(async () => ({
     connected: true,
@@ -894,6 +932,7 @@ it("shows a paused coding turn as resumable work", async () => {
     updatedAt: "2026-10-20T00:00:00.000Z",
     status: "paused",
     error: "The actions are saved. Continue to keep working.",
+    pausedDraft: "The task is complete.",
     messages: [],
     questions: [],
   };
@@ -913,6 +952,8 @@ it("shows a paused coding turn as resumable work", async () => {
   fireEvent.click(await screen.findByRole("button", { name: "Coding chat" }));
   expect(await screen.findByText("Work paused")).toBeInTheDocument();
   expect(screen.getByText(/actions are saved/)).toBeInTheDocument();
+  fireEvent.click(screen.getByText("View Pearl's unverified draft"));
+  expect(screen.getByText("The task is complete.")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   await waitFor(() => expect(retryPearlChat).toHaveBeenCalledWith(chat.id));
 });
