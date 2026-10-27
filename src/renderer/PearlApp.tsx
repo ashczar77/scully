@@ -32,6 +32,7 @@ import { PearlSettings } from "./PearlSettings";
 import { PearlSandboxPanel } from "./PearlSandboxPanel";
 import { PearlWorkspacePanel, type Inspector } from "./PearlWorkspacePanel";
 import { PearlSandboxInspector } from "./PearlSandboxInspector";
+import { PearlFileWorkbench, type WorkbenchFile } from "./PearlFileWorkbench";
 import scullyLogo from "../../assets/branding/scully-friendly-nerd-transparent-v1.png";
 import pearlPortrait from "../../assets/team-portrait-coordinator-v1.png";
 import "./pearl.css";
@@ -65,7 +66,11 @@ export function PearlApp({
     "chats",
   );
   const [inspectorWidth, setInspectorWidth] = useState(420);
+  const [inspectorCollapseReady, setInspectorCollapseReady] = useState(false);
+  const [workbenchFiles, setWorkbenchFiles] = useState<WorkbenchFile[]>([]);
+  const [workbenchActive, setWorkbenchActive] = useState("");
   const [sidebarWidth, setSidebarWidth] = useState(268);
+  const [sidebarCollapseReady, setSidebarCollapseReady] = useState(false);
   const [renameId, setRenameId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renameError, setRenameError] = useState("");
@@ -221,6 +226,8 @@ export function PearlApp({
     if (!created) return;
     activeId.current = created.id;
     setChat(created);
+    setWorkbenchFiles([]);
+    setInspector(null);
     setPanel("chats");
     await action(refreshChats);
     setDraft("");
@@ -231,6 +238,8 @@ export function PearlApp({
       if (!updated) return;
       activeId.current = updated.id;
       setChat(updated);
+      setWorkbenchFiles([]);
+      setInspector(null);
       setPanel("chats");
       await refreshChats();
     });
@@ -242,6 +251,7 @@ export function PearlApp({
     if (!selected) return;
     activeId.current = id;
     setChat(selected);
+    setWorkbenchFiles([]);
     setDraft("");
     setInspector(null);
   }
@@ -250,51 +260,116 @@ export function PearlApp({
       setPanel(null);
     setInspector(next);
   }
+  function openWorkbench(file: Omit<WorkbenchFile, "id">) {
+    const id = `${file.source}:${file.path}:${file.review ? "review" : "file"}`;
+    setWorkbenchFiles((current) => {
+      const index = current.findIndex((item) => item.id === id);
+      if (index < 0) return [...current, { ...file, id }];
+      return current.map((item) => (item.id === id ? { ...file, id } : item));
+    });
+    setWorkbenchActive(id);
+  }
+  function closeWorkbenchFiles(ids: string[]) {
+    const closed = new Set(ids);
+    setWorkbenchFiles((current) => {
+      const next = current.filter((file) => !closed.has(file.id));
+      if (closed.has(workbenchActive))
+        setWorkbenchActive(next.at(-1)?.id || "");
+      return next;
+    });
+  }
+  function closeWorkbenchFile(id: string) {
+    closeWorkbenchFiles([id]);
+  }
   function startResize(event: ReactPointerEvent<HTMLDivElement>) {
     event.preventDefault();
     const startX = event.clientX;
     const startWidth = inspectorWidth;
-    const move = (next: PointerEvent) =>
+    const rawWidth = (x: number) => startWidth + startX - x;
+    const move = (next: PointerEvent) => {
+      const raw = rawWidth(next.clientX);
+      const collapsing = raw < 240;
+      setInspectorCollapseReady(collapsing);
       setInspectorWidth(
-        Math.max(
-          300,
-          Math.min(
-            850,
-            window.innerWidth -
-              (panel === "chats" || panel === "archived" ? sidebarWidth : 0) -
-              380,
-            startWidth + startX - next.clientX,
-          ),
-        ),
+        collapsing
+          ? 72
+          : Math.max(
+              300,
+              Math.min(
+                850,
+                window.innerWidth -
+                  (panel === "chats" || panel === "archived"
+                    ? sidebarWidth
+                    : 0) -
+                  380,
+                raw,
+              ),
+            ),
       );
-    const stop = () => {
+    };
+    const stop = (next: PointerEvent) => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", cancel);
+      if (rawWidth(next.clientX) < 240) {
+        setInspector(null);
+        setInspectorWidth(startWidth);
+      }
+      setInspectorCollapseReady(false);
+    };
+    const cancel = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", cancel);
+      setInspectorWidth(startWidth);
+      setInspectorCollapseReady(false);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", stop, { once: true });
+    window.addEventListener("pointercancel", cancel, { once: true });
   }
   function startSidebarResize(event: ReactPointerEvent<HTMLDivElement>) {
     event.preventDefault();
     const startX = event.clientX;
     const startWidth = sidebarWidth;
-    const move = (next: PointerEvent) =>
+    const rawWidth = (x: number) => startWidth + x - startX;
+    const move = (next: PointerEvent) => {
+      const raw = rawWidth(next.clientX);
+      const collapsing = raw < 170;
+      setSidebarCollapseReady(collapsing);
       setSidebarWidth(
-        Math.max(
-          210,
-          Math.min(
-            460,
-            window.innerWidth - (inspector ? inspectorWidth : 0) - 380,
-            startWidth + next.clientX - startX,
-          ),
-        ),
+        collapsing
+          ? 72
+          : Math.max(
+              210,
+              Math.min(
+                460,
+                window.innerWidth - (inspector ? inspectorWidth : 0) - 380,
+                raw,
+              ),
+            ),
       );
-    const stop = () => {
+    };
+    const stop = (next: PointerEvent) => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", cancel);
+      if (rawWidth(next.clientX) < 170) {
+        setPanel(null);
+        setSidebarWidth(startWidth);
+      }
+      setSidebarCollapseReady(false);
+    };
+    const cancel = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", cancel);
+      setSidebarWidth(startWidth);
+      setSidebarCollapseReady(false);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", stop, { once: true });
+    window.addEventListener("pointercancel", cancel, { once: true });
   }
   async function rename(id: string) {
     const title = renameValue.replace(/\s+/g, " ").trim();
@@ -623,7 +698,7 @@ export function PearlApp({
         </nav>
         {shownSidebar === "chats" && (
           <aside
-            className={`pearl-sidebar${sidebarClosing ? " is-closing" : ""}`}
+            className={`pearl-sidebar${sidebarClosing ? " is-closing" : ""}${sidebarCollapseReady ? " is-collapse-ready" : ""}`}
             style={{ width: sidebarWidth }}
             id="pearl-chats-panel"
             aria-label="Chats panel"
@@ -646,7 +721,7 @@ export function PearlApp({
         )}
         {shownSidebar === "archived" && (
           <aside
-            className={`pearl-sidebar${sidebarClosing ? " is-closing" : ""}`}
+            className={`pearl-sidebar${sidebarClosing ? " is-closing" : ""}${sidebarCollapseReady ? " is-collapse-ready" : ""}`}
             style={{ width: sidebarWidth }}
             id="pearl-archived-panel"
             aria-label="Archived panel"
@@ -773,6 +848,11 @@ export function PearlApp({
                           (item.evidence.projectApproved ||
                             item.evidence.filesWritten > 0) && (
                             <div className="pearl-evidence">
+                              {item.evidence.executionMode === "sandbox"
+                                ? "Nebius Sandbox branch. "
+                                : item.evidence.executionMode === "local"
+                                  ? "Local project. "
+                                  : ""}
                               {item.evidence.filesWritten > 0 ? (
                                 <>
                                   {item.evidence.filesWritten} file
@@ -1186,6 +1266,16 @@ export function PearlApp({
                   <div ref={end} />
                 </div>
               </div>
+              {workbenchFiles.length > 0 && (
+                <PearlFileWorkbench
+                  files={workbenchFiles}
+                  activeId={workbenchActive}
+                  onSelect={setWorkbenchActive}
+                  onCloseFile={closeWorkbenchFile}
+                  onCloseFiles={closeWorkbenchFiles}
+                  onClose={() => setWorkbenchFiles([])}
+                />
+              )}
               {error && (
                 <div className="pearl-error" role="alert">
                   {error}
@@ -1199,6 +1289,13 @@ export function PearlApp({
                   onChange={setChat}
                   onSettings={() => setPanel("settings")}
                   onInspect={() => openInspector({ kind: "sandbox" })}
+                  onOpenFile={(review) =>
+                    openWorkbench({
+                      path: review.path,
+                      source: "Sandbox",
+                      review,
+                    })
+                  }
                 />
               )}
               <form
@@ -1270,9 +1367,17 @@ export function PearlApp({
                   api={api}
                   chat={chat}
                   closing={!inspector}
+                  collapseReady={inspectorCollapseReady}
                   width={inspectorWidth}
                   onResizeStart={startResize}
                   onClose={() => setInspector(null)}
+                  onOpenFile={(review) =>
+                    openWorkbench({
+                      path: review.path,
+                      source: "Sandbox",
+                      review,
+                    })
+                  }
                 />
               ) : (
                 <PearlWorkspacePanel
@@ -1280,9 +1385,16 @@ export function PearlApp({
                   chat={chat}
                   inspector={shownInspector}
                   closing={!inspector}
+                  collapseReady={inspectorCollapseReady}
                   width={inspectorWidth}
                   onResizeStart={startResize}
                   onClose={() => setInspector(null)}
+                  onOpenFile={(file) =>
+                    openWorkbench({
+                      ...file,
+                      source: "Local",
+                    })
+                  }
                   onUndo={(turnId) => {
                     if (
                       !window.confirm(

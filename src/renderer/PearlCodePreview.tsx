@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 const KEYWORDS = new Set([
   "async",
@@ -118,23 +118,55 @@ export function highlightedLine(line: string, kind: string): ReactNode[] {
 export function PearlCodePreview({
   path,
   content,
+  jumpLine,
 }: {
   path: string;
   content: string;
+  jumpLine?: number | null;
 }) {
   const kind = language(path);
-  const lines = content.split("\n");
+  const container = useRef<HTMLDivElement>(null);
+  const lines = useMemo(() => content.split("\n"), [content]);
+  const [first, setFirst] = useState(0);
+  const visible = 240;
+  const lineStep = Math.min(19, 8_000_000 / Math.max(1, lines.length));
+  const start = Math.max(0, Math.min(first, lines.length - 1));
+  const end = Math.min(lines.length, start + visible);
+  useEffect(() => {
+    if (jumpLine && container.current)
+      container.current.scrollTop = Math.max(0, jumpLine - 5) * lineStep;
+  }, [jumpLine, lineStep]);
   return (
-    <div className="pearl-code-preview" role="region" aria-label="Code preview">
+    <div
+      ref={container}
+      className="pearl-code-preview"
+      role="region"
+      aria-label="Code preview"
+      onScroll={(event) =>
+        setFirst(Math.floor(event.currentTarget.scrollTop / lineStep))
+      }
+    >
       <div className="pearl-code-lines">
-        {lines.map((line, index) => (
-          <div className="pearl-code-line" key={index}>
+        <div style={{ height: start * lineStep }} aria-hidden="true" />
+        {lines.slice(start, end).map((line, index) => (
+          <div className="pearl-code-line" key={start + index}>
             <span className="pearl-code-number" aria-hidden="true">
-              {index + 1}
+              {start + index + 1}
             </span>
-            <code>{highlightedLine(line, kind)}</code>
+            <code>
+              {highlightedLine(
+                line.length > 10_000
+                  ? `${line.slice(0, 10_000)} … [line clipped for display]`
+                  : line,
+                kind,
+              )}
+            </code>
           </div>
         ))}
+        <div
+          style={{ height: (lines.length - end) * lineStep }}
+          aria-hidden="true"
+        />
       </div>
     </div>
   );

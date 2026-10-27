@@ -231,12 +231,12 @@ export function sandboxCollaborationWorkspace(
     publish: OperationUpdate,
   ) {
     let head = imageId;
-    for (let start = 0; start < files.length; start += 100) {
+    const transferBatch = async (batch: SourceFile[]) => {
       const attached: Record<
         string,
         { uuid: string; uid: number; gid: number; mode: string }
       > = {};
-      for (const file of files.slice(start, start + 100)) {
+      for (const file of batch) {
         safePath(file.path);
         const upload = await client.upload(file.content);
         attached[`/workspace/${file.path}`] = {
@@ -257,13 +257,92 @@ export function sandboxCollaborationWorkspace(
         "upload",
         publish,
       );
-      if (!result.resultImage)
+      if (!result.commandPassed || !result.resultImage)
         throw new Error(
           "Sandbox upload produced no inspectable image; the previous checkpoint is still usable",
         );
       await client.inspectImage(result.resultImage);
       head = result.resultImage;
+    };
+    let batch: SourceFile[] = [];
+    let batchBytes = 0;
+    for (const file of files) {
+      safePath(file.path);
+      const fileBytes = Buffer.byteLength(file.content);
+      if (fileBytes <= 7 * 1024 * 1024) {
+        if (batch.length && batchBytes + fileBytes > 128 * 1024 * 1024) {
+          await transferBatch(batch);
+          batch = [];
+          batchBytes = 0;
+        }
+        batch.push(file);
+        batchBytes += fileBytes;
+        if (batch.length === 100) {
+          await transferBatch(batch);
+          batch = [];
+          batchBytes = 0;
+        }
+        continue;
+      }
+      if (batch.length) {
+        await transferBatch(batch);
+        batch = [];
+        batchBytes = 0;
+      }
+      const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+      const temporary = `scully-transfer-${randomUUID()}`;
+      const attached: Record<
+        string,
+        { uuid: string; uid: number; gid: number; mode: string }
+      > = {};
+      let start = 0;
+      let index = 0;
+      while (start < file.content.length) {
+        let end = Math.min(file.content.length, start + 3_000_000);
+        if (
+          end < file.content.length &&
+          /[\uD800-\uDBFF]/.test(file.content[end - 1])
+        )
+          end--;
+        let piece = file.content.slice(start, end);
+        while (Buffer.byteLength(piece) > 7 * 1024 * 1024) {
+          end = start + Math.floor((end - start) / 2);
+          if (/[\uD800-\uDBFF]/.test(file.content[end - 1])) end--;
+          piece = file.content.slice(start, end);
+        }
+        const upload = await client.upload(piece);
+        attached[`/workspace/${temporary}/${String(index).padStart(4, "0")}`] =
+          {
+            uuid: upload.uuid,
+            uid: 0,
+            gid: 0,
+            mode: "0600",
+          };
+        start = end;
+        index++;
+      }
+      if (index > 128)
+        throw new Error("Large Sandbox file requires too many transfer pieces");
+      const target = `/workspace/${file.path}`;
+      const tempPath = `/workspace/${temporary}`;
+      const script = `set -eu; mkdir -p ${quote(`/workspace/${dirname(file.path)}`)}; cat ${quote(tempPath)}/* > ${quote(target)}; rm -r ${quote(tempPath)}`;
+      const result = await submit(
+        head,
+        attached,
+        "/bin/sh",
+        ["-c", script],
+        true,
+        actor,
+        revision,
+        "upload",
+        publish,
+      );
+      if (!result.commandPassed || !result.resultImage)
+        throw new Error("Large Sandbox upload produced no usable checkpoint");
+      await client.inspectImage(result.resultImage);
+      head = result.resultImage;
     }
+    if (batch.length) await transferBatch(batch);
     return head;
   }
   return {

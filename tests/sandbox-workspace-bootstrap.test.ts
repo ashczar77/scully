@@ -82,3 +82,113 @@ it("rejects a base image containing files without submitting an operation", asyn
   ).rejects.toThrow(/empty \/workspace/);
   expect(submit).not.toHaveBeenCalled();
 });
+
+it("splits a large source file into bounded uploads and reassembles it in one saved checkpoint", async () => {
+  const content = "abc\n".repeat(2_300_000);
+  const uploads: string[] = [];
+  const requests: SandboxCommand[] = [];
+  const client = {
+    inspectImage: async () => {},
+    listFiles: async () => [],
+    upload: async (piece: string) => {
+      uploads.push(piece);
+      return { uuid: fileId, sha256: "digest", size: Buffer.byteLength(piece) };
+    },
+    submit: async (request: SandboxCommand) => {
+      requests.push(request);
+      return uploadOperation;
+    },
+    status: async () => ({
+      terminal: true,
+      commandPassed: true,
+      resultImage: uploaded,
+    }),
+    downloadFile: async () => content,
+  } as unknown as ReturnType<typeof sandboxClient>;
+  await sandboxCollaborationWorkspace(client).prepare(
+    [{ path: "src/large.ts", content }],
+    base,
+    "pearl",
+    "revision",
+    () => {},
+  );
+  expect(uploads.length).toBeGreaterThan(1);
+  expect(uploads.join("")).toBe(content);
+  expect(uploads.every((piece) => Buffer.byteLength(piece) < 8_388_608)).toBe(
+    true,
+  );
+  expect(requests).toHaveLength(1);
+  expect(requests[0].command).toBe("/bin/sh");
+  expect(requests[0].args.join(" ")).toContain("src/large.ts");
+  expect(requests[0].saveChanges).toBe(true);
+});
+
+it("quotes untrusted large file names in the remote assembly command", async () => {
+  const content = "x".repeat(7 * 1024 * 1024 + 1);
+  const requests: SandboxCommand[] = [];
+  const client = {
+    inspectImage: async () => {},
+    listFiles: async () => [],
+    upload: async () => ({ uuid: fileId, sha256: "digest", size: 1 }),
+    submit: async (request: SandboxCommand) => {
+      requests.push(request);
+      return uploadOperation;
+    },
+    status: async () => ({
+      terminal: true,
+      commandPassed: true,
+      resultImage: uploaded,
+    }),
+    downloadFile: async () => content,
+  } as unknown as ReturnType<typeof sandboxClient>;
+  const path = "src/$(touch marker).ts";
+  await sandboxCollaborationWorkspace(client).prepare(
+    [{ path, content }],
+    base,
+    "pearl",
+    "revision",
+    () => {},
+  );
+  expect(requests[0].command).toBe("/bin/sh");
+  expect(requests[0].args[1]).toContain("'/workspace/src/$(touch marker).ts'");
+});
+
+it("splits a large project into checkpoint batches below the layer byte limit", async () => {
+  const content = "x".repeat(6 * 1024 * 1024);
+  const files = Array.from({ length: 23 }, (_, index) => ({
+    path: `file-${index}.txt`,
+    content,
+  }));
+  const requests: SandboxCommand[] = [];
+  const client = {
+    inspectImage: async () => {},
+    listFiles: async () => [],
+    upload: async () => ({
+      uuid: fileId,
+      sha256: "digest",
+      size: content.length,
+    }),
+    submit: async (request: SandboxCommand) => {
+      requests.push(request);
+      return uploadOperation;
+    },
+    status: async () => ({
+      terminal: true,
+      commandPassed: true,
+      resultImage: uploaded,
+    }),
+    downloadFile: async () => content,
+  } as unknown as ReturnType<typeof sandboxClient>;
+  await sandboxCollaborationWorkspace(client).prepare(
+    files,
+    base,
+    "pearl",
+    "revision",
+    () => {},
+  );
+  expect(requests).toHaveLength(2);
+  expect(requests[0].image).toBe(base);
+  expect(requests[1].image).toBe(uploaded);
+  expect(Object.keys(requests[0].files || {})).toHaveLength(21);
+  expect(Object.keys(requests[1].files || {})).toHaveLength(2);
+});

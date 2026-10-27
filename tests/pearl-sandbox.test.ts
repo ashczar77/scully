@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import {
   mkdtempSync,
@@ -26,6 +26,8 @@ import {
   SandboxWorkspaceMissingError,
 } from "../src/engine/sandbox";
 import type { CollaborationWorkspace } from "../src/main/collaboration-workspace";
+import type { PearlModel } from "../src/engine/pearl-model";
+import { PearlWebAccess, type PearlWebProvider } from "../src/main/pearl-web";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -128,6 +130,60 @@ it("requires explicit upload review and excludes private paths", async () => {
   );
 });
 
+it("lists approved Sandbox files in pages and rejects invalid offsets", async () => {
+  const f = fixture();
+  for (let index = 0; index < 502; index++)
+    writeFileSync(
+      join(f.project, `file-${String(index).padStart(3, "0")}.txt`),
+      "x",
+    );
+  await f.service.images();
+  f.service.prepare(f.chat, f.base);
+  await f.service.start(f.chat, () => {});
+  const first = await f.service.list(f.chat, "", 0);
+  expect(first.entries).toHaveLength(500);
+  expect(first.nextOffset).toBe(500);
+  const second = await f.service.list(f.chat, "", 500);
+  expect(second.entries.map((entry) => entry.name)).toEqual([
+    "file-500.txt",
+    "file-501.txt",
+    "main.ts",
+  ]);
+  expect(second.nextOffset).toBeNull();
+  await expect(f.service.list(f.chat, "", -1)).rejects.toThrow(/offset/);
+  await expect(f.service.list(f.chat, ".env", 0)).rejects.toThrow();
+});
+
+it("searches unchanged snapshot text locally and reads changed remote files", async () => {
+  const f = fixture();
+  await f.service.images();
+  f.service.prepare(f.chat, f.base);
+  await f.service.start(f.chat, () => {});
+  const download = vi.spyOn(f.client, "downloadFile");
+  const unchanged = await f.service.search(f.chat, "", "value");
+  expect(unchanged.matches).toEqual([
+    { path: "main.ts", line: 1, text: "export const value = 1;" },
+  ]);
+  expect(download).not.toHaveBeenCalled();
+  const read = await f.service.read(f.chat, "main.ts");
+  await f.service.write(
+    f.chat,
+    "main.ts",
+    "export const value = 2;\n",
+    read.sha256,
+    () => {},
+  );
+  download.mockClear();
+  const changed = await f.service.search(f.chat, "", "value = 2");
+  expect(changed.matches).toEqual([
+    { path: "main.ts", line: 1, text: "export const value = 2;" },
+  ]);
+  expect(download).toHaveBeenCalledWith(
+    f.chat.sandbox?.branches[0].headImage,
+    "main.ts",
+  );
+});
+
 it("inspects the saved remote branch without granting sync review or trusting a changed remote file", async () => {
   const f = fixture();
   await f.service.images();
@@ -209,6 +265,57 @@ it("keeps saved Sandbox inspection available during Pearl's turn without allowin
   }
 });
 
+it("does not query a stale Sandbox after the selected project changes", async () => {
+  const f = fixture();
+  await f.service.images();
+  f.service.prepare(f.chat, f.base);
+  const other = join(f.project, "..", "other-project");
+  mkdirSync(other);
+  writeFileSync(join(other, "main.ts"), "export const other = true;\n");
+  f.chat.project = {
+    ...bindProjectWorkspace(other, "existing", f.data),
+    approved: true,
+  };
+  expect(() => f.service.snapshotView(f.chat)).not.toThrow();
+  expect(f.service.snapshotView(f.chat).files).toEqual([]);
+});
+
+it("clears a prepared upload when the chat selects a different project", async () => {
+  const f = fixture();
+  const store = new PearlChatStore(join(f.data, "project-change.sqlite"));
+  try {
+    const manager = new PearlChatManager(
+      store,
+      f.data,
+      () => null,
+      () => {},
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      f.service,
+    );
+    await f.service.images();
+    f.service.prepare(f.chat, f.base);
+    store.save(f.chat);
+    const other = join(f.project, "..", "replacement-project");
+    mkdirSync(other);
+    const changed = manager.chooseProject(f.chat.id, other);
+    expect(changed.sandbox).toBeUndefined();
+    expect(changed.project?.approved).toBe(false);
+    manager.approveProject(f.chat.id, true);
+    expect(manager.sandboxSnapshot(f.chat.id).files).toEqual([]);
+  } finally {
+    store.close();
+  }
+});
+
 it("rejects unlisted images and keeps secret or linked files out of the snapshot", async () => {
   const f = fixture();
   writeFileSync(
@@ -228,7 +335,7 @@ it("rejects unlisted images and keeps secret or linked files out of the snapshot
   expect(f.images.get(f.base)).toEqual({});
 });
 
-it("excludes paths the remote transfer API cannot represent", async () => {
+it("includes ordinary filenames with spaces in the remote review", async () => {
   const f = fixture();
   writeFileSync(
     join(f.project, "space name.ts"),
@@ -238,8 +345,38 @@ it("excludes paths the remote transfer API cannot represent", async () => {
   f.service.prepare(f.chat, f.base);
   expect(f.chat.sandbox?.manifest.map((file) => file.path)).toEqual([
     "main.ts",
+    "space name.ts",
   ]);
-  expect(f.chat.sandbox?.excluded).toContain("space name.ts");
+  expect(f.chat.sandbox?.excluded).not.toContain("space name.ts");
+});
+
+it("includes source files larger than one megabyte and tracked configuration files", async () => {
+  const f = fixture();
+  writeFileSync(join(f.project, "large.ts"), "x".repeat(1_200_000));
+  writeFileSync(join(f.project, ".prettierrc"), "{}\n");
+  await f.service.images();
+  f.service.prepare(f.chat, f.base);
+  expect(f.chat.sandbox?.manifest.map((file) => file.path)).toEqual([
+    ".prettierrc",
+    "large.ts",
+    "main.ts",
+  ]);
+  await f.service.start(f.chat, () => {});
+  expect((await f.service.read(f.chat, "large.ts")).content).toHaveLength(
+    1_200_000,
+  );
+});
+
+it("prepares a project with more than five hundred source files", async () => {
+  const f = fixture();
+  for (let index = 0; index < 501; index++)
+    writeFileSync(
+      join(f.project, `file-${index}.ts`),
+      `export const n = ${index};\n`,
+    );
+  await f.service.images();
+  f.service.prepare(f.chat, f.base);
+  expect(f.chat.sandbox?.manifest).toHaveLength(502);
 });
 
 it("recovers an uncertain workspace initialization before retrying upload", async () => {
@@ -304,6 +441,8 @@ it("counts only a successful remote check after the latest Sandbox edit", () => 
   expect(currentTurnEvidence(f.chat).successfulCommandAfterLatestWrite).toBe(
     false,
   );
+  f.chat.sandbox = { active: true } as PearlChat["sandbox"];
+  expect(currentTurnEvidence(f.chat).executionMode).toBe("sandbox");
   expect(needsPostEditCheck(f.chat)).toBe(true);
   f.chat.messages.push({
     id: "passed",
@@ -318,7 +457,7 @@ it("counts only a successful remote check after the latest Sandbox edit", () => 
   expect(needsPostEditCheck(f.chat)).toBe(false);
 });
 
-it("exposes only remote file and check tools while a Sandbox task is active", async () => {
+it("exposes remote file and check tools while a Sandbox task is active", async () => {
   const f = fixture();
   const store = new PearlChatStore(join(f.data, "chats.sqlite"));
   try {
@@ -355,6 +494,170 @@ it("exposes only remote file and check tools while a Sandbox task is active", as
   } finally {
     store.close();
   }
+});
+
+it("can search current public information in Sandbox without sending project files", async () => {
+  const f = fixture();
+  const store = new PearlChatStore(join(f.data, "sandbox-web.sqlite"));
+  const provider: PearlWebProvider = {
+    search: vi.fn(async () => [
+      {
+        title: "Current forecast",
+        url: "https://example.org/weather",
+        excerpt: "Current conditions are clear.",
+      },
+    ]),
+    read: vi.fn(async () => "Current conditions are clear."),
+  };
+  const responses = [
+    {
+      kind: "tool" as const,
+      text: "",
+      call: {
+        id: "private-search",
+        name: "search_web",
+        arguments: JSON.stringify({ query: "api_key=private-value" }),
+      },
+    },
+    {
+      kind: "tool" as const,
+      text: "",
+      call: {
+        id: "search",
+        name: "search_web",
+        arguments: JSON.stringify({ query: "New York weather today" }),
+      },
+    },
+    {
+      kind: "reply" as const,
+      text: "Current conditions are clear. [Forecast](https://example.org/weather)",
+    },
+  ];
+  const complete = vi.fn(
+    async (_input: Parameters<PearlModel["complete"]>[0]) => {
+      const next = responses.shift();
+      if (!next) throw new Error("No model fixture response");
+      return next;
+    },
+  );
+  try {
+    const manager = new PearlChatManager(
+      store,
+      f.data,
+      () => ({
+        key: "fixture-key",
+        model: "fixture-model",
+        outputTokens: 8192,
+      }),
+      () => {},
+      { complete } as PearlModel,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      new PearlWebAccess(provider),
+      () => true,
+      undefined,
+      undefined,
+      undefined,
+      f.service,
+    );
+    await f.service.images();
+    f.service.prepare(f.chat, f.base);
+    await f.service.start(f.chat, () => {});
+    store.save(f.chat);
+    manager.send(f.chat.id, "What is the weather today in New York?");
+    await vi.waitFor(() => expect(store.get(f.chat.id).status).toBe("idle"));
+    expect(complete.mock.calls[0][0].allowedTools).toContain("search_web");
+    expect(complete.mock.calls[0][0].allowedTools).not.toContain("run_command");
+    expect(provider.search).toHaveBeenCalledWith(
+      "New York weather today",
+      expect.any(AbortSignal),
+    );
+    expect(provider.search).toHaveBeenCalledTimes(1);
+    expect(
+      store
+        .get(f.chat.id)
+        .messages.some((message) =>
+          message.text.includes("Invalid web search query"),
+        ),
+    ).toBe(true);
+    expect(store.get(f.chat.id).messages.at(-1)?.text).toContain(
+      "https://example.org/weather",
+    );
+  } finally {
+    store.close();
+  }
+});
+
+it("keeps the selected Sandbox active for follow-up turns in the same chat", async () => {
+  const f = fixture();
+  const store = new PearlChatStore(join(f.data, "follow-up.sqlite"));
+  try {
+    const complete = vi.fn(
+      async (_input: Parameters<PearlModel["complete"]>[0]) => ({
+        kind: "reply" as const,
+        text: "The branch is ready.",
+      }),
+    );
+    const manager = new PearlChatManager(
+      store,
+      f.data,
+      () => ({
+        key: "fixture-key",
+        model: "fixture-model",
+        outputTokens: 8192,
+      }),
+      () => {},
+      { complete } as PearlModel,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      f.service,
+    );
+    await f.service.images();
+    f.service.prepare(f.chat, f.base);
+    await f.service.start(f.chat, () => {});
+    store.save(f.chat);
+    manager.send(f.chat.id, "Inspect the branch");
+    await vi.waitFor(() => expect(store.get(f.chat.id).status).toBe("idle"));
+    expect(store.get(f.chat.id).sandbox?.active).toBe(true);
+    manager.send(f.chat.id, "Answer a follow-up about this project");
+    await vi.waitFor(() => expect(complete).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(store.get(f.chat.id).status).toBe("idle"));
+    expect(complete.mock.calls[1][0].allowedTools).toContain(
+      "sandbox_run_check",
+    );
+  } finally {
+    store.close();
+  }
+});
+
+it("resumes an older synchronized checkpoint only when local files still match", async () => {
+  const f = fixture();
+  await f.service.images();
+  f.service.prepare(f.chat, f.base);
+  await f.service.start(f.chat, () => {});
+  const branchId = f.chat.sandbox!.activeBranchId!;
+  const selected = f.chat.sandbox!.branches[0];
+  selected.syncedHead = selected.headImage;
+  f.service.leave(f.chat);
+  writeFileSync(join(f.project, "main.ts"), "local change\n");
+  expect(() => f.service.switchBranch(f.chat, branchId)).toThrow(
+    /Local project differs/,
+  );
+  expect(f.chat.sandbox?.active).toBe(false);
+  writeFileSync(join(f.project, "main.ts"), "export const value = 1;\n");
+  f.service.switchBranch(f.chat, branchId);
+  expect(f.chat.sandbox?.active).toBe(true);
+  expect(f.chat.sandbox?.activeBranchId).not.toBe(branchId);
+  expect(f.chat.sandbox?.branches[0].syncedHead).toBeUndefined();
 });
 
 it("forks independent checkpoints and binds writes and checks to the selected revision", async () => {
@@ -502,7 +805,22 @@ it("synchronizes only reviewed branch changes and rejects reuse of the approval"
   await expect(f.service.approveSync(f.chat, token)).rejects.toThrow(
     /already used/,
   );
-  expect(() =>
-    f.service.switchBranch(f.chat, f.chat.sandbox!.activeBranchId),
-  ).toThrow(/already synchronized/);
+  expect(f.chat.sandbox?.branches).toHaveLength(1);
+  expect(f.chat.sandbox?.active).toBe(false);
+  f.service.switchBranch(f.chat, f.chat.sandbox!.activeBranchId);
+  const next = await f.service.read(f.chat, "main.ts");
+  await f.service.write(
+    f.chat,
+    "main.ts",
+    "export const value = 4;\n",
+    next.sha256,
+    () => {},
+  );
+  await f.service.reviewSync(f.chat);
+  expect(f.chat.sandbox?.pendingSync?.files).toMatchObject([
+    {
+      path: "main.ts",
+      beforeBytes: Buffer.byteLength("export const value = 3;\n"),
+    },
+  ]);
 });

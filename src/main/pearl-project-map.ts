@@ -44,14 +44,17 @@ const sourceExtensions = new Set([
 const declaration =
   /^(?:(?:export|pub|public|private|protected|static|async|default)\s+)*(?:(function|class|interface|type|enum|const|def|fn|func|struct|trait)\s+)([A-Za-z_$][\w$]*)\b/;
 
-function fallbackFiles(binding: ProjectWorkspace): {
+function fallbackFiles(
+  binding: ProjectWorkspace,
+  limit: number,
+): {
   paths: string[];
   truncated: boolean;
 } {
   const paths: string[] = [];
   const pending = [""];
   let visited = 0;
-  while (pending.length && paths.length <= 500 && visited < 1500) {
+  while (pending.length && paths.length <= limit && visited < limit * 3) {
     const dir = pending.pop()!;
     visited++;
     for (const name of readdirSync(join(binding.path, dir)).sort()) {
@@ -61,16 +64,20 @@ function fallbackFiles(binding: ProjectWorkspace): {
       if (stat.isSymbolicLink()) continue;
       if (stat.isDirectory()) pending.push(path);
       else if (stat.isFile()) paths.push(path);
-      if (paths.length > 500) break;
+      if (paths.length > limit) break;
     }
   }
   return {
     paths: paths.sort(),
-    truncated: pending.length > 0 || paths.length > 500 || visited >= 1500,
+    truncated:
+      pending.length > 0 || paths.length > limit || visited >= limit * 3,
   };
 }
 
-export function candidateFiles(binding: ProjectWorkspace): {
+export function candidateFiles(
+  binding: ProjectWorkspace,
+  limit = 500,
+): {
   paths: string[];
   truncated: boolean;
 } {
@@ -95,7 +102,7 @@ export function candidateFiles(binding: ProjectWorkspace): {
       {
         cwd: binding.path,
         timeout: 3000,
-        maxBuffer: 8_000_000,
+        maxBuffer: 32_000_000,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
         env: {
@@ -110,14 +117,14 @@ export function candidateFiles(binding: ProjectWorkspace): {
       },
     );
     const paths = output.split("\0").filter(Boolean).sort();
-    return { paths, truncated: paths.length > 500 };
+    return { paths, truncated: paths.length > limit };
   } catch (error) {
     const failure = error as NodeJS.ErrnoException & { stderr?: Buffer };
     if (
       failure.code === "ENOENT" ||
       String(failure.stderr || "").includes("not a git repository")
     )
-      return fallbackFiles(binding);
+      return fallbackFiles(binding, limit);
     throw new Error("Project map could not list Git files");
   }
 }

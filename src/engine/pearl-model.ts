@@ -122,12 +122,13 @@ export const pearlTools = [
   ),
   tool(
     "list_files",
-    "List project files. Paths are relative to the approved project.",
+    "List up to 500 project entries at a time. Use offset to continue through large directories. Paths are relative to the approved project.",
     {
       path: {
         type: "string",
         description: "Relative directory, or empty for project root",
       },
+      offset: { type: "integer", minimum: 0 },
     },
     ["path"],
   ),

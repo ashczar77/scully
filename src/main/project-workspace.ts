@@ -56,7 +56,7 @@ function inspect(binding: ProjectWorkspace, path: string): string | null {
       if (!stat.isDirectory())
         throw new Error(`Parent is not a directory: ${path}`);
     } else {
-      if (!stat.isFile() || stat.nlink !== 1 || stat.size > 8 * 1024 * 1024)
+      if (!stat.isFile() || stat.nlink !== 1 || stat.size > 64 * 1024 * 1024)
         throw new Error(`Unsupported project file: ${path}`);
       return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
         readFileSync(current),

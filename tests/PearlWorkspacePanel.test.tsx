@@ -37,6 +37,7 @@ it("renders added and removed lines from a task review", async () => {
     { kind: "same", text: "keep" },
   ]);
   const undo = vi.fn();
+  const onOpenFile = vi.fn();
   const api = {
     reviewPearlTaskFile: vi.fn(async () => ({
       path: "notes.txt",
@@ -54,18 +55,24 @@ it("renders added and removed lines from a task review", async () => {
       onResizeStart={() => {}}
       onClose={() => {}}
       onUndo={undo}
+      onOpenFile={onOpenFile}
     />,
   );
   fireEvent.click(screen.getByRole("button", { name: /modified notes.txt/ }));
   await waitFor(() =>
-    expect(screen.getByLabelText("File preview")).toHaveTextContent("old"),
+    expect(onOpenFile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        review: expect.objectContaining({ before: "old\n", after: "new\n" }),
+      }),
+    ),
   );
-  expect(screen.getByLabelText("File preview")).toHaveTextContent("new");
+  expect(screen.queryByLabelText("File preview")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Undo task changes" }));
   expect(undo).toHaveBeenCalledWith(turnId);
 });
 
 it("opens nested project files in a read-only preview", async () => {
+  const onOpenFile = vi.fn();
   const api = {
     listPearlProjectFiles: vi.fn(async (_id: string, path?: string) =>
       path
@@ -83,6 +90,7 @@ it("opens nested project files in a read-only preview", async () => {
       onResizeStart={() => {}}
       onClose={() => {}}
       onUndo={() => {}}
+      onOpenFile={onOpenFile}
     />,
   );
   await waitFor(() =>
@@ -90,17 +98,17 @@ it("opens nested project files in a read-only preview", async () => {
   );
   fireEvent.click(screen.getByRole("button", { name: "src" }));
   fireEvent.click(await screen.findByRole("button", { name: /app.ts/ }));
-  expect(await screen.findByLabelText("Code preview")).toHaveTextContent(
-    "const app = true;",
+  await waitFor(() =>
+    expect(onOpenFile).toHaveBeenCalledWith({
+      path: "src/app.ts",
+      content: "const app = true;",
+    }),
   );
-  expect(screen.getByLabelText("Code preview")).toHaveTextContent("1");
-  expect(
-    screen.getByLabelText("Code preview").querySelector(".pearl-token-keyword"),
-  ).toHaveTextContent("const");
   expect(screen.queryByRole("textbox")).toBeNull();
 });
 
 it("renders untrusted source as text and never activates markup in the preview", async () => {
+  const onOpenFile = vi.fn();
   const api = {
     listPearlProjectFiles: vi.fn(async () => [
       { path: "index.html", kind: "file", size: 32 },
@@ -118,18 +126,21 @@ it("renders untrusted source as text and never activates markup in the preview",
       onResizeStart={() => {}}
       onClose={() => {}}
       onUndo={() => {}}
+      onOpenFile={onOpenFile}
     />,
   );
   fireEvent.click(await screen.findByRole("button", { name: "index.html" }));
-  expect(await screen.findByLabelText("Code preview")).toHaveTextContent(
-    "<script>window.exploited = true</script>",
+  await waitFor(() =>
+    expect(onOpenFile).toHaveBeenCalledWith({
+      path: "index.html",
+      content: "<script>window.exploited = true</script>",
+    }),
   );
-  expect(
-    screen.getByLabelText("Code preview").querySelector("script"),
-  ).toBeNull();
+  expect(document.querySelector("script")).toBeNull();
 });
 
 it("shows Git branch, working changes and commits as a read-only timeline", async () => {
+  const onOpenFile = vi.fn();
   const api = {
     pearlGitView: vi.fn(async () => ({
       state: "ready",
@@ -158,6 +169,7 @@ it("shows Git branch, working changes and commits as a read-only timeline", asyn
       onResizeStart={() => {}}
       onClose={() => {}}
       onUndo={() => {}}
+      onOpenFile={onOpenFile}
     />,
   );
   expect(await screen.findByText("Update app")).toBeInTheDocument();
@@ -167,7 +179,12 @@ it("shows Git branch, working changes and commits as a read-only timeline", asyn
   fireEvent.click(
     (await screen.findAllByRole("button", { name: /src\/app.ts/ })).at(-1)!,
   );
-  expect(await screen.findByText("+new line")).toBeInTheDocument();
+  await waitFor(() =>
+    expect(onOpenFile).toHaveBeenCalledWith({
+      path: "src/app.ts",
+      content: "+new line",
+    }),
+  );
   expect(screen.queryByRole("button", { name: /Commit$/ })).toBeNull();
 });
 
@@ -193,6 +210,7 @@ it("loads the next folder page when the first page is full", async () => {
       onResizeStart={() => {}}
       onClose={() => {}}
       onUndo={() => {}}
+      onOpenFile={() => {}}
     />,
   );
   fireEvent.click(

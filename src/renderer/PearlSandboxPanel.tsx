@@ -1,10 +1,15 @@
 import { useEffect, useState } from "react";
-import { Box, ChevronDown, ChevronUp, GitBranch } from "lucide-react";
+import {
+  Box,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  GitBranch,
+} from "lucide-react";
 import type { DesktopAPI } from "../shared/contracts";
 import type { PearlChat } from "../shared/pearl-chat";
 import type { PearlSandboxImageList } from "../shared/pearl-sandbox";
 import type { FileReview } from "../shared/pearl-workspace";
-import { reviewLines } from "./PearlWorkspacePanel";
 import { ModelPicker } from "./ModelPicker";
 
 export function PearlSandboxPanel({
@@ -13,17 +18,18 @@ export function PearlSandboxPanel({
   onChange,
   onSettings,
   onInspect,
+  onOpenFile,
 }: {
   api: DesktopAPI;
   chat: PearlChat;
   onChange: (chat: PearlChat) => void;
   onSettings: () => void;
   onInspect?: () => void;
+  onOpenFile: (review: FileReview) => void;
 }) {
   const [catalog, setCatalog] = useState<PearlSandboxImageList | null>(null);
   const [image, setImage] = useState("");
   const [branchName, setBranchName] = useState("");
-  const [preview, setPreview] = useState<FileReview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [expanded, setExpanded] = useState(chat.sandbox?.status !== "ready");
@@ -35,6 +41,15 @@ export function PearlSandboxPanel({
     chat.status === "running" || chat.status === "awaiting_approval";
   const selected = sandbox?.branches.find(
     (item) => item.id === sandbox.activeBranchId,
+  );
+  const baselineFiles = new Map(
+    sandbox?.manifest.map((file) => [file.path, file.sha256]) || [],
+  );
+  const hasUnsyncedChanges = Boolean(
+    selected &&
+    Object.entries(selected.files).some(
+      ([path, digest]) => baselineFiles.get(path) !== digest,
+    ),
   );
   async function run(work: () => Promise<PearlChat>) {
     setBusy(true);
@@ -130,11 +145,12 @@ export function PearlSandboxPanel({
                 </button>
               ) : (
                 <>
-                  <label>
-                    Base image{" "}
+                  <div className="pearl-sandbox-choice">
+                    <span>Base image</span>
                     <ModelPicker
                       label="Sandbox base image"
                       noun="image"
+                      recommendedIds={[]}
                       icon={<Box size={15} />}
                       value={image}
                       options={catalog.images.map((item) => ({
@@ -143,7 +159,7 @@ export function PearlSandboxPanel({
                       }))}
                       onChange={setImage}
                     />
-                  </label>
+                  </div>
                   <button
                     type="button"
                     disabled={busy || !image}
@@ -165,10 +181,11 @@ export function PearlSandboxPanel({
           <>
             <p>
               Upload {sandbox.manifest.length} eligible files from the approved
-              project to Nebius Sandbox. {sandbox.excluded.length} paths are
-              excluded. Review this list before continuing.
+              project to Nebius Sandbox. {sandbox.excluded.length} candidate
+              paths are excluded. Git ignored paths are not scanned. Review this
+              list before continuing.
             </p>
-            <details>
+            <details className="pearl-sandbox-file-list">
               <summary>Files to upload ({sandbox.manifest.length})</summary>
               <ul>
                 {sandbox.manifest.map((file) => (
@@ -191,11 +208,12 @@ export function PearlSandboxPanel({
             <div className="pearl-sandbox-controls pearl-sandbox-upload-actions">
               {catalog ? (
                 <>
-                  <label>
-                    Base image{" "}
+                  <div className="pearl-sandbox-choice">
+                    <span>Base image</span>
                     <ModelPicker
                       label="Sandbox base image"
                       noun="image"
+                      recommendedIds={[]}
                       icon={<Box size={15} />}
                       value={image}
                       options={catalog.images.map((item) => ({
@@ -204,7 +222,7 @@ export function PearlSandboxPanel({
                       }))}
                       onChange={setImage}
                     />
-                  </label>
+                  </div>
                   {image !== sandbox.baseImage && (
                     <button
                       type="button"
@@ -257,11 +275,12 @@ export function PearlSandboxPanel({
         {sandbox?.status === "ready" && (
           <>
             <div className="pearl-sandbox-controls pearl-sandbox-branch-row">
-              <label>
-                Branch{" "}
+              <div className="pearl-sandbox-choice">
+                <span>Branch</span>
                 <ModelPicker
                   label="Sandbox branch"
                   noun="branch"
+                  recommendedIds={[]}
                   icon={<GitBranch size={15} />}
                   value={selected?.id || ""}
                   options={sandbox.branches.map((item) => ({
@@ -273,7 +292,7 @@ export function PearlSandboxPanel({
                     void run(() => api.switchPearlSandboxBranch(chat.id, id))
                   }
                 />
-              </label>
+              </div>
               <span
                 className={`pearl-sandbox-mode ${sandbox.active ? "remote" : "local"}`}
               >
@@ -290,12 +309,7 @@ export function PearlSandboxPanel({
               ) : (
                 <button
                   type="button"
-                  disabled={
-                    busy ||
-                    locked ||
-                    !selected ||
-                    selected.syncedHead === selected.headImage
-                  }
+                  disabled={busy || locked || !selected}
                   onClick={() =>
                     void run(() =>
                       api.switchPearlSandboxBranch(chat.id, selected!.id),
@@ -333,26 +347,31 @@ export function PearlSandboxPanel({
                 </button>
               </div>
             )}
-            {selected?.syncedHead === selected?.headImage && (
-              <p>
-                This branch is synchronized. Start a new chat for the next
-                Sandbox task.
-              </p>
-            )}
             <p>
               Checkpoint: {selected?.headImage || "Unavailable"}. Checks run
               remotely with one-use approval and discard their file writes.
             </p>
             {selected?.checks.length ? (
-              <p>
-                Latest check: {selected.checks.at(-1)?.command} (exit{" "}
+              <p
+                className={`pearl-sandbox-check ${selected.checks.at(-1)?.passed ? "passed" : "failed"}`}
+                role="status"
+              >
+                {selected.checks.at(-1)?.passed && (
+                  <CheckCircle2 size={16} aria-hidden="true" />
+                )}
+                {selected.checks.at(-1)?.passed
+                  ? "Command completed successfully"
+                  : "Command failed"}
+                : {selected.checks.at(-1)?.command}{" "}
+                {selected.checks.at(-1)?.args?.join(" ") || ""} (exit{" "}
                 {selected.checks.at(-1)?.exitCode ?? "unknown"})
               </p>
             ) : null}
             <button
               type="button"
-              disabled={
-                busy || locked || selected?.syncedHead === selected?.headImage
+              disabled={busy || locked || !hasUnsyncedChanges}
+              title={
+                !hasUnsyncedChanges ? "No unsynced Sandbox changes" : undefined
               }
               onClick={() =>
                 void run(() => api.reviewPearlSandboxSync(chat.id))
@@ -360,6 +379,11 @@ export function PearlSandboxPanel({
             >
               Review local sync
             </button>
+            {!hasUnsyncedChanges && (
+              <span className="pearl-sandbox-sync-hint">
+                No unsynced Sandbox changes
+              </span>
+            )}
             {sandbox.pendingSync && (
               <div className="pearl-sandbox-sync">
                 <strong>Local sync review</strong>
@@ -378,7 +402,7 @@ export function PearlSandboxPanel({
                           void api
                             .reviewPearlSandboxFile(chat.id, file.path)
                             .then((result) => {
-                              setPreview(result);
+                              onOpenFile(result);
                               void api.getPearlChat(chat.id).then(onChange);
                             })
                             .catch((cause) => setError(String(cause)));
@@ -392,43 +416,6 @@ export function PearlSandboxPanel({
                     </li>
                   ))}
                 </ul>
-                {preview && (
-                  <details open>
-                    <summary>{preview.path}</summary>
-                    {(preview.before || "").split("\n").length *
-                      (preview.after || "").split("\n").length <=
-                    160_000 ? (
-                      <pre className="pearl-diff pearl-sandbox-inline-diff">
-                        {reviewLines(
-                          preview.before || "",
-                          preview.after || "",
-                        ).map((line, index) => (
-                          <div className={line.kind} key={index}>
-                            <span>
-                              {line.kind === "added"
-                                ? "+"
-                                : line.kind === "removed"
-                                  ? "−"
-                                  : " "}
-                            </span>
-                            {line.text || " "}
-                          </div>
-                        ))}
-                      </pre>
-                    ) : (
-                      <div className="pearl-sandbox-diff">
-                        <div>
-                          <strong>Before</strong>
-                          <pre>{preview.before ?? "New file"}</pre>
-                        </div>
-                        <div>
-                          <strong>After</strong>
-                          <pre>{preview.after ?? ""}</pre>
-                        </div>
-                      </div>
-                    )}
-                  </details>
-                )}
                 <button
                   type="button"
                   disabled={

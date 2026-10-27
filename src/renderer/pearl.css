@@ -112,17 +112,58 @@
   gap: 10px;
   flex-wrap: wrap;
 }
-.pearl-sandbox-controls > label {
+.pearl-sandbox-choice {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  min-height: 36px;
+  flex: none;
 }
-.pearl-sandbox-panel .pearl-sandbox-controls button {
+.pearl-sandbox-choice > span {
+  white-space: nowrap;
+}
+.pearl-sandbox-panel .pearl-sandbox-controls > button {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
   min-height: 36px;
   box-sizing: border-box;
+}
+.pearl-sandbox-controls .model-picker-trigger {
+  min-height: 36px;
+  box-sizing: border-box;
+}
+.pearl-sandbox-branch-row .pearl-sandbox-mode {
+  min-height: 36px;
+  box-sizing: border-box;
+}
+.pearl-sandbox-sync-hint {
+  display: inline-block;
+  margin-left: 9px;
+  color: #91adb0;
+  font-size: 12px;
+}
+.pearl-sandbox-file-list {
+  margin-bottom: 12px;
+}
+.pearl-sandbox-file-list > summary {
+  display: inline-block;
+  cursor: pointer;
+}
+.pearl-sandbox-file-list > summary:focus-visible {
+  outline: none;
+  color: var(--pearl-teal);
+  text-decoration: underline;
+}
+.pearl-sandbox-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pearl-sandbox-check.passed {
+  color: #76dfac;
+}
+.pearl-sandbox-check.failed {
+  color: #f0b39d;
 }
 .pearl-sandbox-upload-actions {
   margin-top: 14px;
@@ -187,7 +228,9 @@
 .pearl-sandbox-inspector .pearl-inspector-item {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 8px;
+  text-align: left;
 }
 .pearl-sandbox-inspector .pearl-inspector-item span {
   overflow: hidden;
@@ -557,11 +600,194 @@
   box-shadow: inset 3px 0 var(--pearl-teal);
 }
 .pearl-main {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
   flex: 1;
   background: #10171b;
+}
+.pearl-file-workbench {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: #10191d;
+}
+.pearl-file-workbench-head,
+.pearl-file-workbench-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #36514e;
+}
+.pearl-file-workbench-head > button {
+  margin-left: auto;
+}
+.pearl-file-workbench-tabs {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  min-width: 0;
+  flex: 1;
+  scrollbar-width: thin;
+  scrollbar-color: #45615f transparent;
+}
+.pearl-file-workbench-tabs::-webkit-scrollbar {
+  height: 4px;
+}
+.pearl-file-workbench-tabs::-webkit-scrollbar-track {
+  background: transparent;
+}
+.pearl-file-workbench-tabs::-webkit-scrollbar-thumb {
+  background: #45615f;
+  border-radius: 6px;
+}
+.pearl-file-workbench-tab {
+  display: flex;
+  align-items: center;
+  border: 1px solid #36514e;
+  flex: none;
+}
+.pearl-file-workbench-menu-wrap {
+  position: relative;
+  flex: none;
+}
+.pearl-file-workbench-menu-wrap > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.pearl-file-workbench-menu {
+  position: absolute;
+  z-index: 20;
+  right: 0;
+  top: calc(100% + 6px);
+  width: 215px;
+  padding: 5px;
+  border: 1px solid #45615f;
+  background: #19272c;
+  box-shadow: 0 12px 32px #0008;
+}
+.pearl-file-workbench-menu button {
+  display: block;
+  width: 100%;
+  padding: 7px 9px;
+  text-align: left;
+  color: #d3e8e3;
+  background: transparent;
+  border: 0;
+}
+.pearl-file-workbench-menu button:hover:not(:disabled),
+.pearl-file-workbench-menu button:focus-visible {
+  background: #25413d;
+}
+.pearl-file-workbench-menu button:disabled {
+  opacity: 0.45;
+}
+.pearl-file-workbench-tab:has([aria-selected="true"]) {
+  border-color: #46dfcc;
+  background: #183532;
+}
+.pearl-file-workbench-tab button {
+  border: 0;
+  background: transparent;
+  color: #d3e8e3;
+  padding: 6px 8px;
+}
+.pearl-file-workbench-toolbar {
+  flex-wrap: wrap;
+}
+.pearl-file-workbench-toolbar > span {
+  flex: 1;
+  min-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pearl-file-workbench-toolbar [role="tablist"] {
+  display: flex;
+  gap: 6px;
+}
+.pearl-file-workbench-toolbar [aria-selected="true"] {
+  color: #46dfcc;
+  border-color: #46dfcc;
+}
+.pearl-file-workbench-toolbar form {
+  display: flex;
+  gap: 4px;
+}
+.pearl-file-workbench-toolbar input {
+  width: 120px;
+}
+.pearl-file-find-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 31px;
+  height: 31px;
+  transition:
+    transform 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease;
+}
+.pearl-file-find-button:hover {
+  transform: translateY(-1px);
+  background: #25413d;
+  color: #69f1dd;
+}
+.pearl-file-find-button:active {
+  transform: scale(0.91);
+}
+@media (prefers-reduced-motion: reduce) {
+  .pearl-file-find-button {
+    transition: none;
+  }
+}
+.pearl-file-workbench-match {
+  margin: 4px 12px;
+  color: #8bdccb;
+}
+.pearl-file-workbench-unavailable {
+  padding: 16px;
+  color: #aec6c3;
+}
+.pearl-file-workbench-content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.pearl-file-workbench-content > .pearl-code-preview {
+  width: 100%;
+}
+.pearl-file-workbench-content > .pearl-diff {
+  width: 100%;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  font: 12px/1.5 var(--pearl-font);
+}
+.pearl-file-workbench-side-by-side {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
+  min-height: 0;
+}
+.pearl-file-workbench-side-by-side section {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid #36514e;
+}
+.pearl-file-workbench-side-by-side strong {
+  padding: 8px 12px;
+  border-bottom: 1px solid #36514e;
 }
 .pearl-header-context {
   min-width: 0;
@@ -1174,6 +1400,27 @@
   overflow: hidden;
   transform-origin: right center;
 }
+.pearl-sidebar.is-collapse-ready,
+.pearl-inspector.is-collapse-ready {
+  min-width: 72px;
+  max-width: 72px;
+  overflow: hidden;
+  opacity: 0.62;
+}
+.pearl-sidebar.is-collapse-ready::after,
+.pearl-inspector.is-collapse-ready::after {
+  content: "›";
+  position: absolute;
+  z-index: 3;
+  inset: 45% 0 auto;
+  text-align: center;
+  color: #69f1dd;
+  font-size: 28px;
+  pointer-events: none;
+}
+.pearl-inspector.is-collapse-ready::after {
+  content: "‹";
+}
 @keyframes pearl-panel-enter {
   from {
     opacity: 0.5;
@@ -1272,6 +1519,7 @@
   width: 100%;
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 7px;
   text-align: left;
   padding: 7px 12px;
@@ -1499,6 +1747,7 @@
 }
 .pearl-code-line {
   display: flex;
+  height: 19px;
   min-height: 19px;
 }
 .pearl-code-line:hover {

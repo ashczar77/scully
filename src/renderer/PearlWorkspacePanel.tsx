@@ -21,7 +21,6 @@ import type {
   GitView,
   WorkspaceEntry,
 } from "../shared/pearl-workspace";
-import { PearlCodePreview } from "./PearlCodePreview";
 
 export type Inspector = {
   kind: "files" | "git" | "review" | "sandbox";
@@ -109,7 +108,9 @@ export function PearlWorkspacePanel({
   onUndo,
   width,
   onResizeStart,
+  onOpenFile,
   closing = false,
+  collapseReady = false,
 }: {
   api: DesktopAPI;
   chat: PearlChat;
@@ -118,14 +119,18 @@ export function PearlWorkspacePanel({
   onUndo: (turnId: string) => void;
   width: number;
   onResizeStart: (event: PointerEvent<HTMLDivElement>) => void;
+  onOpenFile: (file: {
+    path: string;
+    content?: string;
+    review?: FileReview;
+  }) => void;
   closing?: boolean;
+  collapseReady?: boolean;
 }) {
   const [entries, setEntries] = useState<Record<string, WorkspaceEntry[]>>({});
   const [exhausted, setExhausted] = useState<string[]>([]);
   const [expanded, setExpanded] = useState<string[]>([]);
   const [path, setPath] = useState("");
-  const [content, setContent] = useState("");
-  const [review, setReview] = useState<FileReview | null>(null);
   const [git, setGit] = useState<GitView | null>(null);
   const [commit, setCommit] = useState<string | undefined>();
   const [commitFiles, setCommitFiles] = useState<
@@ -143,8 +148,6 @@ export function PearlWorkspacePanel({
     setExhausted([]);
     setExpanded([]);
     setPath("");
-    setContent("");
-    setReview(null);
     setGit(null);
     setError("");
     if (!chat.project?.approved) return;
@@ -200,16 +203,23 @@ export function PearlWorkspacePanel({
   }
   async function openFile(file: string) {
     setPath(file);
-    setReview(null);
-    setContent("");
     setError("");
     try {
       if (inspector.kind === "files")
-        setContent(await api.readPearlProjectFile(chat.id, file));
+        onOpenFile({
+          path: file,
+          content: await api.readPearlProjectFile(chat.id, file),
+        });
       else if (inspector.kind === "git")
-        setContent(await api.pearlGitDiff(chat.id, file, commit));
+        onOpenFile({
+          path: file,
+          content: await api.pearlGitDiff(chat.id, file, commit),
+        });
       else if (task)
-        setReview(await api.reviewPearlTaskFile(chat.id, task.turnId, file));
+        onOpenFile({
+          path: file,
+          review: await api.reviewPearlTaskFile(chat.id, task.turnId, file),
+        });
     } catch (cause) {
       setError(String(cause));
     }
@@ -277,7 +287,7 @@ export function PearlWorkspacePanel({
   }
   return (
     <aside
-      className={`pearl-inspector${closing ? " is-closing" : ""}`}
+      className={`pearl-inspector${closing ? " is-closing" : ""}${collapseReady ? " is-collapse-ready" : ""}`}
       style={{ width }}
       aria-hidden={closing}
       inert={closing}
@@ -361,8 +371,7 @@ export function PearlWorkspacePanel({
                             .pearlGitDiff(chat.id, item.path)
                             .then((value) => {
                               setPath(item.path);
-                              setContent(value);
-                              setReview(null);
+                              onOpenFile({ path: item.path, content: value });
                             })
                             .catch((cause) => setError(String(cause)));
                         }}
@@ -386,7 +395,6 @@ export function PearlWorkspacePanel({
                         onClick={() => {
                           setCommit(item.hash);
                           setPath("");
-                          setContent("");
                           void api
                             .pearlGitCommitFiles(chat.id, item.hash)
                             .then(setCommitFiles)
@@ -471,40 +479,6 @@ export function PearlWorkspacePanel({
                 </>
               )}
             </div>
-          )}
-          {path && (
-            <section
-              className="pearl-inspector-preview"
-              aria-label="File preview"
-            >
-              <h3 title={path}>{path}</h3>
-              {review ? (
-                review.binary ? (
-                  <p>Binary or large file. Text diff unavailable.</p>
-                ) : (
-                  <pre className="pearl-diff">
-                    {reviewLines(review.before || "", review.after || "").map(
-                      (line, index) => (
-                        <div className={line.kind} key={index}>
-                          <span>
-                            {line.kind === "added"
-                              ? "+"
-                              : line.kind === "removed"
-                                ? "−"
-                                : " "}
-                          </span>
-                          {line.text || " "}
-                        </div>
-                      ),
-                    )}
-                  </pre>
-                )
-              ) : inspector.kind === "files" ? (
-                <PearlCodePreview path={path} content={content} />
-              ) : (
-                <pre>{content || "No text diff available."}</pre>
-              )}
-            </section>
           )}
         </>
       )}

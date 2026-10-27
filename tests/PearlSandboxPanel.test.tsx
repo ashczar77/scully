@@ -54,6 +54,7 @@ it("requires a separate manifest review before remote upload", async () => {
       chat={initial}
       onChange={onChange}
       onSettings={() => {}}
+      onOpenFile={() => {}}
     />,
   );
   expect(start).not.toHaveBeenCalled();
@@ -72,6 +73,7 @@ it("requires a separate manifest review before remote upload", async () => {
       chat={prepared}
       onChange={onChange}
       onSettings={() => {}}
+      onOpenFile={() => {}}
     />,
   );
   expect(screen.getByText(/Upload 1 eligible files/)).toBeInTheDocument();
@@ -118,6 +120,7 @@ it("lets a prepared task choose a different base image after a failed start", as
       chat={prepared}
       onChange={() => {}}
       onSettings={() => {}}
+      onOpenFile={() => {}}
     />,
   );
   fireEvent.click(screen.getByRole("button", { name: "Choose another image" }));
@@ -167,6 +170,7 @@ it("keeps a ready Sandbox compact while exposing a styled branch picker and insp
       onChange={() => {}}
       onSettings={() => {}}
       onInspect={onInspect}
+      onOpenFile={() => {}}
     />,
   );
   expect(
@@ -194,4 +198,46 @@ it("keeps a ready Sandbox compact while exposing a styled branch picker and insp
   fireEvent.click(screen.getByRole("button", { name: "Sandbox branch: Main" }));
   fireEvent.click(screen.getByRole("option", { name: "Feature" }));
   await waitFor(() => expect(switchBranch).toHaveBeenCalledWith(id, "feature"));
+});
+
+it("disables local sync when the selected checkpoint has no unsynced files", () => {
+  const ready = {
+    ...chat(),
+    sandbox: {
+      status: "ready",
+      active: false,
+      projectId: "project",
+      projectPath: "/project",
+      baseImage: image,
+      baseDigest: "digest",
+      manifest: [{ path: "math.mjs", bytes: 4, sha256: "same" }],
+      excluded: [],
+      activeBranchId: "main",
+      branches: [
+        {
+          id: "main",
+          name: "Main",
+          headImage: image,
+          files: { "math.mjs": "same" },
+          checks: [],
+        },
+      ],
+    },
+  } as PearlChat;
+  render(
+    <PearlSandboxPanel
+      api={{} as DesktopAPI}
+      chat={ready}
+      onChange={() => {}}
+      onSettings={() => {}}
+      onOpenFile={() => {}}
+    />,
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Expand Sandbox details" }),
+  );
+  expect(
+    screen.getByRole("button", { name: "Review local sync" }),
+  ).toBeDisabled();
+  expect(screen.getByText("No unsynced Sandbox changes")).toBeInTheDocument();
 });

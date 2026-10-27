@@ -1804,6 +1804,103 @@ it("searches a single approved file without treating it as a directory", async (
   ).toEqual([{ path: "note.txt", line: 2, text: "needle here" }]);
 });
 
+it("paginates large directories and searches text past the former 1 MB cutoff", async () => {
+  const f = fixture([
+    tool("list_files", { path: "", offset: 500 }),
+    reply("Found the next page."),
+    tool(
+      "search_text",
+      { path: "large.txt", query: "deep marker" },
+      "search-large",
+    ),
+    reply("Found the marker."),
+  ]);
+  for (let index = 0; index < 502; index++)
+    writeFileSync(
+      join(f.project, `file-${String(index).padStart(3, "0")}.txt`),
+      "x",
+    );
+  writeFileSync(
+    join(f.project, "large.txt"),
+    `${"a".repeat(1_100_000)}\ndeep marker\n`,
+  );
+  const chat = f.manager.create();
+  f.manager.chooseProject(chat.id, f.project);
+  f.manager.approveProject(chat.id, true);
+  f.manager.send(chat.id, "List the next files");
+  const listed = await settled(f.store, chat.id);
+  const page = JSON.parse(
+    listed.messages.find((message) => message.role === "tool")!.text,
+  );
+  expect(page.entries.map((entry: { name: string }) => entry.name)).toEqual([
+    "file-500.txt",
+    "file-501.txt",
+    "large.txt",
+  ]);
+  expect(page.nextOffset).toBeNull();
+  f.manager.send(chat.id, "Find the marker");
+  const searched = await settled(f.store, chat.id);
+  const result = JSON.parse(
+    searched.messages.find(
+      (message) =>
+        message.role === "tool" && message.toolCallId === "search-large",
+    )!.text,
+  );
+  expect(result.matches).toEqual([
+    { path: "large.txt", line: 2, text: "deep marker" },
+  ]);
+});
+
+it("guides Pearl to inspect an existing project in bounded pages", async () => {
+  const f = fixture([reply("I will inspect the relevant files.")]);
+  const chat = f.manager.create();
+  f.manager.chooseProject(chat.id, f.project);
+  f.manager.approveProject(chat.id, true);
+  f.manager.send(chat.id, "Review this project");
+  await settled(f.store, chat.id);
+  const system = f.complete.mock.calls[0][0].system;
+  expect(system).toContain("paged list_files");
+  expect(system).toContain("nextOffset");
+  expect(system).toContain("ranged read_file");
+});
+
+it("makes a revision-bound precise edit in a file larger than one megabyte", async () => {
+  const original = `${"a".repeat(1_100_000)}\nchange this\n`;
+  const digest = createHash("sha256").update(original).digest("hex");
+  const f = fixture([
+    tool("read_file", { path: "large.txt", startLine: 2, lineCount: 1 }),
+    reply("Read the target line."),
+    tool(
+      "replace_in_file",
+      {
+        path: "large.txt",
+        oldText: "change this",
+        newText: "changed",
+        expectedSha256: digest,
+      },
+      "edit-large",
+    ),
+    reply("Changed the target line."),
+  ]);
+  writeFileSync(join(f.project, "large.txt"), original);
+  const chat = f.manager.create();
+  f.manager.chooseProject(chat.id, f.project);
+  f.manager.approveProject(chat.id, true);
+  f.manager.send(chat.id, "Read line two");
+  await settled(f.store, chat.id);
+  f.manager.send(chat.id, "Change line two");
+  const done = await settled(f.store, chat.id);
+  expect(
+    done.messages.find(
+      (message) =>
+        message.role === "tool" && message.toolCallId === "edit-large",
+    )?.text,
+  ).toContain('"written":true');
+  expect(readFileSync(join(f.project, "large.txt"), "utf8")).toContain(
+    "\nchanged\n",
+  );
+});
+
 it("offers a project map only after folder approval and returns a bounded observation", async () => {
   const f = fixture([
     tool("project_map", {}),
@@ -1851,6 +1948,7 @@ it("creates a new file but refuses to overwrite an existing path", async () => {
     uiFilesWritten: 0,
     commandsCompleted: 0,
     browserChecks: 0,
+    executionMode: "local",
     successfulCommandAfterLatestWrite: false,
     successfulBrowserAfterLatestUiWrite: false,
   });
@@ -2142,9 +2240,10 @@ it("accepts common root notation only for bounded project listing", async () => 
     .get(chat.id)
     .messages.filter((message) => message.role === "tool")
     .map((message) => message.text);
-  expect(JSON.parse(observations[0])).toEqual([
-    { name: "note.txt", type: "file" },
-  ]);
+  expect(JSON.parse(observations[0])).toEqual({
+    entries: [{ name: "note.txt", type: "file" }],
+    nextOffset: null,
+  });
   expect(JSON.parse(observations[1])).toEqual(JSON.parse(observations[0]));
   expect(observations[2]).toContain("Unsafe or private file path");
 });
@@ -3787,7 +3886,7 @@ it("retains repeated-action detection across a resumed stretch of the same reque
       {
         id: `t${i}`,
         role: "tool",
-        text: "[]",
+        text: '{"entries":[],"nextOffset":null}',
         toolName: "list_files",
         toolCallId: `c${i}`,
         at: "now",

@@ -68,11 +68,13 @@ export function sandboxBody(value: SandboxCommand) {
   if (entries.length > 128)
     throw new Error("Too many files in one sandbox transfer");
   for (const [path, file] of entries) {
-    if (
-      !/^\/workspace\/[A-Za-z0-9_./+-]{1,240}$/.test(path) ||
-      path.split("/").includes("..")
-    )
+    if (!path.startsWith("/workspace/") || path.length > 512)
       throw new Error("Invalid guest file path");
+    try {
+      safePath(path.slice("/workspace/".length));
+    } catch {
+      throw new Error("Invalid guest file path");
+    }
     files[path] = { uuid: uuid(file.uuid), uid: 0, gid: 0, mode: "0600" };
   }
   return {
@@ -348,7 +350,7 @@ export function sandboxClient(
         {
           method: "GET",
           redirect: "error",
-          signal: AbortSignal.timeout(20000),
+          signal: AbortSignal.timeout(120000),
           headers: { Authorization: `Bearer ${key}`, Project: project },
         },
       );
@@ -364,7 +366,7 @@ export function sandboxClient(
           const { done, value } = await reader.read();
           if (done) break;
           bytes += value.length;
-          if (bytes > 8_388_608)
+          if (bytes > 64 * 1024 * 1024)
             throw new Error("Saved file exceeds the inspection byte limit");
           chunks.push(value);
         }

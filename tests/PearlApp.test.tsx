@@ -857,6 +857,68 @@ it("uses a full-width header and opens one navigation panel at a time", async ()
   );
 });
 
+it("closes side panels when dragged narrow and restores their usable widths", async () => {
+  const chat = {
+    id: "12345678-1234-1234-1234-123456789abc",
+    title: "Resize panels",
+    createdAt: "now",
+    updatedAt: "now",
+    status: "idle",
+    messages: [],
+    questions: [],
+    project: { path: "/tmp/project", dev: 1, ino: 2, approved: true },
+  } as PearlChat;
+  const api = {
+    listPearlChats: vi.fn(async (scope?: string) => (scope ? [] : [chat])),
+    session: vi.fn(async () => ({ configured: true, model: "fixture" })),
+    onPearlChatUpdate: vi.fn(() => () => {}),
+    getPearlChat: vi.fn(async () => chat),
+    listPearlProjectFiles: vi.fn(async () => []),
+  } as unknown as DesktopAPI;
+  render(<PearlApp api={api} />);
+  fireEvent.click(await screen.findByRole("button", { name: chat.title }));
+  const left = screen.getByRole("separator", { name: "Resize chat list" });
+  fireEvent(left, new MouseEvent("pointerdown", { bubbles: true, clientX: 0 }));
+  fireEvent(
+    window,
+    new MouseEvent("pointermove", { bubbles: true, clientX: -200 }),
+  );
+  expect(screen.getByLabelText("Chats panel")).toHaveClass("is-collapse-ready");
+  fireEvent(
+    window,
+    new MouseEvent("pointerup", { bubbles: true, clientX: -200 }),
+  );
+  await waitFor(() =>
+    expect(screen.queryByLabelText("Chats panel")).toBeNull(),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Chats" }));
+  expect(screen.getByLabelText("Chats panel")).toHaveStyle({ width: "268px" });
+  fireEvent.click(screen.getByRole("button", { name: "Files" }));
+  const right = await screen.findByRole("separator", { name: "Resize panel" });
+  fireEvent(
+    right,
+    new MouseEvent("pointerdown", { bubbles: true, clientX: 0 }),
+  );
+  fireEvent(
+    window,
+    new MouseEvent("pointermove", { bubbles: true, clientX: 300 }),
+  );
+  expect(screen.getByRole("complementary", { name: "Files" })).toHaveClass(
+    "is-collapse-ready",
+  );
+  fireEvent(
+    window,
+    new MouseEvent("pointerup", { bubbles: true, clientX: 300 }),
+  );
+  await waitFor(() =>
+    expect(screen.queryByRole("complementary", { name: "Files" })).toBeNull(),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Files" }));
+  expect(screen.getByRole("complementary", { name: "Files" })).toHaveStyle({
+    width: "420px",
+  });
+});
+
 it("grows the composer with a draft and shrinks it after clearing", async () => {
   const original = Object.getOwnPropertyDescriptor(
     HTMLTextAreaElement.prototype,

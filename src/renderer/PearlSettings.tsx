@@ -300,6 +300,28 @@ export function PearlSettings({
                 aria-label="Nebius Sandbox connection"
               >
                 <h2>Nebius Sandbox</h2>
+                <div
+                  className={`pearl-connection-status ${sandboxConfigured ? "connected" : ""}`}
+                  role="status"
+                >
+                  {sandboxConfigured ? (
+                    <CircleCheck size={20} />
+                  ) : (
+                    <Info size={20} />
+                  )}
+                  <div>
+                    <strong>
+                      {sandboxConfigured
+                        ? "Sandbox connection saved for this session"
+                        : "Sandbox not connected"}
+                    </strong>
+                    <p>
+                      {sandboxConfigured
+                        ? "Project files are uploaded only after you review the transfer."
+                        : "Connect a Sandbox project to prepare a remote workspace."}
+                    </p>
+                  </div>
+                </div>
                 <p>
                   {sandboxConfigured
                     ? "Connected for this app session."
@@ -318,9 +340,6 @@ export function PearlSettings({
                       setSandboxConfigured(connection.configured);
                       setSandboxProjectId(connection.projectId);
                       setSandboxKey("");
-                      setNotice(
-                        "Nebius Sandbox connection saved for this session.",
-                      );
                     });
                   }}
                 >

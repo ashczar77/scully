@@ -401,19 +401,71 @@ try {
   assert.equal(fileSelection.outline, "none");
   assert.match(fileSelection.shadow, /inset/);
   assert.equal(fileSelection.icon, true);
-  await page
-    .getByRole("region", { name: "File preview" })
-    .getByText("Project fixture")
-    .waitFor();
+  const fileAlignment = await page
+    .locator(".pearl-inspector-item.pearl-tree-item")
+    .first()
+    .evaluate((button) => ({
+      left: button.getBoundingClientRect().left,
+      text: button.lastElementChild.getBoundingClientRect().left,
+    }));
+  assert(fileAlignment.text - fileAlignment.left < 70);
+  await page.getByLabel("File editor").getByText("Project fixture").waitFor();
+  assert.equal(
+    await page
+      .getByLabel("File editor")
+      .getByRole("tab", { name: "README.md" })
+      .count(),
+    1,
+  );
   assert.equal(
     await page.getByRole("region", { name: "Code preview" }).count(),
     1,
   );
   await page.screenshot({ path: "test-results/pearl-files.png" });
+  await page.getByRole("button", { name: "Close file editor" }).click();
   await page.getByRole("button", { name: "Refresh panel" }).click();
   await page.getByRole("button", { name: "Close panel" }).click();
   await page.locator(".pearl-inspector.is-closing").waitFor();
   await page.locator(".pearl-inspector").waitFor({ state: "detached" });
+  await page.getByRole("button", { name: "Files", exact: true }).click();
+  const collapseGrip = await page
+    .getByRole("separator", { name: "Resize panel" })
+    .boundingBox();
+  assert(collapseGrip);
+  await page.mouse.move(
+    collapseGrip.x + collapseGrip.width / 2,
+    collapseGrip.y + 80,
+  );
+  await page.mouse.down();
+  await page.mouse.move(collapseGrip.x + 550, collapseGrip.y + 80);
+  await page.mouse.up();
+  await page.locator(".pearl-inspector").waitFor({ state: "detached" });
+  await page.getByRole("button", { name: "Files", exact: true }).click();
+  await page.getByRole("complementary", { name: "Files" }).waitFor();
+  assert(
+    (await page.locator(".pearl-inspector").boundingBox()).width >= 300,
+    "Inspector should reopen at a usable width after drag collapse",
+  );
+  await page.getByRole("button", { name: "Close panel" }).click();
+  await page.locator(".pearl-inspector").waitFor({ state: "detached" });
+  const sidebarGrip = await page
+    .getByRole("separator", { name: "Resize chat list" })
+    .boundingBox();
+  assert(sidebarGrip);
+  await page.mouse.move(
+    sidebarGrip.x + sidebarGrip.width / 2,
+    sidebarGrip.y + 80,
+  );
+  await page.mouse.down();
+  await page.mouse.move(100, sidebarGrip.y + 80);
+  await page.mouse.up();
+  await page.locator(".pearl-sidebar").waitFor({ state: "detached" });
+  await page.getByRole("button", { name: "Chats" }).click();
+  await page.getByLabel("Chats panel").waitFor();
+  assert(
+    (await page.locator(".pearl-sidebar").boundingBox()).width >= 210,
+    "Chat list should reopen at a usable width after drag collapse",
+  );
   execFileSync("git", ["init", "-q", project]);
   execFileSync("git", ["-C", project, "add", "README.md"]);
   execFileSync("git", [

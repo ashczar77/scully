@@ -1,9 +1,35 @@
 // @vitest-environment node
 import { expect, it } from "vitest";
-import { sandboxClient } from "../src/engine/sandbox";
+import { sandboxBody, sandboxClient } from "../src/engine/sandbox";
 
 const image = "11111111-1111-1111-1111-111111111111";
 const config = { key: "test-key", projectId: "test-project" };
+
+it("accepts ordinary source names in transfers while rejecting private and escaping paths", () => {
+  const command = {
+    image,
+    command: "/bin/true",
+    args: [],
+    cwd: "/workspace",
+    timeoutSeconds: 30,
+    saveChanges: true,
+    files: {
+      "/workspace/space name.ts": { uuid: image, uid: 0, gid: 0, mode: "0600" },
+    },
+  };
+  expect(sandboxBody(command).files).toHaveProperty("/workspace/space name.ts");
+  for (const path of [
+    "/workspace/../secret.txt",
+    "/workspace/.env",
+    "/tmp/outside.txt",
+  ])
+    expect(() =>
+      sandboxBody({
+        ...command,
+        files: { [path]: command.files["/workspace/space name.ts"] },
+      }),
+    ).toThrow(/Invalid guest file path/);
+});
 
 it("explains when a selected image has no workspace directory", async () => {
   const paths: string[] = [];

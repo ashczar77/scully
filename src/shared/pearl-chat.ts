@@ -34,6 +34,7 @@ export type PearlMessage = {
     browserChecks?: number;
     successfulCommandAfterLatestWrite?: boolean;
     successfulBrowserAfterLatestUiWrite?: boolean;
+    executionMode?: "local" | "sandbox" | "none";
   };
   completion?: {
     status: "done" | "partial" | "blocked" | "unverified";
@@ -245,6 +246,7 @@ export function currentTurnEvidence(chat: PearlChat): {
   browserChecks: number;
   successfulCommandAfterLatestWrite: boolean;
   successfulBrowserAfterLatestUiWrite: boolean;
+  executionMode: "local" | "sandbox" | "none";
 } {
   const start = chat.messages.findIndex(
     (message) => message.id === chat.activeUserMessageId,
@@ -335,6 +337,12 @@ export function currentTurnEvidence(chat: PearlChat): {
       latestSuccessfulCommand >= 0 && latestSuccessfulCommand > latestWrite,
     successfulBrowserAfterLatestUiWrite:
       latestSuccessfulBrowser >= 0 && latestSuccessfulBrowser > latestWrite,
+    executionMode:
+      filesWritten > 0 || commandsCompleted > 0 || browserChecks > 0
+        ? chat.sandbox?.active
+          ? "sandbox"
+          : "local"
+        : "none",
   };
 }
 

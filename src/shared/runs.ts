@@ -547,6 +547,17 @@ export function validateSession(value: unknown): SessionConfig {
     outputTokens: v.outputTokens,
   };
 }
+const visibleConfigParts = new Set([
+  ".github",
+  ".editorconfig",
+  ".gitignore",
+  ".prettierrc",
+  ".eslintrc",
+  ".nvmrc",
+  ".node-version",
+  ".python-version",
+  ".tool-versions",
+]);
 export function safePath(path: unknown): asserts path is string {
   if (
     typeof path !== "string" ||
@@ -557,7 +568,13 @@ export function safePath(path: unknown): asserts path is string {
     /[\x00-\x1f\x7f]/.test(path) ||
     path
       .split("/")
-      .some((s) => !s || s === ".." || s === "." || s.startsWith(".")) ||
+      .some(
+        (s) =>
+          !s ||
+          s === ".." ||
+          s === "." ||
+          (s.startsWith(".") && !visibleConfigParts.has(s)),
+      ) ||
     /(^|\/)(node_modules|vendor|dist|build|out|coverage)(\/|$)/i.test(path) ||
     /(^|\/)(credentials|secrets?)([./]|$)/i.test(path) ||
     /(^|\/)AGENTS\.md$/i.test(path) ||

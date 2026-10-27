@@ -46,21 +46,17 @@ import {
 
 type Client = ReturnType<typeof sandboxClient>;
 type Baseline = { projectPath: string; files: Record<string, string> };
-const maxFiles = 500;
-const maxBytes = 8 * 1024 * 1024;
-const maxChangedFiles = 8;
+const maxFiles = 20_000;
+const maxBytes = 256 * 1024 * 1024;
+const maxFileBytes = 64 * 1024 * 1024;
+const maxChangedFiles = 100;
 
 function hash(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 function safeSourcePath(path: unknown): asserts path is string {
   safePath(path);
-  if (
-    !/^[A-Za-z0-9_./+-]{1,240}$/.test(path as string) ||
-    (path as string)
-      .split("/")
-      .some((part) => part.startsWith(".") || blockedProjectPart(part))
-  )
+  if ((path as string).split("/").some(blockedProjectPart))
     throw new Error("Unsupported or private project path for Sandbox");
 }
 function branch(state: PearlSandboxState): PearlSandboxBranch {
@@ -182,10 +178,10 @@ export class PearlSandboxService {
     manifest: PearlSandboxManifestFile[];
     excluded: string[];
   } {
-    const candidates = candidateFiles(project);
+    const candidates = candidateFiles(project, maxFiles);
     if (candidates.truncated || candidates.paths.length > maxFiles)
       throw new Error(
-        "This project exceeds the Sandbox snapshot limit of 500 files",
+        "This project exceeds the Sandbox snapshot limit of 20,000 files",
       );
     const files: Record<string, string> = {};
     const manifest: PearlSandboxManifestFile[] = [];
@@ -195,7 +191,7 @@ export class PearlSandboxService {
       try {
         safeSourcePath(path);
         const stat = lstatSync(join(project.path, path));
-        if (!stat.isFile() || stat.nlink !== 1 || stat.size > 1_000_000)
+        if (!stat.isFile() || stat.nlink !== 1 || stat.size > maxFileBytes)
           throw new Error("Unsupported file");
         const content = inspectProjectFile(project, path);
         if (
@@ -206,13 +202,14 @@ export class PearlSandboxService {
           throw new Error("Private or unsupported content");
         const bytes = Buffer.byteLength(content);
         total += bytes;
-        if (total > maxBytes) throw new Error("Sandbox snapshot exceeds 8 MB");
+        if (total > maxBytes)
+          throw new Error("Sandbox snapshot exceeds 256 MB");
         files[path] = content;
         manifest.push({ path, bytes, sha256: hash(content) });
       } catch (error) {
         if (
           error instanceof Error &&
-          error.message === "Sandbox snapshot exceeds 8 MB"
+          error.message === "Sandbox snapshot exceeds 256 MB"
         )
           throw error;
         excluded.push(path);
@@ -329,13 +326,15 @@ export class PearlSandboxService {
   fork(chat: PearlChat, name: unknown): PearlChat {
     const state = chat.sandbox;
     if (!state) throw new Error("No Sandbox is prepared");
-    const parent = branch(state);
-    if (parent.syncedHead === parent.headImage)
-      throw new Error(
-        "This branch has already synchronized. Start a new chat for the next Sandbox task.",
-      );
+    if (state.projectPath !== binding(chat).path)
+      throw new Error("This Sandbox belongs to a different project");
     if (typeof name !== "string" || !name.trim() || name.length > 60)
       throw new Error("Enter a branch name of at most 60 characters");
+    let parent = branch(state);
+    if (parent.syncedHead === parent.headImage) {
+      this.switchBranch(chat, parent.id);
+      parent = branch(state);
+    }
     if (state.branches.length >= 8)
       throw new Error("This task has reached eight branches");
     const child: PearlSandboxBranch = {
@@ -362,9 +361,36 @@ export class PearlSandboxService {
       !selected
     )
       throw new Error("Unknown Sandbox branch");
-    if (selected.syncedHead === selected.headImage)
-      throw new Error("This branch is already synchronized. Start a new task.");
-    state.activeBranchId = branchId;
+    if (state.projectPath !== binding(chat).path)
+      throw new Error("This Sandbox belongs to a different project");
+    if (selected.syncedHead === selected.headImage) {
+      const project = binding(chat);
+      const files: Record<string, string> = {};
+      for (const [path, digest] of Object.entries(selected.files)) {
+        const content = inspectProjectFile(project, path);
+        if (content === null || hash(content) !== digest)
+          throw new Error(
+            "Local project differs from the synchronized checkpoint. Review local changes before resuming this branch.",
+          );
+        files[path] = content;
+      }
+      this.saveBaseline(chat, { projectPath: project.path, files });
+      state.baseDigest = hash(JSON.stringify(files));
+      state.manifest = Object.entries(files).map(([path, content]) => ({
+        path,
+        bytes: Buffer.byteLength(content),
+        sha256: hash(content),
+      }));
+      const continued: PearlSandboxBranch = {
+        id: randomUUID(),
+        name: selected.name,
+        headImage: selected.headImage,
+        files: { ...selected.files },
+        checks: [],
+      };
+      state.branches = [continued];
+      state.activeBranchId = continued.id;
+    } else state.activeBranchId = branchId;
     state.active = true;
     state.pendingSync = undefined;
     chat.readRevisions = {};
@@ -408,21 +434,34 @@ export class PearlSandboxService {
   async list(
     chat: PearlChat,
     path: unknown,
-  ): Promise<{ name: string; type: string }[]> {
-    const { selected, client } = this.active(chat);
+    offset: unknown = 0,
+  ): Promise<{
+    entries: { name: string; type: string }[];
+    nextOffset: number | null;
+  }> {
+    const { selected } = this.active(chat);
     if (path !== "" && path !== ".") safeSourcePath(path);
-    const directory =
-      path === "" || path === "." ? "/workspace" : `/workspace/${path}`;
-    return (await client.listFiles(selected.headImage, directory)).map(
-      (file) => ({
-        name: file.name,
-        type: file.symlink
-          ? "unavailable"
-          : file.directory
-            ? "directory"
-            : "file",
-      }),
-    );
+    if (!Number.isSafeInteger(offset) || (offset as number) < 0)
+      throw new Error("Invalid directory offset");
+    const prefix = path === "" || path === "." ? "" : `${path}/`;
+    const entries = new Map<string, "directory" | "file">();
+    for (const file of Object.keys(selected.files)) {
+      if (!file.startsWith(prefix)) continue;
+      const relative = file.slice(prefix.length);
+      const [name, ...rest] = relative.split("/");
+      if (!name) continue;
+      entries.set(name, rest.length ? "directory" : "file");
+    }
+    const sorted = [...entries].sort(([a], [b]) => a.localeCompare(b));
+    return {
+      entries: sorted
+        .slice(offset as number, (offset as number) + 500)
+        .map(([name, type]) => ({ name, type })),
+      nextOffset:
+        (offset as number) + 500 < sorted.length
+          ? (offset as number) + 500
+          : null,
+    };
   }
   async read(
     chat: PearlChat,
@@ -451,7 +490,8 @@ export class PearlSandboxService {
     if (path !== "" && path !== ".") safeSourcePath(path);
     if (typeof query !== "string" || !query || query.length > 200)
       throw new Error("Invalid search query");
-    const { selected } = this.active(chat);
+    const { selected, client } = this.active(chat);
+    const baseline = this.baseline(chat).files;
     const files = Object.keys(selected.files).filter(
       (item) =>
         path === "" ||
@@ -461,11 +501,19 @@ export class PearlSandboxService {
     );
     const matches: { path: string; line: number; text: string }[] = [];
     let inspected = 0;
+    let bytes = 0;
     for (const file of files) {
-      if (inspected >= 100 || matches.length >= 50) break;
-      const content = (await this.read(chat, file)).content;
+      if (inspected >= maxFiles || bytes >= maxBytes || matches.length >= 50)
+        break;
+      const source = baseline[file];
+      const content =
+        source !== undefined && hash(source) === selected.files[file]
+          ? source
+          : await client.downloadFile(selected.headImage, file);
+      if (hash(content) !== selected.files[file])
+        throw new Error("Sandbox file differs from the saved branch revision");
       inspected++;
-      if (content.length > 1_000_000) continue;
+      bytes += Buffer.byteLength(content);
       content.split("\n").forEach((line, index) => {
         if (matches.length < 50 && line.includes(query))
           matches.push({
@@ -477,7 +525,8 @@ export class PearlSandboxService {
     }
     return {
       matches,
-      truncated: inspected < files.length || matches.length >= 50,
+      truncated:
+        inspected < files.length || bytes >= maxBytes || matches.length >= 50,
     };
   }
   async write(
@@ -490,7 +539,7 @@ export class PearlSandboxService {
     safeSourcePath(path);
     if (
       typeof content !== "string" ||
-      content.length > 1_000_000 ||
+      Buffer.byteLength(content) > maxFileBytes ||
       content.includes("\0") ||
       containsSecret(content)
     )
@@ -514,7 +563,7 @@ export class PearlSandboxService {
         hash(original[item]) !== selected.files[item],
     );
     if (!changed.includes(path) && changed.length >= maxChangedFiles)
-      throw new Error("A Sandbox branch can change at most eight source files");
+      throw new Error("A Sandbox branch can change at most 100 source files");
     const nextHash = hash(content);
     if (before === nextHash) throw new Error("File content is unchanged");
     state.lastOperation = undefined;
@@ -725,6 +774,16 @@ export class PearlSandboxService {
     return { path, before: baseline.files[path] ?? null, after, binary: false };
   }
   snapshotView(chat: PearlChat): PearlSandboxSnapshot {
+    if (!chat.project?.approved)
+      throw new Error("Approve the project folder first");
+    if (!chat.sandbox || chat.sandbox.projectPath !== chat.project.path)
+      return {
+        branch: "",
+        checkpoint: "",
+        files: [],
+        operations: [],
+        checks: [],
+      };
     const { state, selected } = this.selectedForReview(chat);
     const baseline = this.baseline(chat);
     return {
@@ -749,7 +808,7 @@ export class PearlSandboxService {
     if (!selected.files[path])
       throw new Error("File is outside the approved Sandbox source scope");
     const after = await client.downloadFile(selected.headImage, path);
-    if (after.length > 1_000_000 || hash(after) !== selected.files[path])
+    if (hash(after) !== selected.files[path])
       throw new Error("Sandbox file differs from the saved branch revision");
     return {
       path,
@@ -833,7 +892,25 @@ export class PearlSandboxService {
         join(this.dataRoot, "pearl-transactions", chat.id),
         join(this.dataRoot, "pearl-backups", chat.id, randomUUID()),
       );
-    selected.syncedHead = selected.headImage;
+    const nextFiles = { ...baseline.files };
+    for (const draft of drafts) nextFiles[draft.path] = draft.content;
+    this.saveBaseline(chat, { projectPath: project.path, files: nextFiles });
+    state.baseDigest = hash(JSON.stringify(nextFiles));
+    state.manifest = Object.entries(nextFiles).map(([path, content]) => ({
+      path,
+      bytes: Buffer.byteLength(content),
+      sha256: hash(content),
+    }));
+    state.branches = [
+      {
+        id: randomUUID(),
+        name: selected.name,
+        headImage: selected.headImage,
+        files: { ...selected.files },
+        checks: [],
+      },
+    ];
+    state.activeBranchId = state.branches[0].id;
     state.active = false;
     return chat;
   }

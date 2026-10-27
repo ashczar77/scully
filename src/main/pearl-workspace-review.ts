@@ -25,7 +25,7 @@ import { verifyProjectRoot } from "./project-workspace";
 
 const maxFiles = 20_000;
 const maxSnapshotBytes = 128 * 1024 * 1024;
-const maxReviewBytes = 512_000;
+const maxReviewBytes = 64 * 1024 * 1024;
 type Image = { content: string; mode: number; size: number; digest: string };
 type Snapshot = {
   project: string;
@@ -115,7 +115,7 @@ export function readWorkspaceFile(
 ): string {
   const target = safeFile(binding, validatedPath(path));
   const stat = lstatSync(target);
-  if (!stat.isFile() || stat.size > 1024 * 1024)
+  if (!stat.isFile() || stat.size > 64 * 1024 * 1024)
     throw new Error("This file is too large or cannot be viewed as text");
   return new TextDecoder("utf-8", { fatal: true }).decode(readFileSync(target));
 }

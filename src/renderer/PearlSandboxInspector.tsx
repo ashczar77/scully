@@ -12,8 +12,6 @@ import type { DesktopAPI } from "../shared/contracts";
 import type { PearlChat } from "../shared/pearl-chat";
 import type { PearlSandboxSnapshot } from "../shared/pearl-sandbox";
 import type { FileReview } from "../shared/pearl-workspace";
-import { PearlCodePreview } from "./PearlCodePreview";
-import { reviewLines } from "./PearlWorkspacePanel";
 
 export function PearlSandboxInspector({
   api,
@@ -21,19 +19,22 @@ export function PearlSandboxInspector({
   onClose,
   width,
   onResizeStart,
+  onOpenFile,
   closing = false,
+  collapseReady = false,
 }: {
   api: DesktopAPI;
   chat: PearlChat;
   onClose: () => void;
   width: number;
   onResizeStart: (event: PointerEvent<HTMLDivElement>) => void;
+  onOpenFile: (review: FileReview) => void;
   closing?: boolean;
+  collapseReady?: boolean;
 }) {
   const [snapshot, setSnapshot] = useState<PearlSandboxSnapshot | null>(null);
   const [review, setReview] = useState<FileReview | null>(null);
   const [tab, setTab] = useState<"files" | "activity">("files");
-  const [view, setView] = useState<"file" | "diff">("diff");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [revision, setRevision] = useState(0);
@@ -59,7 +60,7 @@ export function PearlSandboxInspector({
   useEffect(() => {
     setSnapshot(null);
     setReview(null);
-  }, [chat.id, checkpoint, branchName]);
+  }, [chat.id, branchName]);
   useEffect(() => {
     let live = true;
     setError("");
@@ -103,7 +104,9 @@ export function PearlSandboxInspector({
     setError("");
     setReview(null);
     try {
-      setReview(await api.inspectPearlSandboxFile(chat.id, path));
+      const result = await api.inspectPearlSandboxFile(chat.id, path);
+      setReview(result);
+      onOpenFile(result);
     } catch (cause) {
       setError(String(cause));
     }
@@ -174,7 +177,7 @@ export function PearlSandboxInspector({
   }
   return (
     <aside
-      className={`pearl-inspector pearl-sandbox-inspector${closing ? " is-closing" : ""}`}
+      className={`pearl-inspector pearl-sandbox-inspector${closing ? " is-closing" : ""}${collapseReady ? " is-collapse-ready" : ""}`}
       style={{ width }}
       aria-label="Sandbox view"
       aria-hidden={closing}
@@ -201,7 +204,7 @@ export function PearlSandboxInspector({
           </button>
         </div>
       </div>
-      {loading && (
+      {loading && !snapshot && (
         <p className="pearl-inspector-note">Loading saved checkpoint…</p>
       )}
       {error && (
@@ -242,54 +245,6 @@ export function PearlSandboxInspector({
               <div className="pearl-inspector-list" aria-label="Sandbox files">
                 {tree()}
               </div>
-              {review && (
-                <div className="pearl-inspector-preview">
-                  <h3>{review.path}</h3>
-                  <div
-                    className="pearl-sandbox-inspector-tabs"
-                    role="tablist"
-                    aria-label="File view"
-                  >
-                    <button
-                      role="tab"
-                      aria-selected={view === "diff"}
-                      onClick={() => setView("diff")}
-                    >
-                      Changes
-                    </button>
-                    <button
-                      role="tab"
-                      aria-selected={view === "file"}
-                      onClick={() => setView("file")}
-                    >
-                      Current file
-                    </button>
-                  </div>
-                  {view === "file" ? (
-                    <PearlCodePreview
-                      path={review.path}
-                      content={review.after || ""}
-                    />
-                  ) : (
-                    <pre className="pearl-diff" aria-label="Sandbox file diff">
-                      {reviewLines(review.before || "", review.after || "").map(
-                        (line, index) => (
-                          <div key={index} className={line.kind}>
-                            <span>
-                              {line.kind === "added"
-                                ? "+"
-                                : line.kind === "removed"
-                                  ? "−"
-                                  : " "}
-                            </span>
-                            {line.text || " "}
-                          </div>
-                        ),
-                      )}
-                    </pre>
-                  )}
-                </div>
-              )}
             </>
           )}
           {tab === "activity" && (
