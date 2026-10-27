@@ -5,6 +5,46 @@ import { PearlSandboxInspector } from "../src/renderer/PearlSandboxInspector";
 import type { DesktopAPI } from "../src/shared/contracts";
 import type { PearlChat } from "../src/shared/pearl-chat";
 
+it("offers Settings without requesting a saved snapshot when Sandbox is disconnected", async () => {
+  const chat = {
+    id: "11111111-1111-1111-1111-111111111111",
+    status: "idle",
+    sandbox: {
+      projectId: "project-a",
+      activeBranchId: "main",
+      branches: [
+        { id: "main", name: "Main", headImage: "checkpoint", checks: [] },
+      ],
+    },
+  } as unknown as PearlChat;
+  const snapshot = vi.fn();
+  const onOpenSettings = vi.fn();
+  const api = {
+    pearlSandboxConnection: vi.fn(async () => ({
+      configured: false,
+      projectId: "",
+    })),
+    pearlSandboxSnapshot: snapshot,
+  } as unknown as DesktopAPI;
+  render(
+    <PearlSandboxInspector
+      api={api}
+      chat={chat}
+      onClose={() => {}}
+      width={420}
+      onResizeStart={() => {}}
+      onOpenFile={() => {}}
+      onOpenSettings={onOpenSettings}
+    />,
+  );
+  expect(
+    await screen.findByText(/Connect to Nebius Sandbox in Settings/),
+  ).toBeInTheDocument();
+  expect(snapshot).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Open Settings" }));
+  expect(onOpenSettings).toHaveBeenCalledTimes(1);
+});
+
 it("shows checkpoint files, verified content, diffs and recorded checks without local sync", async () => {
   const chat = {
     id: "11111111-1111-1111-1111-111111111111",
@@ -51,6 +91,7 @@ it("shows checkpoint files, verified content, diffs and recorded checks without 
   const api = {
     pearlSandboxSnapshot: snapshot,
     inspectPearlSandboxFile: inspect,
+    pearlSandboxConnection: async () => ({ configured: true }),
   } as unknown as DesktopAPI;
   const onOpenFile = vi.fn();
   const view = render(
@@ -61,6 +102,7 @@ it("shows checkpoint files, verified content, diffs and recorded checks without 
       width={420}
       onResizeStart={() => {}}
       onOpenFile={onOpenFile}
+      onOpenSettings={() => {}}
     />,
   );
   fireEvent.click(await screen.findByRole("button", { name: /src\/main.ts/ }));
@@ -78,6 +120,7 @@ it("shows checkpoint files, verified content, diffs and recorded checks without 
       width={420}
       onResizeStart={() => {}}
       onOpenFile={onOpenFile}
+      onOpenSettings={() => {}}
     />,
   );
   expect(snapshot).toHaveBeenCalledTimes(1);
@@ -104,6 +147,7 @@ it("shows checkpoint files, verified content, diffs and recorded checks without 
       width={420}
       onResizeStart={() => {}}
       onOpenFile={onOpenFile}
+      onOpenSettings={() => {}}
     />,
   );
   await waitFor(() => expect(snapshot).toHaveBeenCalledTimes(2));
@@ -139,7 +183,10 @@ it("keeps the previous file tree visible while the next checkpoint loads", async
       operations: [],
     },
   } as unknown as PearlChat;
-  const api = { pearlSandboxSnapshot: snapshot } as unknown as DesktopAPI;
+  const api = {
+    pearlSandboxSnapshot: snapshot,
+    pearlSandboxConnection: async () => ({ configured: true }),
+  } as unknown as DesktopAPI;
   const view = render(
     <PearlSandboxInspector
       api={api}
@@ -148,6 +195,7 @@ it("keeps the previous file tree visible while the next checkpoint loads", async
       width={420}
       onResizeStart={() => {}}
       onOpenFile={() => {}}
+      onOpenSettings={() => {}}
     />,
   );
   expect(
@@ -175,6 +223,7 @@ it("keeps the previous file tree visible while the next checkpoint loads", async
       width={420}
       onResizeStart={() => {}}
       onOpenFile={() => {}}
+      onOpenSettings={() => {}}
     />,
   );
   await waitFor(() => expect(snapshot).toHaveBeenCalledTimes(2));

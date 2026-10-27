@@ -5,7 +5,14 @@ export function roomChat(chat: PearlChat): PearlChat {
   return {
     ...chat,
     messages: chat.messages.map(
-      ({ providerContinuation: _continuation, ...message }) => message,
+      ({
+        providerContinuation: _continuation,
+        modelImages: _images,
+        ...message
+      }) =>
+        message.role === "user" && message.displayText !== undefined
+          ? { ...message, text: message.displayText }
+          : message,
     ),
   };
 }

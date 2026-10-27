@@ -122,3 +122,130 @@ it("offers tab cleanup actions for the selected tab", () => {
   fireEvent.click(screen.getByRole("menuitem", { name: "Close other tabs" }));
   expect(closeFiles).toHaveBeenCalledWith(["one", "two", "four"]);
 });
+
+it("keeps Before and After visible for both small and large text changes", () => {
+  const view = render(
+    <PearlFileWorkbench
+      files={[
+        {
+          id: "small",
+          path: "small.ts",
+          source: "Sandbox",
+          review: {
+            path: "small.ts",
+            before: "old",
+            after: "new",
+            binary: false,
+          },
+        },
+      ]}
+      activeId="small"
+      onSelect={() => {}}
+      onCloseFile={() => {}}
+      onClose={() => {}}
+    />,
+  );
+  expect(screen.getByText("Before")).toBeInTheDocument();
+  expect(screen.getByText("After")).toBeInTheDocument();
+  expect(
+    screen.getByRole("separator", { name: "Resize comparison" }),
+  ).toBeInTheDocument();
+  view.rerender(
+    <PearlFileWorkbench
+      files={[
+        {
+          id: "large",
+          path: "large.ts",
+          source: "Sandbox",
+          review: {
+            path: "large.ts",
+            before: "a\n".repeat(700),
+            after: "b\n".repeat(700),
+            binary: false,
+          },
+        },
+      ]}
+      activeId="large"
+      onSelect={() => {}}
+      onCloseFile={() => {}}
+      onClose={() => {}}
+    />,
+  );
+  expect(screen.getByText("Before")).toBeInTheDocument();
+  expect(screen.getByText("After")).toBeInTheDocument();
+});
+
+it("limits comparison resizing with keyboard controls", () => {
+  render(
+    <PearlFileWorkbench
+      files={[
+        {
+          id: "review",
+          path: "main.ts",
+          source: "Local",
+          review: {
+            path: "main.ts",
+            before: "old",
+            after: "new",
+            binary: false,
+          },
+        },
+      ]}
+      activeId="review"
+      onSelect={() => {}}
+      onCloseFile={() => {}}
+      onClose={() => {}}
+    />,
+  );
+  const divider = screen.getByRole("separator", { name: "Resize comparison" });
+  fireEvent.keyDown(divider, { key: "End" });
+  expect(divider).toHaveAttribute("aria-valuenow", "75");
+  fireEvent.keyDown(divider, { key: "ArrowRight" });
+  expect(divider).toHaveAttribute("aria-valuenow", "75");
+  fireEvent.keyDown(divider, { key: "Home" });
+  expect(divider).toHaveAttribute("aria-valuenow", "25");
+});
+
+it("offers overflow controls when tabs exceed the available width", () => {
+  render(
+    <PearlFileWorkbench
+      files={["one", "two", "three"].map((id) => ({
+        id,
+        path: `${id}.ts`,
+        source: "Local" as const,
+        content: id,
+      }))}
+      activeId="one"
+      onSelect={() => {}}
+      onCloseFile={() => {}}
+      onClose={() => {}}
+    />,
+  );
+  const strip = screen.getByRole("tablist", { name: "Open files" });
+  Object.defineProperty(strip, "clientWidth", {
+    configurable: true,
+    value: 100,
+  });
+  Object.defineProperty(strip, "scrollWidth", {
+    configurable: true,
+    value: 500,
+  });
+  const scrollBy = vi.fn();
+  Object.defineProperty(strip, "scrollBy", {
+    configurable: true,
+    value: scrollBy,
+  });
+  fireEvent.scroll(strip);
+  fireEvent.click(screen.getByRole("button", { name: "Scroll tabs right" }));
+  expect(scrollBy).toHaveBeenCalledWith(
+    expect.objectContaining({ left: expect.any(Number) }),
+  );
+  Object.defineProperty(strip, "scrollLeft", {
+    configurable: true,
+    value: 300,
+  });
+  fireEvent.scroll(strip);
+  expect(
+    screen.getByRole("button", { name: "Scroll tabs left" }),
+  ).toBeEnabled();
+});

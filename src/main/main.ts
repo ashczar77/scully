@@ -226,6 +226,13 @@ app
       trusted(event);
       return pearl.approveProject(id, approved);
     });
+    metricHandle(
+      "pearl:permission:update",
+      (event, id, permission, enabled) => {
+        trusted(event);
+        return pearl.updatePermission(id, permission, enabled);
+      },
+    );
     metricHandle("pearl:tool:decide", (event, id, callId, approved) => {
       trusted(event);
       return pearl.decideTool(id, callId, approved);

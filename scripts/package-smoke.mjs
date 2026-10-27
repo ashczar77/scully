@@ -34,7 +34,9 @@ assert(
       path.startsWith("/node_modules/") &&
       statFile(`${bundle}/Contents/Resources/app.asar`, path.slice(1)).size !==
         undefined &&
-      !/^\/node_modules\/(node-pty|node-addon-api)(\/|$)/.test(path),
+      !/^\/node_modules\/(node-pty|node-addon-api|pdfjs-dist|@napi-rs)(\/|$)/.test(
+        path,
+      ),
   ),
 );
 const unpacked = `${bundle}/Contents/Resources/app.asar.unpacked/node_modules/node-pty`;
@@ -42,7 +44,38 @@ assert((await stat(`${unpacked}/build/Release/pty.node`)).isFile());
 const helper = await stat(`${unpacked}/build/Release/spawn-helper`);
 assert(helper.isFile());
 assert(helper.mode & 0o111);
+assert(
+  entries.some((path) => path.endsWith("/pdfjs-dist/legacy/build/pdf.mjs")),
+);
+assert(entries.some((path) => path.endsWith("/@napi-rs/canvas/index.js")));
+assert(
+  (
+    await stat(
+      `${bundle}/Contents/Resources/app.asar.unpacked/node_modules/@napi-rs/canvas-darwin-arm64/skia.darwin-arm64.node`,
+    )
+  ).isFile(),
+);
 const state = await mkdtemp(join(tmpdir(), "scully-package-test-"));
+function samplePdf() {
+  const stream =
+    "BT /F1 14 Tf 50 150 Td (Packaged document extraction works) Tj ET";
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    `<< /Length ${stream.length + 1} >>\nstream\n${stream}\nendstream`,
+  ];
+  let body = "%PDF-1.4\n";
+  const offsets = [];
+  objects.forEach((object, index) => {
+    offsets.push(Buffer.byteLength(body));
+    body += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  });
+  const start = Buffer.byteLength(body);
+  body += `xref\n0 6\n0000000000 65535 f \n${offsets.map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("")}trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${start}\n%%EOF`;
+  return Buffer.from(body).toString("base64");
+}
 let app;
 let supervisor;
 let commandPid;
@@ -144,6 +177,17 @@ try {
     1,
   );
   assert.equal(
+    await page.evaluate(async (base64) => {
+      const [chat] = await window.scully.listPearlChats();
+      const updated = await window.scully.preparePearlAttachment(chat.id, {
+        name: "sample.pdf",
+        base64,
+      });
+      return updated.pendingAttachments?.[0]?.kind;
+    }, samplePdf()),
+    "pdf",
+  );
+  assert.equal(
     await page.evaluate(() => {
       const shell = document
         .querySelector(".pearl-shell")
@@ -178,6 +222,11 @@ try {
     await page.getByRole("button", { name: "Task", exact: true }).count(),
     0,
   );
+  assert.equal(
+    await page.getByRole("button", { name: "Send message" }).isDisabled(),
+    false,
+  );
+  await page.getByRole("button", { name: "Remove sample.pdf" }).click();
   assert.equal(
     await page.getByRole("button", { name: "Send message" }).isDisabled(),
     true,

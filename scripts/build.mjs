@@ -24,7 +24,7 @@ await bundle({
   bundle: true,
   platform: "node",
   format: "cjs",
-  external: ["electron", "node:sqlite"],
+  external: ["electron", "node:sqlite", "@napi-rs/canvas", "pdfjs-dist/*"],
   define: {
     __SCULLY_DEV_HARNESS__:
       process.env.SCULLY_DEV_HARNESS === "1" ? "true" : "false",

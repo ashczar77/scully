@@ -8,23 +8,28 @@ import {
   type FormEvent,
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  type ChangeEvent,
 } from "react";
 import {
   Archive,
+  Box,
   Files,
   Folder,
   GitBranch,
   MessageSquareText,
   MoreHorizontal,
   Paperclip,
+  X,
   Plus,
   Send,
   Settings2,
   ShieldCheck,
   Sparkles,
+  Square,
 } from "lucide-react";
 import type { DesktopAPI } from "../shared/contracts";
 import type { PearlChat, PearlChatSummary } from "../shared/pearl-chat";
+import type { ModelOption } from "../shared/runs";
 import { RichText } from "./RichText";
 import { PearlActivity, roomTimeline } from "./PearlActivity";
 import { PearlMessageFrame } from "./PearlMessageFrame";
@@ -33,6 +38,7 @@ import { PearlSandboxPanel } from "./PearlSandboxPanel";
 import { PearlWorkspacePanel, type Inspector } from "./PearlWorkspacePanel";
 import { PearlSandboxInspector } from "./PearlSandboxInspector";
 import { PearlFileWorkbench, type WorkbenchFile } from "./PearlFileWorkbench";
+import { addWorkbenchTab } from "./pearl-workbench-tabs";
 import scullyLogo from "../../assets/branding/scully-friendly-nerd-transparent-v1.png";
 import pearlPortrait from "../../assets/team-portrait-coordinator-v1.png";
 import "./pearl.css";
@@ -40,6 +46,65 @@ import "./pearl.css";
 const PearlTerminalView = lazy(async () => ({
   default: (await import("./PearlTerminalView")).PearlTerminalView,
 }));
+
+function approvalCommandLabel(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const { command, args } = value as { command?: unknown; args?: unknown };
+  if (typeof command !== "string" || !Array.isArray(args)) return null;
+  if (!args.every((arg) => typeof arg === "string")) return null;
+  const label = [command, ...args].join(" ");
+  return label.length > 100 ? `${label.slice(0, 100)}...` : label;
+}
+
+function approvalSequence(chat: PearlChat): string | null {
+  if (
+    chat.pendingTool?.name !== "install_dependencies" &&
+    chat.pendingTool?.name !== "sandbox_run_check"
+  )
+    return null;
+  const start = chat.messages.findIndex(
+    (message) => message.id === chat.activeUserMessageId,
+  );
+  const previous = chat.messages
+    .slice(start < 0 ? 0 : start + 1)
+    .reverse()
+    .find(
+      (message) =>
+        message.role === "tool" &&
+        ["sandbox_run_check", "install_dependencies"].includes(
+          message.toolName || "",
+        ),
+    );
+  if (!previous) return null;
+  let result: Record<string, unknown>;
+  try {
+    result = JSON.parse(previous.text) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  if (!result || typeof result !== "object") return null;
+  if (typeof result.passed !== "boolean") return null;
+  if (
+    chat.pendingTool.name === "install_dependencies" &&
+    previous.toolName === "sandbox_run_check" &&
+    !result.passed
+  ) {
+    const detail =
+      typeof result.stderr === "string"
+        ? result.stderr.trim().split(/\r?\n/).at(-1)?.slice(0, 120)
+        : "";
+    const exit =
+      typeof result.exitCode === "number" ? ` (exit ${result.exitCode})` : "";
+    return `Previous check failed${exit}${detail ? `: ${detail}` : ""}. This is a separate approval to install dependencies before Pearl retries the check.`;
+  }
+  if (
+    chat.pendingTool.name === "sandbox_run_check" &&
+    previous.toolName === "install_dependencies" &&
+    result.passed
+  )
+    return "Dependencies installed successfully. This is a new approval to check the project with the installed packages.";
+  return null;
+}
 
 export function PearlApp({
   api: optionalApi = window.scully,
@@ -57,9 +122,14 @@ export function PearlApp({
   const [panel, setPanel] = useState<"chats" | "archived" | "settings" | null>(
     "chats",
   );
+  const [settingsSection, setSettingsSection] = useState<
+    "models" | "connections" | "permissions"
+  >("models");
   const [menuId, setMenuId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [configured, setConfigured] = useState(false);
+  const [selectedModel, setSelectedModel] = useState("");
+  const [modelCatalog, setModelCatalog] = useState<ModelOption[]>([]);
   const [inspector, setInspector] = useState<Inspector | null>(null);
   const [lastInspector, setLastInspector] = useState<Inspector | null>(null);
   const [lastSidebar, setLastSidebar] = useState<"chats" | "archived" | null>(
@@ -78,6 +148,7 @@ export function PearlApp({
   const openMenuRow = useRef<HTMLDivElement | null>(null);
   const end = useRef<HTMLDivElement>(null);
   const composerInput = useRef<HTMLTextAreaElement>(null);
+  const attachmentInput = useRef<HTMLInputElement>(null);
   const renameInput = useRef<HTMLTextAreaElement>(null);
   const shownSidebar =
     panel === "chats" || panel === "archived" ? panel : lastSidebar;
@@ -113,12 +184,18 @@ export function PearlApp({
       .then(([session]) => {
         if (!live) return;
         setConfigured(session.configured);
+        setSelectedModel(session.model);
       })
       .catch((cause) => {
         if (live) setError(String(cause));
       });
     const off = api.onPearlChatUpdate((updated) => {
-      if (activeId.current === updated.id) setChat(updated);
+      if (activeId.current === updated.id)
+        setChat((current) =>
+          current?.id === updated.id && current.updatedAt > updated.updatedAt
+            ? current
+            : updated,
+        );
       void refreshChats().catch(() => {});
     });
     return () => {
@@ -126,6 +203,21 @@ export function PearlApp({
       off();
     };
   }, [api]);
+  useEffect(() => {
+    if (!configured || !api.listPearlModels) return;
+    let live = true;
+    void api
+      .listPearlModels()
+      .then((models) => {
+        if (live) setModelCatalog(models);
+      })
+      .catch(() => {
+        if (live) setModelCatalog([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [api, configured, panel]);
   useEffect(() => {
     if (!chat || chat.status !== "running") return;
     const id = chat.id;
@@ -140,11 +232,7 @@ export function PearlApp({
           if (!live || activeId.current !== id) return;
           setChat((current) => {
             if (!current || current.id !== id) return current;
-            if (
-              persisted.status !== current.status ||
-              persisted.updatedAt > current.updatedAt
-            )
-              return persisted;
+            if (persisted.updatedAt > current.updatedAt) return persisted;
             return current;
           });
         })
@@ -215,9 +303,20 @@ export function PearlApp({
     work: () => Promise<PearlChat>,
   ): Promise<PearlChat> {
     const updated = await work();
+    if (activeId.current === updated.id)
+      setChat((current) =>
+        current?.id === updated.id && current.updatedAt > updated.updatedAt
+          ? current
+          : updated,
+      );
     const latest = await api.getPearlChat(updated.id);
-    if (activeId.current === updated.id) setChat(latest);
-    return latest;
+    if (activeId.current === updated.id)
+      setChat((current) =>
+        current?.id === latest.id && current.updatedAt > latest.updatedAt
+          ? current
+          : latest,
+      );
+    return latest.updatedAt > updated.updatedAt ? latest : updated;
   }
   async function create() {
     setMenuId(null);
@@ -262,11 +361,9 @@ export function PearlApp({
   }
   function openWorkbench(file: Omit<WorkbenchFile, "id">) {
     const id = `${file.source}:${file.path}:${file.review ? "review" : "file"}`;
-    setWorkbenchFiles((current) => {
-      const index = current.findIndex((item) => item.id === id);
-      if (index < 0) return [...current, { ...file, id }];
-      return current.map((item) => (item.id === id ? { ...file, id } : item));
-    });
+    setWorkbenchFiles((current) =>
+      addWorkbenchTab(current, { ...file, id }, workbenchActive),
+    );
     setWorkbenchActive(id);
   }
   function closeWorkbenchFiles(ids: string[]) {
@@ -418,8 +515,11 @@ export function PearlApp({
   }
   async function send(event?: FormEvent) {
     event?.preventDefault();
-    const text = draft.trim();
-    if (!text || busy || chat?.lifecycle) return;
+    if (chat?.status === "running") return;
+    const text =
+      draft.trim() ||
+      (chat?.pendingAttachments?.length ? "Analyze the attached files." : "");
+    if (!text || busy || chat?.lifecycle || attachmentBlockReason) return;
     let current = chat;
     if (!current) {
       current = (await action(() => api.createPearlChat())) || null;
@@ -434,6 +534,56 @@ export function PearlApp({
     if (result) {
       setDraft("");
     }
+  }
+  async function addAttachments(event: ChangeEvent<HTMLInputElement>) {
+    const selected = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (!selected.length) return;
+    await action(async () => {
+      let current = chat;
+      if (!current) {
+        current = await api.createPearlChat();
+        activeId.current = current.id;
+        setChat(current);
+        setPanel("chats");
+        await refreshChats();
+      }
+      for (const file of selected) {
+        if (file.size > 20 * 1024 * 1024)
+          throw new Error("Each attachment must be 20 MB or smaller");
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        let binary = "";
+        for (let offset = 0; offset < bytes.length; offset += 8192)
+          binary += String.fromCharCode(
+            ...bytes.subarray(offset, offset + 8192),
+          );
+        current = await api.preparePearlAttachment(current.id, {
+          name: file.name,
+          base64: btoa(binary),
+        });
+        if (activeId.current === current.id) setChat(current);
+      }
+    });
+  }
+  const imageAttachments =
+    chat?.pendingAttachments?.filter((item) => item.needsVision) || [];
+  const imageCapable = modelCatalog.some(
+    (item) => item.id === selectedModel && item.supportsImages === true,
+  );
+  const attachmentBlockReason =
+    imageAttachments.length && !imageCapable
+      ? imageAttachments.some((item) => item.kind === "pdf")
+        ? "This model does not support visual PDF analysis. Choose an image-capable model."
+        : "This model does not support image analysis. Choose an image-capable model."
+      : "";
+  function openPearlLink(url: string) {
+    void api
+      .openPearlExternalLink(url)
+      .catch(() =>
+        setError(
+          "Could not open this link. Check the browser configured on your system.",
+        ),
+      );
   }
   function chatList(items: PearlChatSummary[], scope: "chats" | "archived") {
     return (
@@ -590,6 +740,8 @@ export function PearlApp({
       command = null;
     }
   }
+  const pendingCommandLabel = approvalCommandLabel(command);
+  const pendingApprovalSequence = chat ? approvalSequence(chat) : null;
   return (
     <div className="pearl-shell">
       <header className="pearl-header">
@@ -678,6 +830,19 @@ export function PearlApp({
             <GitBranch size={19} aria-hidden="true" />
           </button>
           <button
+            aria-label="Sandbox"
+            aria-expanded={inspector?.kind === "sandbox"}
+            title="Sandbox"
+            className={inspector?.kind === "sandbox" ? "active" : ""}
+            onClick={() =>
+              openInspector(
+                inspector?.kind === "sandbox" ? null : { kind: "sandbox" },
+              )
+            }
+          >
+            <Box size={19} aria-hidden="true" />
+          </button>
+          <button
             aria-label="Settings"
             aria-expanded={panel === "settings"}
             aria-controls={
@@ -742,8 +907,14 @@ export function PearlApp({
         {panel === "settings" ? (
           <PearlSettings
             api={api}
+            chat={chat}
+            initialSection={settingsSection}
             onBack={() => setPanel("chats")}
-            onSessionChange={(info) => setConfigured(info.configured)}
+            onChatChange={setChat}
+            onSessionChange={(info) => {
+              setConfigured(info.configured);
+              setSelectedModel(info.model);
+            }}
           />
         ) : (
           <>
@@ -821,7 +992,11 @@ export function PearlApp({
                           progress
                           fallbackModel={item.fallbackModel}
                         >
-                          <RichText text={item.text} readableProse />
+                          <RichText
+                            text={item.text}
+                            readableProse
+                            onOpenLink={openPearlLink}
+                          />
                         </PearlMessageFrame>
                       );
                     return (
@@ -832,12 +1007,28 @@ export function PearlApp({
                         fallbackModel={item.fallbackModel}
                       >
                         <RichText
-                          text={item.text}
+                          text={
+                            item.role === "user"
+                              ? item.displayText || item.text
+                              : item.text
+                          }
                           readableProse={item.role === "assistant"}
+                          onOpenLink={openPearlLink}
                         />
+                        {item.role === "user" && item.attachments?.length ? (
+                          <div className="pearl-message-attachments">
+                            {item.attachments.map((attachment) => (
+                              <span key={attachment.id}>{attachment.name}</span>
+                            ))}
+                          </div>
+                        ) : null}
                         {item.role === "assistant" && item.completion && (
                           <div className="pearl-evidence">
-                            Work status: {item.completion.status}.
+                            {item.completion.status === "unverified" &&
+                            item.evidence?.filesWritten &&
+                            !item.evidence.successfulCommandAfterLatestWrite
+                              ? "Work status: not checked. The edit was saved, but no successful check ran after it. Review the change or ask Pearl to run a check."
+                              : `Work status: ${item.completion.status}.`}
                             {item.completion.remaining && (
                               <> Remaining: {item.completion.remaining}</>
                             )}
@@ -904,7 +1095,11 @@ export function PearlApp({
                             return (
                               <div className="pearl-task-summary">
                                 <strong>
-                                  {changes.files.length} project change
+                                  {changes.files.length}{" "}
+                                  {changes.source === "sandbox"
+                                    ? "Sandbox"
+                                    : "local"}{" "}
+                                  change
                                   {changes.files.length === 1 ? "" : "s"}
                                 </strong>
                                 {changes.reason && (
@@ -930,7 +1125,7 @@ export function PearlApp({
                                         })
                                       }
                                     >
-                                      Undo…
+                                      Undo
                                     </button>
                                   )}
                               </div>
@@ -943,24 +1138,22 @@ export function PearlApp({
                     !chat.lifecycle &&
                     chat.streamingText && (
                       <PearlMessageFrame role="assistant" draft>
-                        <RichText text={chat.streamingText} />
+                        <RichText
+                          text={chat.streamingText}
+                          onOpenLink={openPearlLink}
+                        />
                       </PearlMessageFrame>
                     )}
                   {chat?.status === "running" && !chat.lifecycle && (
-                    <div className="pearl-working">
+                    <div className="pearl-working" role="status">
                       {chat.retryHint
                         ? "Pearl is retrying from your saved chat. Waiting for Nebius."
-                        : "Pearl is working…"}{" "}
-                      <button
-                        className="pearl-stop"
-                        onClick={() =>
-                          void action(() =>
-                            mutateChat(() => api.stopPearlChat(chat.id)),
-                          )
-                        }
-                      >
-                        Stop
-                      </button>
+                        : "Pearl is working"}
+                      <span className="pearl-wait-dots" aria-hidden="true">
+                        <span>.</span>
+                        <span>.</span>
+                        <span>.</span>
+                      </span>
                     </div>
                   )}
                   {chat?.project &&
@@ -1076,11 +1269,13 @@ export function PearlApp({
                       aria-label={
                         chat.pendingTool.name === "edit_files"
                           ? "File transaction review"
-                          : chat.pendingTool.name === "sandbox_run_check"
-                            ? "Sandbox check approval"
-                            : chat.pendingTool.name === "mcp_call_tool"
-                              ? "Remote MCP tool approval"
-                              : "Command approval"
+                          : chat.pendingTool.name === "install_dependencies"
+                            ? "Dependency installation approval"
+                            : chat.pendingTool.name === "sandbox_run_check"
+                              ? "Sandbox check approval"
+                              : chat.pendingTool.name === "mcp_call_tool"
+                                ? "Remote MCP tool approval"
+                                : "Command approval"
                       }
                     >
                       <ShieldCheck size={20} />
@@ -1088,59 +1283,72 @@ export function PearlApp({
                         <strong>
                           {chat.pendingTool.name === "edit_files"
                             ? `Review ${chat.pendingTool.review?.files || 0} file changes`
-                            : chat.pendingTool.name === "sandbox_run_check"
-                              ? "Approve remote Sandbox check?"
-                              : chat.pendingTool.name === "mcp_call_tool"
-                                ? "Approve remote tool call?"
-                                : "Approve command?"}
+                            : chat.pendingTool.name === "install_dependencies"
+                              ? `Install dependencies${pendingCommandLabel ? `: ${pendingCommandLabel}` : ""}`
+                              : chat.pendingTool.name === "sandbox_run_check"
+                                ? `Run Sandbox check${pendingCommandLabel ? `: ${pendingCommandLabel}` : ""}`
+                                : chat.pendingTool.name === "mcp_call_tool"
+                                  ? "Approve remote tool call?"
+                                  : "Approve command?"}
                         </strong>
+                        {pendingApprovalSequence && (
+                          <p className="pearl-approval-sequence">
+                            {pendingApprovalSequence}
+                          </p>
+                        )}
                         <p>
                           {chat.pendingTool.name === "edit_files"
                             ? "Pearl proposes one file transaction. Review the complete diff. The backend checks every file again before applying it; a changed file rejects the batch."
-                            : chat.pendingTool.name === "sandbox_run_check"
-                              ? `Run this exact command once in the selected Nebius Sandbox checkpoint (${chat.pendingTool.remoteRevision || "unknown"}). File writes from this check are discarded. Its output enters Pearl's chat context.`
-                              : chat.pendingTool.name === "mcp_call_tool"
-                                ? `Send these arguments to ${chat.pendingTool.remoteEndpoint || "the remote MCP server"} and run this tool once. The server may change external data. Its result will enter Pearl's chat context and go to the selected Nebius model. Approve only if you trust the endpoint and arguments.`
-                                : chat.pendingTool.name === "preview_app"
-                                  ? "Start the project server and an isolated browser for this turn, up to ten minutes. Pearl can continue interacting with it; form actions can change project data. Stop ends the preview."
-                                  : chat.pendingTool.name === "start_terminal"
-                                    ? "Start this command in an interactive terminal until you stop it or close the app. Only you can type into it; your input can run further commands inside the project sandbox."
-                                    : "This runs once inside the selected project."}
+                            : chat.pendingTool.name === "install_dependencies"
+                              ? chat.sandbox?.active
+                                ? `Run this exact installation once with network access in the selected Sandbox checkpoint (${chat.pendingTool.remoteRevision || "unknown"}). Package files and workspace changes are saved to a new checkpoint. Review the command and package source before approving.`
+                                : "Run this exact installation once with network access inside the approved project. Package files may be downloaded and project files may change. Review the command and package source before approving."
+                              : chat.pendingTool.name === "sandbox_run_check"
+                                ? `Run this exact command once in the selected Nebius Sandbox checkpoint (${chat.pendingTool.remoteRevision || "unknown"}). File writes from this check are discarded. Its output enters Pearl's chat context.`
+                                : chat.pendingTool.name === "mcp_call_tool"
+                                  ? `Send these arguments to ${chat.pendingTool.remoteEndpoint || "the remote MCP server"} and run this tool once. The server may change external data. Its result will enter Pearl's chat context and go to the selected Nebius model. Approve only if you trust the endpoint and arguments.`
+                                  : chat.pendingTool.name === "preview_app"
+                                    ? "Start the project server and an isolated browser for this turn, up to ten minutes. Pearl can continue interacting with it; form actions can change project data. Stop ends the preview."
+                                    : chat.pendingTool.name === "start_terminal"
+                                      ? "Start this command in an interactive terminal until you stop it or close the app. Only you can type into it; your input can run further commands inside the project sandbox."
+                                      : "This runs once inside the selected project."}
                         </p>
                         <pre>
                           {chat.pendingTool.name === "edit_files"
                             ? chat.pendingTool.review?.diff ||
                               "Diff unavailable"
-                            : chat.pendingTool.name === "sandbox_run_check"
+                            : chat.pendingTool.name === "install_dependencies"
                               ? chat.pendingTool.arguments
-                              : chat.pendingTool.name === "mcp_call_tool"
-                                ? JSON.stringify(
-                                    JSON.parse(chat.pendingTool.arguments),
-                                    null,
-                                    2,
-                                  )
-                                : command
+                              : chat.pendingTool.name === "sandbox_run_check"
+                                ? chat.pendingTool.arguments
+                                : chat.pendingTool.name === "mcp_call_tool"
                                   ? JSON.stringify(
-                                      {
-                                        executable:
-                                          chat.pendingTool.executable?.path,
-                                        argv: [
-                                          command.command,
-                                          ...(command.args || []),
-                                        ],
-                                        ...(chat.pendingTool.name ===
-                                        "preview_app"
-                                          ? {
-                                              browser: JSON.parse(
-                                                chat.pendingTool.arguments,
-                                              ),
-                                            }
-                                          : {}),
-                                      },
+                                      JSON.parse(chat.pendingTool.arguments),
                                       null,
                                       2,
                                     )
-                                  : chat.pendingTool.arguments}
+                                  : command
+                                    ? JSON.stringify(
+                                        {
+                                          executable:
+                                            chat.pendingTool.executable?.path,
+                                          argv: [
+                                            command.command,
+                                            ...(command.args || []),
+                                          ],
+                                          ...(chat.pendingTool.name ===
+                                          "preview_app"
+                                            ? {
+                                                browser: JSON.parse(
+                                                  chat.pendingTool.arguments,
+                                                ),
+                                              }
+                                            : {}),
+                                        },
+                                        null,
+                                        2,
+                                      )
+                                    : chat.pendingTool.arguments}
                         </pre>
                         <button
                           onClick={() =>
@@ -1159,7 +1367,11 @@ export function PearlApp({
                             ? "Apply changes"
                             : chat.pendingTool.name === "mcp_call_tool"
                               ? "Call once"
-                              : "Run once"}
+                              : chat.pendingTool.name === "install_dependencies"
+                                ? "Install dependencies"
+                                : chat.pendingTool.name === "sandbox_run_check"
+                                  ? "Run check"
+                                  : "Run once"}
                         </button>
                         <button
                           className="quiet"
@@ -1240,16 +1452,47 @@ export function PearlApp({
                       >
                         <div>
                           <strong>
-                            {chat.status === "paused"
-                              ? "Work paused"
-                              : "Turn interrupted"}
+                            {chat.pauseKind === "completion_missing" ||
+                            chat.pauseKind === "completion_rejected" ||
+                            chat.error?.startsWith(
+                              "Required completion action",
+                            ) ||
+                            chat.error?.startsWith(
+                              "The selected model rejected Scully's required completion action",
+                            )
+                              ? "Pearl could not finish this turn"
+                              : chat.status === "paused"
+                                ? "Work paused"
+                                : "Turn interrupted"}
                           </strong>
                           <p>{chat.error}</p>
                           {chat.status === "paused" && chat.pausedDraft && (
                             <details className="pearl-paused-draft">
                               <summary>View Pearl's unverified draft</summary>
-                              <RichText text={chat.pausedDraft} readableProse />
+                              <RichText
+                                text={chat.pausedDraft}
+                                readableProse
+                                onOpenLink={openPearlLink}
+                              />
                             </details>
+                          )}
+                          {(chat.pauseKind === "completion_missing" ||
+                            chat.pauseKind === "completion_rejected" ||
+                            chat.error?.startsWith(
+                              "Required completion action",
+                            ) ||
+                            chat.error?.startsWith(
+                              "The selected model rejected Scully's required completion action",
+                            )) && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSettingsSection("models");
+                                setPanel("settings");
+                              }}
+                            >
+                              Choose another model
+                            </button>
                           )}
                           <button
                             onClick={() =>
@@ -1287,7 +1530,10 @@ export function PearlApp({
                   api={api}
                   chat={chat}
                   onChange={setChat}
-                  onSettings={() => setPanel("settings")}
+                  onSettings={() => {
+                    setSettingsSection("connections");
+                    setPanel("settings");
+                  }}
                   onInspect={() => openInspector({ kind: "sandbox" })}
                   onOpenFile={(review) =>
                     openWorkbench({
@@ -1302,6 +1548,48 @@ export function PearlApp({
                 className="pearl-composer"
                 onSubmit={(event) => void send(event)}
               >
+                {chat?.pendingAttachments?.length ? (
+                  <div
+                    className="pearl-attachment-list"
+                    aria-label="Attached files"
+                  >
+                    {chat.pendingAttachments.map((item) => (
+                      <div className="pearl-attachment-chip" key={item.id}>
+                        <span>{item.name}</span>
+                        <small>
+                          {item.kind === "pdf" && item.pages
+                            ? `${item.pages} pages`
+                            : item.kind}
+                        </small>
+                        <button
+                          type="button"
+                          aria-label={`Remove ${item.name}`}
+                          onClick={() =>
+                            void action(() =>
+                              mutateChat(() =>
+                                api.removePearlAttachment(chat.id, item.id),
+                              ),
+                            )
+                          }
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                <input
+                  ref={attachmentInput}
+                  type="file"
+                  hidden
+                  style={{ display: "none" }}
+                  tabIndex={-1}
+                  multiple
+                  accept="image/png,image/jpeg,image/webp,.pdf,.docx,.txt,.md,.markdown,.csv,.json"
+                  className="pearl-attachment-input"
+                  aria-label="Choose files to attach"
+                  onChange={(event) => void addAttachments(event)}
+                />
                 <textarea
                   ref={composerInput}
                   aria-label="Message Pearl"
@@ -1315,9 +1603,15 @@ export function PearlApp({
                 <div className="pearl-composer-toolbar">
                   <button
                     type="button"
-                    aria-label="Add files (coming soon)"
-                    title="Add files (coming soon)"
-                    disabled
+                    aria-label="Attach images or documents"
+                    title="Attach images or documents"
+                    disabled={
+                      busy ||
+                      Boolean(chat?.lifecycle) ||
+                      chat?.status === "running" ||
+                      (chat?.pendingAttachments?.length || 0) >= 4
+                    }
+                    onClick={() => attachmentInput.current?.click()}
                   >
                     <Paperclip size={16} aria-hidden="true" />
                   </button>
@@ -1325,35 +1619,77 @@ export function PearlApp({
                     type="button"
                     className="pearl-composer-model"
                     aria-label="Choose model"
-                    title="Choose model"
-                    onClick={() => setPanel("settings")}
+                    title={selectedModel || "Choose model"}
+                    onClick={() => {
+                      setSettingsSection("models");
+                      setPanel("settings");
+                    }}
                   >
-                    <Sparkles size={15} aria-hidden="true" /> Model
+                    <Sparkles size={15} aria-hidden="true" />{" "}
+                    {modelCatalog.find((item) => item.id === selectedModel)
+                      ?.name ||
+                      selectedModel?.split("/").at(-1) ||
+                      "Choose model"}
                   </button>
                   <button
                     type="button"
-                    aria-label="Permissions (coming soon)"
-                    title="Permissions (coming soon)"
-                    disabled
+                    className="pearl-composer-permissions"
+                    aria-label="View Pearl permissions"
+                    title={
+                      chat?.project?.approved
+                        ? "Project access approved. Commands require individual approval."
+                        : "No project approved. Commands require individual approval."
+                    }
+                    onClick={() => {
+                      setSettingsSection("permissions");
+                      setPanel("settings");
+                    }}
                   >
                     <ShieldCheck size={16} aria-hidden="true" />
                   </button>
                   <button
                     className="pearl-composer-send"
-                    aria-label="Send message"
+                    type={chat?.status === "running" ? "button" : "submit"}
+                    aria-label={
+                      chat?.status === "running" ? "Stop Pearl" : "Send message"
+                    }
+                    title={
+                      chat?.status === "running"
+                        ? "Stop Pearl"
+                        : attachmentBlockReason || "Send message"
+                    }
+                    onClick={
+                      chat?.status === "running"
+                        ? () => {
+                            void action(() =>
+                              mutateChat(() => api.stopPearlChat(chat.id)),
+                            );
+                          }
+                        : undefined
+                    }
                     disabled={
-                      !draft.trim() ||
                       Boolean(chat?.lifecycle) ||
-                      chat?.status === "running" ||
-                      chat?.status === "awaiting_approval" ||
-                      chat?.sandbox?.status === "uploading" ||
-                      chat?.sandbox?.status === "uncertain" ||
-                      busy
+                      (chat?.status !== "running" &&
+                        ((!draft.trim() && !chat?.pendingAttachments?.length) ||
+                          Boolean(attachmentBlockReason) ||
+                          chat?.status === "awaiting_approval" ||
+                          chat?.sandbox?.status === "uploading" ||
+                          chat?.sandbox?.status === "uncertain" ||
+                          busy))
                     }
                   >
-                    <Send size={15} aria-hidden="true" />
+                    {chat?.status === "running" ? (
+                      <Square size={14} aria-hidden="true" />
+                    ) : (
+                      <Send size={15} aria-hidden="true" />
+                    )}
                   </button>
                 </div>
+                {attachmentBlockReason && (
+                  <small className="pearl-attachment-warning" role="status">
+                    {attachmentBlockReason}
+                  </small>
+                )}
               </form>
               <div className="pearl-footer">
                 Pearl can make mistakes. Review code changes and command
@@ -1371,6 +1707,10 @@ export function PearlApp({
                   width={inspectorWidth}
                   onResizeStart={startResize}
                   onClose={() => setInspector(null)}
+                  onOpenSettings={() => {
+                    setSettingsSection("connections");
+                    setPanel("settings");
+                  }}
                   onOpenFile={(review) =>
                     openWorkbench({
                       path: review.path,
@@ -1392,7 +1732,13 @@ export function PearlApp({
                   onOpenFile={(file) =>
                     openWorkbench({
                       ...file,
-                      source: "Local",
+                      source:
+                        shownInspector.kind === "review" &&
+                        chat.taskChanges?.find(
+                          (item) => item.turnId === shownInspector.turnId,
+                        )?.source === "sandbox"
+                          ? "Sandbox"
+                          : "Local",
                     })
                   }
                   onUndo={(turnId) => {

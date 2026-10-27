@@ -55,6 +55,20 @@ it("does not turn unsafe links or image Markdown into active content", () => {
   expect(document.querySelector("img")).toBeNull();
 });
 
+it("routes web links through the confirmation action", () => {
+  const open = vi.fn();
+  render(
+    <RichText
+      text="[Project](https://example.com/repo) [Old site](http://example.com/)"
+      onOpenLink={open}
+    />,
+  );
+  fireEvent.click(screen.getByRole("link", { name: "Project" }));
+  fireEvent.click(screen.getByRole("link", { name: "Old site" }));
+  expect(open).toHaveBeenCalledWith("https://example.com/repo");
+  expect(open).toHaveBeenCalledWith("http://example.com/");
+});
+
 it("keeps nested lists, quotes, tables and fenced code as formatted blocks", () => {
   render(
     <RichText

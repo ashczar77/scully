@@ -21,6 +21,13 @@ export type CheckOutcome = {
   unknown: boolean;
 };
 export type OperationUpdate = (operation: CollaborationOperation) => void;
+export type TransferProgress = (progress: {
+  phase: "transferring" | "verifying";
+  uploadedBytes: number;
+  totalBytes: number;
+  completedFiles: number;
+  totalFiles: number;
+}) => void;
 export type CollaborationWorkspace = {
   prepare(
     files: SourceFile[],
@@ -28,6 +35,7 @@ export type CollaborationWorkspace = {
     actor: string,
     revision: string,
     update: OperationUpdate,
+    progress?: TransferProgress,
   ): Promise<string | null>;
   write(
     imageId: string | null,
@@ -47,6 +55,14 @@ export type CollaborationWorkspace = {
     revision: string,
     update: OperationUpdate,
   ): Promise<CheckOutcome>;
+  install?(
+    imageId: string,
+    command: string,
+    args: string[],
+    actor: string,
+    revision: string,
+    update: OperationUpdate,
+  ): Promise<{ outcome: CheckOutcome; imageId: string }>;
   reconcile(operation: CollaborationOperation): Promise<{
     status: "running" | "complete" | "failed";
     resultImageId: string | null;
@@ -187,6 +203,7 @@ export function sandboxCollaborationWorkspace(
     stage: string,
     publish: OperationUpdate,
     cwd = "/workspace",
+    network = false,
   ) {
     const record = operation(actor, stage, revision);
     publish(record);
@@ -199,6 +216,7 @@ export function sandboxCollaborationWorkspace(
           cwd,
           timeoutSeconds: 120,
           saveChanges,
+          network,
           files: attached,
         },
         true,
@@ -229,8 +247,23 @@ export function sandboxCollaborationWorkspace(
     actor: string,
     revision: string,
     publish: OperationUpdate,
+    progress?: TransferProgress,
   ) {
     let head = imageId;
+    const totalBytes = files.reduce(
+      (sum, file) => sum + Buffer.byteLength(file.content),
+      0,
+    );
+    let uploadedBytes = 0;
+    let completedFiles = 0;
+    const report = () =>
+      progress?.({
+        phase: "transferring",
+        uploadedBytes,
+        totalBytes,
+        completedFiles,
+        totalFiles: files.length,
+      });
     const transferBatch = async (batch: SourceFile[]) => {
       const attached: Record<
         string,
@@ -239,6 +272,9 @@ export function sandboxCollaborationWorkspace(
       for (const file of batch) {
         safePath(file.path);
         const upload = await client.upload(file.content);
+        uploadedBytes += Buffer.byteLength(file.content);
+        completedFiles++;
+        report();
         attached[`/workspace/${file.path}`] = {
           uuid: upload.uuid,
           uid: 0,
@@ -311,6 +347,8 @@ export function sandboxCollaborationWorkspace(
           piece = file.content.slice(start, end);
         }
         const upload = await client.upload(piece);
+        uploadedBytes += Buffer.byteLength(piece);
+        report();
         attached[`/workspace/${temporary}/${String(index).padStart(4, "0")}`] =
           {
             uuid: upload.uuid,
@@ -341,12 +379,14 @@ export function sandboxCollaborationWorkspace(
         throw new Error("Large Sandbox upload produced no usable checkpoint");
       await client.inspectImage(result.resultImage);
       head = result.resultImage;
+      completedFiles++;
+      report();
     }
     if (batch.length) await transferBatch(batch);
     return head;
   }
   return {
-    async prepare(files, imageId, actor, revision, publish) {
+    async prepare(files, imageId, actor, revision, publish, progress) {
       if (!imageId) throw new Error("Choose a starting Sandbox image");
       await client.inspectImage(imageId);
       let head = imageId;
@@ -376,7 +416,25 @@ export function sandboxCollaborationWorkspace(
         if ((await client.listFiles(head)).length)
           throw new Error("Created Sandbox workspace is not empty");
       }
-      const prepared = await transfer(head, files, actor, revision, publish);
+      const prepared = await transfer(
+        head,
+        files,
+        actor,
+        revision,
+        publish,
+        progress,
+      );
+      const totalBytes = files.reduce(
+        (sum, file) => sum + Buffer.byteLength(file.content),
+        0,
+      );
+      progress?.({
+        phase: "verifying",
+        uploadedBytes: totalBytes,
+        totalBytes,
+        completedFiles: files.length,
+        totalFiles: files.length,
+      });
       for (const file of files)
         if ((await client.downloadFile(prepared, file.path)) !== file.content)
           throw new Error(
@@ -428,6 +486,52 @@ export function sandboxCollaborationWorkspace(
         stderr: result.stderr,
         passed: result.commandPassed,
         unknown: false,
+      };
+    },
+    async install(imageId, command, args, actor, revision, publish) {
+      const executable = await client.inspectExecutable(imageId, command);
+      if (!executable)
+        throw new Error(
+          `The selected Sandbox image does not contain ${command}`,
+        );
+      const result = await submit(
+        imageId,
+        {},
+        executable,
+        args,
+        true,
+        actor,
+        revision,
+        "install",
+        publish,
+        "/workspace",
+        true,
+      );
+      if (!result.commandPassed)
+        return {
+          imageId,
+          outcome: {
+            exitCode: result.exitCode,
+            stdout: result.stdout,
+            stderr: result.stderr,
+            passed: false,
+            unknown: false,
+          },
+        };
+      if (!result.resultImage)
+        throw new Error(
+          "Dependency installation did not produce a usable Sandbox checkpoint",
+        );
+      await client.inspectImage(result.resultImage);
+      return {
+        imageId: result.resultImage,
+        outcome: {
+          exitCode: result.exitCode,
+          stdout: result.stdout,
+          stderr: result.stderr,
+          passed: result.commandPassed,
+          unknown: false,
+        },
       };
     },
     async reconcile(record) {

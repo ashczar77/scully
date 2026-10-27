@@ -3,6 +3,44 @@ import { expect, it, vi } from "vitest";
 import { runPearlAgentTurn } from "../src/main/pearl-agent-runtime";
 import type { PearlChat } from "../src/shared/pearl-chat";
 
+it("asks for the Sandbox check tool after a Sandbox edit", async () => {
+  const chat: PearlChat = {
+    id: "12345678-1234-1234-1234-123456789abc",
+    title: "Sandbox chat",
+    createdAt: "now",
+    updatedAt: "now",
+    status: "running",
+    messages: [],
+    questions: [],
+    sandbox: { active: true } as PearlChat["sandbox"],
+  };
+  const request = vi
+    .fn()
+    .mockResolvedValueOnce({ kind: "reply", text: "Edited the file." })
+    .mockResolvedValueOnce({
+      kind: "tool",
+      text: "",
+      call: { id: "check", name: "sandbox_run_check", arguments: "{}" },
+    });
+  await runPearlAgentTurn(
+    {
+      load: () => chat,
+      allowedTools: () => ["sandbox_run_check", "complete_work"],
+      request,
+      recordActions: () => {},
+      observe: () => {},
+      execute: async () => "finished",
+      finish: () => {},
+      pause: () => {},
+      needsCheck: () => true,
+      needsCompletion: () => true,
+    },
+    new AbortController().signal,
+  );
+  expect(request.mock.calls[1][3]).toContain("sandbox_run_check");
+  expect(request.mock.calls[1][3]).not.toContain("through run_command");
+});
+
 it("pauses on elapsed time before requesting another model response", async () => {
   const chat: PearlChat = {
     id: "12345678-1234-1234-1234-123456789abc",

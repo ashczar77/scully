@@ -65,6 +65,8 @@ const responses = [
     ],
   },
   { content: "I created index.html. I have not run tests yet." },
+  { content: "The page edit is still waiting for a check." },
+  { content: "The rendered page has not been checked either." },
   {
     content: "I will record the result and its verification status.",
     tool: [
@@ -399,6 +401,17 @@ try {
     "Inspect this project and create the first page without overwriting my README.",
   );
   assert.equal(chat.status, "idle");
+  assert.equal(chat.messages.at(-1).completion.status, "unverified");
+  assert(
+    requests.some(
+      (request) =>
+        request.tool_choice?.function?.name === "complete_work" &&
+        request.tools?.length === 1 &&
+        request.tools[0]?.function?.name === "complete_work",
+    ),
+    `The desktop must require a completion action after a plain reply following a file edit: ${JSON.stringify(requests.slice(-5).map((request) => ({ toolChoice: request.tool_choice, tools: request.tools?.map((tool) => tool.function?.name) })))}`,
+  );
+  await page.getByText(/Work status: not checked/).waitFor();
   assert.equal(
     await page
       .locator(".pearl-message.assistant")

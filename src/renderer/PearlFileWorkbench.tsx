@@ -1,8 +1,21 @@
-import { useEffect, useMemo, useState } from "react";
-import { MoreHorizontal, Search, X } from "lucide-react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  MoreHorizontal,
+  Search,
+  X,
+} from "lucide-react";
 import type { FileReview } from "../shared/pearl-workspace";
 import { PearlCodePreview } from "./PearlCodePreview";
-import { reviewLines } from "./PearlWorkspacePanel";
+import { lineChanges } from "./pearl-line-diff";
 
 export type WorkbenchFile = {
   id: string;
@@ -32,16 +45,46 @@ export function PearlFileWorkbench({
   const [query, setQuery] = useState("");
   const [matchLine, setMatchLine] = useState<number | null>(null);
   const [menuTabId, setMenuTabId] = useState<string | null>(null);
+  const tabStrip = useRef<HTMLDivElement>(null);
+  const comparison = useRef<HTMLDivElement>(null);
+  const [tabEdges, setTabEdges] = useState({ left: false, right: false });
+  const [beforeWidth, setBeforeWidth] = useState(50);
+  useLayoutEffect(() => {
+    const strip = tabStrip.current;
+    if (!strip) return;
+    const update = () =>
+      setTabEdges({
+        left: strip.scrollLeft > 2,
+        right: strip.scrollLeft + strip.clientWidth < strip.scrollWidth - 2,
+      });
+    const selected = strip.querySelector<HTMLElement>(
+      '[role="tab"][aria-selected="true"]',
+    );
+    if (selected && typeof strip.scrollBy === "function") {
+      const stripRect = strip.getBoundingClientRect();
+      const selectedRect = selected.getBoundingClientRect();
+      if (selectedRect.left < stripRect.left)
+        strip.scrollBy({
+          left: selectedRect.left - stripRect.left,
+          behavior: "smooth",
+        });
+      else if (selectedRect.right > stripRect.right)
+        strip.scrollBy({
+          left: selectedRect.right - stripRect.right,
+          behavior: "smooth",
+        });
+    }
+    update();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(update);
+    observer.observe(strip);
+    return () => observer.disconnect();
+  }, [files.length, activeId]);
   const content = active?.review?.after ?? active?.content ?? "";
   const before = active?.review?.before ?? "";
-  const compactDiff = useMemo(
-    () =>
-      active?.review &&
-      before.length + content.length <= 1_000_000 &&
-      before.split("\n").length * content.split("\n").length <= 160_000
-        ? reviewLines(before, content)
-        : null,
-    [active?.review, before, content],
+  const changes = useMemo(
+    () => lineChanges(before, content),
+    [before, content],
   );
   useEffect(() => {
     setMode(active?.review ? "changes" : "current");
@@ -50,7 +93,7 @@ export function PearlFileWorkbench({
   }, [active?.id]);
   useEffect(() => {
     if (!menuTabId) return;
-    const dismiss = (event: PointerEvent) => {
+    const dismiss = (event: globalThis.PointerEvent) => {
       if (
         !(event.target instanceof Element) ||
         !event.target.closest(".pearl-file-workbench-menu-wrap")
@@ -80,13 +123,70 @@ export function PearlFileWorkbench({
     const index = content.toLowerCase().indexOf(query.toLowerCase());
     setMatchLine(index < 0 ? null : content.slice(0, index).split("\n").length);
   }
+  function scrollTabs(direction: -1 | 1) {
+    const strip = tabStrip.current;
+    strip?.scrollBy?.({
+      left: direction * Math.max(160, strip.clientWidth * 0.65),
+      behavior: "smooth",
+    });
+  }
+  function startComparisonResize(event: ReactPointerEvent<HTMLDivElement>) {
+    const bounds = comparison.current?.getBoundingClientRect();
+    if (!bounds?.width) return;
+    event.preventDefault();
+    const move = (next: globalThis.PointerEvent) =>
+      setBeforeWidth(
+        Math.max(
+          25,
+          Math.min(
+            75,
+            Math.round(((next.clientX - bounds.left) / bounds.width) * 100),
+          ),
+        ),
+      );
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop, { once: true });
+    window.addEventListener("pointercancel", stop, { once: true });
+  }
   return (
     <section className="pearl-file-workbench" aria-label="File editor">
       <header className="pearl-file-workbench-head">
+        <button
+          type="button"
+          className="pearl-file-tab-scroll"
+          aria-label="Scroll tabs left"
+          disabled={!tabEdges.left}
+          onClick={() => scrollTabs(-1)}
+        >
+          <ChevronLeft size={16} aria-hidden="true" />
+        </button>
         <div
-          className="pearl-file-workbench-tabs"
+          ref={tabStrip}
+          className={`pearl-file-workbench-tabs${tabEdges.left ? " has-left-overflow" : ""}${tabEdges.right ? " has-right-overflow" : ""}`}
           role="tablist"
           aria-label="Open files"
+          onWheel={(event) => {
+            if (event.deltaX || !event.deltaY) return;
+            const strip = tabStrip.current;
+            if (strip && strip.scrollWidth > strip.clientWidth) {
+              event.preventDefault();
+              strip.scrollLeft += event.deltaY;
+            }
+          }}
+          onScroll={() => {
+            const strip = tabStrip.current;
+            if (strip)
+              setTabEdges({
+                left: strip.scrollLeft > 2,
+                right:
+                  strip.scrollLeft + strip.clientWidth < strip.scrollWidth - 2,
+              });
+          }}
         >
           {files.map((file) => (
             <div className="pearl-file-workbench-tab" key={file.id}>
@@ -111,6 +211,15 @@ export function PearlFileWorkbench({
             </div>
           ))}
         </div>
+        <button
+          type="button"
+          className="pearl-file-tab-scroll"
+          aria-label="Scroll tabs right"
+          disabled={!tabEdges.right}
+          onClick={() => scrollTabs(1)}
+        >
+          <ChevronRight size={16} aria-hidden="true" />
+        </button>
         <div className="pearl-file-workbench-menu-wrap">
           <button
             type="button"
@@ -233,31 +342,52 @@ export function PearlFileWorkbench({
             content={content}
             jumpLine={matchLine}
           />
-        ) : compactDiff ? (
-          <pre className="pearl-diff" aria-label="File changes">
-            {compactDiff.map((line, index) => (
-              <div className={line.kind} key={index}>
-                <span>
-                  {line.kind === "added"
-                    ? "+"
-                    : line.kind === "removed"
-                      ? "−"
-                      : " "}
-                </span>
-                {line.text || " "}
-              </div>
-            ))}
-          </pre>
         ) : (
-          <div className="pearl-file-workbench-side-by-side">
+          <div
+            className="pearl-file-workbench-side-by-side"
+            ref={comparison}
+            style={{
+              gridTemplateColumns: `minmax(0, ${beforeWidth}fr) 6px minmax(0, ${100 - beforeWidth}fr)`,
+            }}
+          >
             <section>
               <strong>Before</strong>
               <PearlCodePreview
                 key={`${active.id}:before`}
                 path={active.path}
                 content={before}
+                changedLines={changes.removed}
+                changeKind="removed"
               />
             </section>
+            <div
+              className="pearl-file-comparison-resize"
+              role="separator"
+              aria-label="Resize comparison"
+              aria-orientation="vertical"
+              aria-valuemin={25}
+              aria-valuemax={75}
+              aria-valuenow={beforeWidth}
+              tabIndex={0}
+              onPointerDown={startComparisonResize}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+                  event.preventDefault();
+                  setBeforeWidth((value) =>
+                    Math.max(
+                      25,
+                      Math.min(
+                        75,
+                        value + (event.key === "ArrowLeft" ? -5 : 5),
+                      ),
+                    ),
+                  );
+                } else if (event.key === "Home" || event.key === "End") {
+                  event.preventDefault();
+                  setBeforeWidth(event.key === "Home" ? 25 : 75);
+                }
+              }}
+            />
             <section>
               <strong>After</strong>
               <PearlCodePreview
@@ -265,6 +395,8 @@ export function PearlFileWorkbench({
                 path={active.path}
                 content={content}
                 jumpLine={matchLine}
+                changedLines={changes.added}
+                changeKind="added"
               />
             </section>
           </div>

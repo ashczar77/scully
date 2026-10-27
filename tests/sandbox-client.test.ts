@@ -5,6 +5,21 @@ import { sandboxBody, sandboxClient } from "../src/engine/sandbox";
 const image = "11111111-1111-1111-1111-111111111111";
 const config = { key: "test-key", projectId: "test-project" };
 
+it("keeps remote checks offline and requires an explicit network choice for installs", () => {
+  const command = {
+    image,
+    command: "/bin/true",
+    args: [],
+    cwd: "/workspace",
+    timeoutSeconds: 30,
+    saveChanges: true,
+  };
+  expect(sandboxBody(command).networking).toEqual({ enabled: false });
+  expect(sandboxBody({ ...command, network: true }).networking).toEqual({
+    enabled: true,
+  });
+});
+
 it("accepts ordinary source names in transfers while rejecting private and escaping paths", () => {
   const command = {
     image,

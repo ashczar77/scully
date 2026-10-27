@@ -25,7 +25,11 @@ import type {
   PearlSandboxSnapshot,
 } from "../shared/pearl-sandbox";
 import type { CollaborationOperation } from "../shared/collaboration";
-import type { FileReview, TaskFileChange } from "../shared/pearl-workspace";
+import type {
+  FileReview,
+  TaskChangeSet,
+  TaskFileChange,
+} from "../shared/pearl-workspace";
 import {
   containsSecret,
   safePath,
@@ -77,7 +81,7 @@ function binding(chat: PearlChat): ProjectWorkspace {
 
 export class PearlSandboxService {
   private config: CloudConfig | null = null;
-  private catalog = new Set<string>();
+  private catalog = new Map<string, string>();
   private recordOperation(
     state: PearlSandboxState,
     operation: CollaborationOperation,
@@ -131,12 +135,17 @@ export class PearlSandboxService {
   }
   async images(): Promise<PearlSandboxImageList> {
     const result = await this.client().images("");
-    this.catalog = new Set(result.images.map((image) => image.uuid));
+    this.catalog = new Map(
+      result.images.map((image) => [image.uuid, image.tag || image.uuid]),
+    );
     return result;
   }
   private client(projectId?: string): Client {
-    if (!this.config || (projectId && this.config.projectId !== projectId))
-      throw new Error("Connect the same Nebius Sandbox project in Settings");
+    if (!this.config) throw new Error("Connect to Nebius Sandbox in Settings");
+    if (projectId && this.config.projectId !== projectId)
+      throw new Error(
+        "This chat uses a different Nebius Sandbox project. Connect that project in Settings",
+      );
     return this.clientFactory(this.config);
   }
   private baselinePath(chat: PearlChat): string {
@@ -243,6 +252,7 @@ export class PearlSandboxService {
       projectId: this.config!.projectId,
       projectPath: project.path,
       baseImage: imageId,
+      baseImageTag: this.catalog.get(imageId),
       baseDigest,
       manifest: source.manifest,
       excluded: source.excluded,
@@ -267,8 +277,17 @@ export class PearlSandboxService {
     const client = this.client(state.projectId);
     state.lastOperation = undefined;
     state.status = "uploading";
+    state.uploadProgress = {
+      phase: "preparing",
+      uploadedBytes: 0,
+      totalBytes: state.manifest.reduce((sum, file) => sum + file.bytes, 0),
+      completedFiles: 0,
+      totalFiles: state.manifest.length,
+    };
     publish();
     try {
+      let reportedBytes = 0;
+      let reportedFiles = 0;
       let existing: Awaited<ReturnType<Client["listFiles"]>> = [];
       try {
         existing = await client.listFiles(state.baseImage);
@@ -291,6 +310,19 @@ export class PearlSandboxService {
           this.recordOperation(state, operation);
           publish();
         },
+        (progress) => {
+          state.uploadProgress = progress;
+          if (
+            progress.phase === "verifying" ||
+            progress.uploadedBytes - reportedBytes >= 4 * 1024 * 1024 ||
+            progress.completedFiles - reportedFiles >= 25 ||
+            progress.completedFiles === progress.totalFiles
+          ) {
+            reportedBytes = progress.uploadedBytes;
+            reportedFiles = progress.completedFiles;
+            publish();
+          }
+        },
       );
       if (!head) throw new Error("Sandbox upload returned no saved checkpoint");
       const first: PearlSandboxBranch = {
@@ -305,6 +337,7 @@ export class PearlSandboxService {
       state.branches = [first];
       state.activeBranchId = first.id;
       state.status = "ready";
+      state.uploadProgress = undefined;
       state.active = true;
       state.pendingSync = undefined;
       publish();
@@ -319,6 +352,7 @@ export class PearlSandboxService {
           : remoteOperation?.remoteId || error instanceof SandboxRequestError
             ? "uncertain"
             : "prepared";
+      state.uploadProgress = undefined;
       publish();
       throw error;
     }
@@ -381,15 +415,9 @@ export class PearlSandboxService {
         bytes: Buffer.byteLength(content),
         sha256: hash(content),
       }));
-      const continued: PearlSandboxBranch = {
-        id: randomUUID(),
-        name: selected.name,
-        headImage: selected.headImage,
-        files: { ...selected.files },
-        checks: [],
-      };
-      state.branches = [continued];
-      state.activeBranchId = continued.id;
+      selected.checks = [];
+      selected.syncedHead = undefined;
+      state.activeBranchId = selected.id;
     } else state.activeBranchId = branchId;
     state.active = true;
     state.pendingSync = undefined;
@@ -649,6 +677,20 @@ export class PearlSandboxService {
       selected.headImage = head;
       selected.files[pending.path] = pending.sha256;
       state.pendingWrite = undefined;
+    } else if (state.pendingInstall) {
+      const pending = state.pendingInstall;
+      const selected = state.branches.find(
+        (item) => item.id === pending.branchId,
+      );
+      if (!selected || selected.headImage !== pending.baseHead)
+        throw new Error("Sandbox branch moved during installation recovery");
+      selected.files = await this.installedSourceFiles(
+        client,
+        head,
+        selected.files,
+      );
+      selected.headImage = head;
+      state.pendingInstall = undefined;
     } else {
       if (state.branches.length)
         throw new Error(
@@ -728,6 +770,170 @@ export class PearlSandboxService {
       writesPersisted: false,
     };
   }
+  async install(
+    chat: PearlChat,
+    command: unknown,
+    args: unknown,
+    expectedHead: unknown,
+    publish: () => void,
+  ) {
+    const { state, selected, client } = this.active(chat);
+    if (expectedHead !== selected.headImage)
+      throw new Error("Sandbox branch changed since installation approval");
+    if (
+      typeof command !== "string" ||
+      !/^[A-Za-z0-9_.+-]{1,80}$/.test(command) ||
+      !Array.isArray(args) ||
+      args.length > 32 ||
+      args.some(
+        (arg) =>
+          typeof arg !== "string" ||
+          arg.length > 2000 ||
+          /[\x00-\x1f\x7f]/.test(arg),
+      )
+    )
+      throw new Error("Invalid dependency installation command");
+    const workspace = this.workspaceFactory(client);
+    if (!workspace.install)
+      throw new Error("Sandbox dependency installation is unavailable");
+    state.pendingInstall = {
+      baseHead: selected.headImage,
+      branchId: selected.id,
+    };
+    state.lastOperation = undefined;
+    try {
+      const result = await workspace.install(
+        selected.headImage,
+        command,
+        args,
+        "pearl",
+        selected.headImage,
+        (operation) => {
+          this.recordOperation(state, operation);
+          publish();
+        },
+      );
+      if (!result.outcome.passed) {
+        state.pendingInstall = undefined;
+        publish();
+        return {
+          command,
+          exitCode: result.outcome.exitCode,
+          stdout: result.outcome.stdout,
+          stderr: result.outcome.stderr,
+          passed: false,
+          writesPersisted: false,
+        };
+      }
+      if (selected.headImage !== expectedHead)
+        throw new Error(
+          "Sandbox branch changed during dependency installation",
+        );
+      const files = await this.installedSourceFiles(
+        client,
+        result.imageId,
+        selected.files,
+      );
+      selected.headImage = result.imageId;
+      selected.files = files;
+      state.pendingInstall = undefined;
+      state.pendingSync = undefined;
+      chat.readRevisions = {};
+      publish();
+      return {
+        command,
+        exitCode: result.outcome.exitCode,
+        stdout: result.outcome.stdout,
+        stderr: result.outcome.stderr,
+        passed: result.outcome.passed,
+        writesPersisted: true,
+        checkpoint: result.imageId,
+      };
+    } catch (error) {
+      const lastOperation =
+        state.lastOperation as PearlSandboxState["lastOperation"];
+      if (
+        (lastOperation?.remoteId && lastOperation.status !== "failed") ||
+        error instanceof SandboxRequestError
+      )
+        state.status = "uncertain";
+      else state.pendingInstall = undefined;
+      publish();
+      throw error;
+    }
+  }
+  private async installedSourceFiles(
+    client: Client,
+    imageId: string,
+    previous: Record<string, string>,
+  ): Promise<Record<string, string>> {
+    const paths: string[] = [];
+    const queue = [""];
+    const generated = new Set([
+      "node_modules",
+      ".venv",
+      "venv",
+      ".gradle",
+      ".m2",
+      "target",
+      "build",
+      "dist",
+      "vendor",
+      "__pycache__",
+    ]);
+    const tracked = Object.keys(previous);
+    while (queue.length) {
+      if (queue.length + paths.length > maxFiles)
+        throw new Error(
+          "Installed Sandbox workspace exceeds the source listing limit",
+        );
+      const dir = queue.shift()!;
+      const entries = await client.listFiles(
+        imageId,
+        dir ? `/workspace/${dir}` : "/workspace",
+      );
+      for (const entry of entries) {
+        const path = dir ? `${dir}/${entry.name}` : entry.name;
+        if (blockedProjectPart(entry.name)) continue;
+        if (
+          (generated.has(entry.name) || entry.name.startsWith(".scully-")) &&
+          !tracked.some((item) => item === path || item.startsWith(`${path}/`))
+        )
+          continue;
+        safeSourcePath(path);
+        if (entry.symlink) continue;
+        if (entry.directory) queue.push(path);
+        else if (entry.regular && entry.size <= maxFileBytes) paths.push(path);
+      }
+    }
+    if (paths.length > maxFiles)
+      throw new Error(
+        "Installed Sandbox workspace exceeds the source file limit",
+      );
+    const files: Record<string, string> = {};
+    let bytes = 0;
+    for (const path of paths) {
+      const content = await client.downloadFile(imageId, path);
+      if (
+        content.includes("\0") ||
+        content.includes("\uFFFD") ||
+        containsSecret(content)
+      ) {
+        if (previous[path])
+          throw new Error(
+            `Installed Sandbox source cannot be safely inspected: ${path}`,
+          );
+        continue;
+      }
+      bytes += Buffer.byteLength(content);
+      if (bytes > maxBytes)
+        throw new Error(
+          "Installed Sandbox source exceeds the 256 MB review limit",
+        );
+      files[path] = hash(content);
+    }
+    return files;
+  }
   private changed(chat: PearlChat): {
     selected: PearlSandboxBranch;
     files: TaskFileChange[];
@@ -772,6 +978,138 @@ export class PearlSandboxService {
     )
       chat.sandbox.pendingSync.viewed.push(path);
     return { path, before: baseline.files[path] ?? null, after, binary: false };
+  }
+  beginTurn(chat: PearlChat, turnId: string): void {
+    const { state, selected } = this.active(chat);
+    if (state.pendingTurn?.turnId === turnId) return;
+    state.pendingTurn = {
+      turnId,
+      branchId: selected.id,
+      headImage: selected.headImage,
+      files: { ...selected.files },
+    };
+  }
+  finishTurn(chat: PearlChat, turnId: string): TaskChangeSet | null {
+    const state = chat.sandbox;
+    const pending = state?.pendingTurn;
+    if (!state || !pending || pending.turnId !== turnId) return null;
+    state.pendingTurn = undefined;
+    const selected = state.branches.find(
+      (item) => item.id === pending.branchId,
+    );
+    if (!selected || state.status !== "ready")
+      return {
+        turnId,
+        at: new Date().toISOString(),
+        files: [],
+        source: "sandbox",
+        undoAvailable: false,
+        reason:
+          "The Sandbox branch changed before this turn could be reviewed.",
+      };
+    const paths = new Set([
+      ...Object.keys(pending.files),
+      ...Object.keys(selected.files),
+    ]);
+    const changed = [...paths]
+      .filter((path) => pending.files[path] !== selected.files[path])
+      .sort();
+    if (!changed.length && pending.headImage === selected.headImage)
+      return null;
+    const beforeFiles: Record<string, string | null> = {};
+    const afterFiles: Record<string, string> = {};
+    const files: TaskFileChange[] = changed.map((path) => {
+      beforeFiles[path] = pending.files[path] ?? null;
+      if (selected.files[path]) afterFiles[path] = selected.files[path];
+      return {
+        path,
+        kind: !pending.files[path]
+          ? "added"
+          : !selected.files[path]
+            ? "deleted"
+            : "modified",
+        beforeBytes: 0,
+        afterBytes: 0,
+      };
+    });
+    return {
+      turnId,
+      at: new Date().toISOString(),
+      files,
+      source: "sandbox",
+      undoAvailable: state.activeBranchId === selected.id,
+      reason:
+        state.activeBranchId === selected.id
+          ? undefined
+          : "Select the branch used by this turn before undoing it.",
+      sandboxRevision: {
+        branchId: selected.id,
+        beforeHead: pending.headImage,
+        afterHead: selected.headImage,
+        beforeFiles,
+        afterFiles,
+      },
+    };
+  }
+  async taskFileReview(
+    chat: PearlChat,
+    task: TaskChangeSet,
+    path: unknown,
+  ): Promise<FileReview> {
+    safeSourcePath(path);
+    const revision = task.sandboxRevision;
+    if (
+      task.source !== "sandbox" ||
+      !revision ||
+      !task.files.some((file) => file.path === path)
+    )
+      throw new Error("File is outside this Sandbox turn");
+    const { state, client } = this.selectedForReview(chat);
+    if (!state.branches.some((item) => item.id === revision.branchId))
+      throw new Error("Sandbox branch is unavailable");
+    const before = revision.beforeFiles[path]
+      ? await client.downloadFile(revision.beforeHead, path)
+      : null;
+    const after = revision.afterFiles[path]
+      ? await client.downloadFile(revision.afterHead, path)
+      : null;
+    if (
+      (before !== null && hash(before) !== revision.beforeFiles[path]) ||
+      (after !== null && hash(after) !== revision.afterFiles[path])
+    )
+      throw new Error("Sandbox file differs from the reviewed turn");
+    return { path, before, after, binary: false };
+  }
+  undoTurn(chat: PearlChat, task: TaskChangeSet): TaskChangeSet {
+    const revision = task.sandboxRevision;
+    if (task.source !== "sandbox" || !revision || !task.undoAvailable)
+      throw new Error("Sandbox Undo is unavailable");
+    const { state } = this.selectedForReview(chat);
+    const selected = state.branches.find(
+      (item) => item.id === revision.branchId,
+    );
+    if (!selected || selected.headImage !== revision.afterHead)
+      throw new Error(
+        "Sandbox branch changed since this turn. Review the latest checkpoint.",
+      );
+    if (selected.syncedHead === revision.afterHead)
+      throw new Error(
+        "This checkpoint was synchronized locally. Review local changes before undoing it.",
+      );
+    for (const [path, digest] of Object.entries(revision.afterFiles))
+      if (selected.files[path] !== digest)
+        throw new Error(
+          "Sandbox branch changed since this turn. Review the latest checkpoint.",
+        );
+    selected.headImage = revision.beforeHead;
+    for (const [path, digest] of Object.entries(revision.beforeFiles)) {
+      if (digest === null) delete selected.files[path];
+      else selected.files[path] = digest;
+      delete chat.readRevisions?.[path];
+    }
+    selected.checks = [];
+    state.pendingSync = undefined;
+    return { ...task, undone: true, undoAvailable: false };
   }
   snapshotView(chat: PearlChat): PearlSandboxSnapshot {
     if (!chat.project?.approved)
@@ -901,16 +1239,8 @@ export class PearlSandboxService {
       bytes: Buffer.byteLength(content),
       sha256: hash(content),
     }));
-    state.branches = [
-      {
-        id: randomUUID(),
-        name: selected.name,
-        headImage: selected.headImage,
-        files: { ...selected.files },
-        checks: [],
-      },
-    ];
-    state.activeBranchId = state.branches[0].id;
+    selected.syncedHead = selected.headImage;
+    state.activeBranchId = selected.id;
     state.active = false;
     return chat;
   }

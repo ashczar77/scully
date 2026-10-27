@@ -3,6 +3,20 @@ export type PearlProviderContinuation = {
   reasoningContent: string;
 };
 
+export type PearlAttachment = {
+  id: string;
+  name: string;
+  kind: "image" | "pdf" | "docx" | "text";
+  bytes: number;
+  needsVision: boolean;
+  pages?: number;
+};
+
+export type PearlAttachmentInput = {
+  name: string;
+  base64: string;
+};
+
 export type PearlWorkState = {
   revision: number;
   sourceUserMessageId: string;
@@ -20,6 +34,11 @@ export type PearlMessage = {
   id: string;
   role: "user" | "assistant" | "tool";
   text: string;
+  /** Original user text, without extracted document context. */
+  displayText?: string;
+  attachments?: PearlAttachment[];
+  /** Added only for a provider request. Never persist or render this data. */
+  modelImages?: string[];
   at: string;
   toolCallId?: string;
   toolName?: string;
@@ -85,7 +104,8 @@ export type PearlPauseReason =
   | "no_progress"
   | "time_budget"
   | "step_budget"
-  | "completion_missing";
+  | "completion_missing"
+  | "completion_rejected";
 
 export type PearlTerminalState = {
   id: string;
@@ -109,6 +129,7 @@ export type PearlChat = {
   updatedAt: string;
   status: "idle" | "running" | "awaiting_approval" | "paused" | "failed";
   messages: PearlMessage[];
+  pendingAttachments?: PearlAttachment[];
   terminals?: PearlTerminalState[];
   activeUserMessageId?: string;
   questions: PearlQuestion[];
@@ -119,6 +140,10 @@ export type PearlChat = {
     dev: number;
     ino: number;
     approved: boolean;
+  };
+  permissions?: {
+    commands: boolean;
+    dependencyDownloads: boolean;
   };
   pendingTool?: PearlToolCall;
   retryHint?: "interrupted_response" | "provider_connection";
@@ -136,6 +161,15 @@ export type PearlChatSummary = Pick<
 >;
 
 export type PearlChatAPI = {
+  openPearlExternalLink: (url: string) => Promise<"cancel" | "copy" | "open">;
+  preparePearlAttachment: (
+    id: string,
+    input: PearlAttachmentInput,
+  ) => Promise<PearlChat>;
+  removePearlAttachment: (
+    id: string,
+    attachmentId: string,
+  ) => Promise<PearlChat>;
   pearlSandboxConnection: () => Promise<
     import("./pearl-sandbox").PearlSandboxConnection
   >;
@@ -192,6 +226,11 @@ export type PearlChatAPI = {
   sendPearlMessage: (id: string, text: string) => Promise<PearlChat>;
   choosePearlProject: (id?: string) => Promise<PearlChat | null>;
   approvePearlProject: (id: string, approved: boolean) => Promise<PearlChat>;
+  updatePearlPermission: (
+    id: string,
+    permission: "commands" | "dependencyDownloads",
+    enabled: boolean,
+  ) => Promise<PearlChat>;
   decidePearlTool: (
     id: string,
     toolCallId: string,

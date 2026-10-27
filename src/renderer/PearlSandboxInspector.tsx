@@ -11,6 +11,7 @@ import {
 import type { DesktopAPI } from "../shared/contracts";
 import type { PearlChat } from "../shared/pearl-chat";
 import type { PearlSandboxSnapshot } from "../shared/pearl-sandbox";
+import type { PearlSandboxConnection } from "../shared/pearl-sandbox";
 import type { FileReview } from "../shared/pearl-workspace";
 
 export function PearlSandboxInspector({
@@ -20,6 +21,7 @@ export function PearlSandboxInspector({
   width,
   onResizeStart,
   onOpenFile,
+  onOpenSettings,
   closing = false,
   collapseReady = false,
 }: {
@@ -29,6 +31,7 @@ export function PearlSandboxInspector({
   width: number;
   onResizeStart: (event: PointerEvent<HTMLDivElement>) => void;
   onOpenFile: (review: FileReview) => void;
+  onOpenSettings: () => void;
   closing?: boolean;
   collapseReady?: boolean;
 }) {
@@ -38,6 +41,9 @@ export function PearlSandboxInspector({
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [revision, setRevision] = useState(0);
+  const [connection, setConnection] = useState<PearlSandboxConnection | null>(
+    null,
+  );
   const [expanded, setExpanded] = useState<string[]>([]);
   const treeRevision = useRef("");
   const selectedBranch = chat.sandbox?.branches.find(
@@ -62,6 +68,41 @@ export function PearlSandboxInspector({
     setReview(null);
   }, [chat.id, branchName]);
   useEffect(() => {
+    let live = true;
+    if (typeof api.pearlSandboxConnection !== "function") {
+      setConnection({ configured: false, projectId: "" });
+      return () => {
+        live = false;
+      };
+    }
+    void api
+      .pearlSandboxConnection()
+      .then((value) => {
+        if (live) setConnection(value);
+      })
+      .catch(() => {
+        if (live) setConnection({ configured: false, projectId: "" });
+      });
+    return () => {
+      live = false;
+    };
+  }, [api, revision]);
+  useEffect(() => {
+    if (!checkpoint) {
+      setSnapshot(null);
+      setError("");
+      setLoading(false);
+      return;
+    }
+    if (
+      !connection?.configured ||
+      connection.projectId !== chat.sandbox?.projectId
+    ) {
+      setSnapshot(null);
+      setError("");
+      setLoading(false);
+      return;
+    }
     let live = true;
     setError("");
     setLoading(true);
@@ -99,7 +140,17 @@ export function PearlSandboxInspector({
     return () => {
       live = false;
     };
-  }, [api, chat.id, checkpoint, branchName, activityRevision, revision]);
+  }, [
+    api,
+    connection?.configured,
+    connection?.projectId,
+    chat.id,
+    chat.sandbox?.status,
+    checkpoint,
+    branchName,
+    activityRevision,
+    revision,
+  ]);
   async function openFile(path: string) {
     setError("");
     setReview(null);
@@ -168,7 +219,12 @@ export function PearlSandboxInspector({
             <FileCode2 size={15} aria-hidden="true" />
             <span>{file.path.split("/").at(-1)}</span>
             {file.changed && (
-              <small className="pearl-sandbox-changed">Changed</small>
+              <span
+                className="pearl-sandbox-changed"
+                role="img"
+                aria-label="Changed since upload"
+                title="Changed since upload"
+              />
             )}
           </button>
         ))}
@@ -204,6 +260,24 @@ export function PearlSandboxInspector({
           </button>
         </div>
       </div>
+      {!checkpoint && (
+        <p className="pearl-inspector-note">
+          No saved Sandbox checkpoint is attached to this chat.
+        </p>
+      )}
+      {checkpoint &&
+        connection &&
+        (!connection.configured ||
+          connection.projectId !== chat.sandbox?.projectId) && (
+          <div className="pearl-inspector-connection" role="status">
+            <p>
+              {connection.configured
+                ? "This chat uses a different Nebius Sandbox project. Connect that project in Settings to view its files."
+                : "Connect to Nebius Sandbox in Settings to view this chat's files."}
+            </p>
+            <button onClick={onOpenSettings}>Open Settings</button>
+          </div>
+        )}
       {loading && !snapshot && (
         <p className="pearl-inspector-note">Loading saved checkpoint…</p>
       )}

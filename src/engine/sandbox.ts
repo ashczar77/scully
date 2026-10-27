@@ -33,6 +33,7 @@ export type SandboxCommand = {
   cwd: string;
   timeoutSeconds: number;
   saveChanges: boolean;
+  network?: boolean;
   files?: Record<
     string,
     { uuid: string; uid: number; gid: number; mode: string }
@@ -85,7 +86,7 @@ export function sandboxBody(value: SandboxCommand) {
     shell: false,
     env: {},
     preserve_env: false,
-    networking: { enabled: false },
+    networking: { enabled: value.network === true },
     disposable: !value.saveChanges,
     timeout: value.timeoutSeconds,
     truncate_output_at: 65536,

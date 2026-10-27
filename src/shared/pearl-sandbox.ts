@@ -44,6 +44,7 @@ export type PearlSandboxState = {
   projectId: string;
   projectPath: string;
   baseImage: string;
+  baseImageTag?: string;
   baseDigest: string;
   manifest: PearlSandboxManifestFile[];
   excluded: string[];
@@ -51,11 +52,19 @@ export type PearlSandboxState = {
   activeBranchId?: string;
   pendingSync?: PearlSandboxSyncReview;
   pendingWrite?: { path: string; sha256: string; baseHead: string };
+  pendingInstall?: { baseHead: string; branchId: string };
+  pendingTurn?: {
+    turnId: string;
+    branchId: string;
+    headImage: string;
+    files: Record<string, string>;
+  };
   lastOperation?: {
     stage: string;
     status: string;
     remoteId: string | null;
   };
+  uploadProgress?: PearlSandboxUploadProgress;
   operations?: {
     stage: string;
     status: string;
@@ -77,4 +86,12 @@ export type PearlSandboxSnapshot = {
 export type PearlSandboxImageList = {
   images: CloudImage[];
   limited: boolean;
+};
+
+export type PearlSandboxUploadProgress = {
+  phase: "preparing" | "transferring" | "verifying";
+  uploadedBytes: number;
+  totalBytes: number;
+  completedFiles: number;
+  totalFiles: number;
 };

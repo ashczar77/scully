@@ -40,6 +40,10 @@ it("requires a separate manifest review before remote upload", async () => {
   const prepare = vi.fn(async () => prepared);
   const start = vi.fn(async () => prepared);
   const api = {
+    pearlSandboxConnection: vi.fn(async () => ({
+      configured: true,
+      projectId: "project",
+    })),
     pearlSandboxImages: vi.fn(async () => ({
       images: [{ uuid: image, tag: "Node" }],
       limited: false,
@@ -104,6 +108,10 @@ it("lets a prepared task choose a different base image after a failed start", as
   } as PearlChat;
   const prepare = vi.fn(async () => prepared);
   const api = {
+    pearlSandboxConnection: vi.fn(async () => ({
+      configured: true,
+      projectId: "project",
+    })),
     pearlSandboxImages: vi.fn(async () => ({
       images: [
         { uuid: image, tag: "Node 20 Alpine" },
@@ -134,6 +142,121 @@ it("lets a prepared task choose a different base image after a failed start", as
   ).toBeDisabled();
   fireEvent.click(screen.getByRole("button", { name: "Review new image" }));
   await waitFor(() => expect(prepare).toHaveBeenCalledWith(id, alternate));
+});
+
+it("opens connection settings instead of listing images when disconnected", async () => {
+  const onSettings = vi.fn();
+  const api = {
+    pearlSandboxConnection: vi.fn(async () => ({
+      configured: false,
+      projectId: "",
+    })),
+    pearlSandboxImages: vi.fn(),
+  } as unknown as DesktopAPI;
+  render(
+    <PearlSandboxPanel
+      api={api}
+      chat={chat()}
+      onChange={() => {}}
+      onSettings={onSettings}
+      onOpenFile={() => {}}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Work in Sandbox" }));
+  await waitFor(() => expect(onSettings).toHaveBeenCalledOnce());
+  expect(api.pearlSandboxImages).not.toHaveBeenCalled();
+});
+
+it("warns when the selected image may lack the project runtime", () => {
+  const project = {
+    ...chat(),
+    sandbox: {
+      status: "prepared",
+      active: false,
+      projectId: "project",
+      projectPath: "/project",
+      baseImage: image,
+      baseImageTag: "node:22",
+      baseDigest: "digest",
+      manifest: [{ path: "pom.xml", bytes: 20, sha256: "sha" }],
+      excluded: [],
+      branches: [],
+    },
+  } as PearlChat;
+  render(
+    <PearlSandboxPanel
+      api={{} as DesktopAPI}
+      chat={project}
+      onChange={() => {}}
+      onSettings={() => {}}
+      onOpenFile={() => {}}
+    />,
+  );
+  expect(screen.getByText(/Java project/)).toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "Upload files and start Sandbox" }),
+  ).toBeEnabled();
+});
+
+it("shows measured upload progress and checkpoint verification separately", () => {
+  const uploading = {
+    ...chat(),
+    sandbox: {
+      status: "uploading",
+      active: false,
+      projectId: "project",
+      projectPath: "/project",
+      baseImage: image,
+      baseDigest: "digest",
+      manifest: [],
+      excluded: [],
+      branches: [],
+      uploadProgress: {
+        phase: "transferring",
+        uploadedBytes: 25,
+        totalBytes: 100,
+        completedFiles: 1,
+        totalFiles: 4,
+      },
+    },
+  } as PearlChat;
+  const view = render(
+    <PearlSandboxPanel
+      api={{} as DesktopAPI}
+      chat={uploading}
+      onChange={() => {}}
+      onSettings={() => {}}
+      onOpenFile={() => {}}
+    />,
+  );
+  expect(screen.getByRole("progressbar")).toHaveAttribute(
+    "aria-valuenow",
+    "25",
+  );
+  expect(screen.getByText(/1 of 4 files/)).toBeInTheDocument();
+  view.rerender(
+    <PearlSandboxPanel
+      api={{} as DesktopAPI}
+      chat={
+        {
+          ...uploading,
+          sandbox: {
+            ...uploading.sandbox!,
+            uploadProgress: {
+              ...uploading.sandbox!.uploadProgress!,
+              phase: "verifying",
+              uploadedBytes: 100,
+              completedFiles: 4,
+            },
+          },
+        } as PearlChat
+      }
+      onChange={() => {}}
+      onSettings={() => {}}
+      onOpenFile={() => {}}
+    />,
+  );
+  expect(screen.getByText(/Verifying saved checkpoint/)).toBeInTheDocument();
 });
 
 it("keeps a ready Sandbox compact while exposing a styled branch picker and inspector", async () => {

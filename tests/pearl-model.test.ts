@@ -63,6 +63,142 @@ it("sends native roles and lets Nebius choose a reply or tool", async () => {
   expect(fetcher).toHaveBeenCalledOnce();
 });
 
+it("requires the completion action when a coding turn needs its work report", async () => {
+  const fetcher = vi.fn(async (_url: string, request: RequestInit) => {
+    const body = JSON.parse(String(request.body));
+    expect(body.tool_choice).toEqual({
+      type: "function",
+      function: { name: "complete_work" },
+    });
+    expect(
+      body.tools.map(
+        (item: { function: { name: string } }) => item.function.name,
+      ),
+    ).toEqual(["complete_work"]);
+    return new Response(
+      JSON.stringify({
+        choices: [{ finish_reason: "stop", message: { content: "Done." } }],
+      }),
+      { status: 200 },
+    );
+  });
+  await expect(
+    nebiusPearlModel(fetcher as typeof fetch).complete({
+      ...input,
+      allowedTools: ["complete_work"],
+      requiredTool: "complete_work",
+    }),
+  ).rejects.toThrow("Required completion action was not returned");
+});
+
+it("accepts only the requested completion action in required mode", async () => {
+  const fetcher = vi.fn(async (_url: string, request: RequestInit) => {
+    const body = JSON.parse(String(request.body));
+    expect(body.tool_choice.function.name).toBe("complete_work");
+    return new Response(
+      JSON.stringify({
+        choices: [
+          {
+            finish_reason: "tool_calls",
+            message: {
+              content: null,
+              tool_calls: [
+                {
+                  id: "finish",
+                  function: {
+                    name: "complete_work",
+                    arguments:
+                      '{"status":"unverified","summary":"No check ran."}',
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+      { status: 200 },
+    );
+  });
+  expect(
+    await nebiusPearlModel(fetcher as typeof fetch).complete({
+      ...input,
+      allowedTools: ["complete_work"],
+      requiredTool: "complete_work",
+    }),
+  ).toEqual({
+    kind: "tool",
+    text: "",
+    call: {
+      id: "finish",
+      name: "complete_work",
+      arguments: '{"status":"unverified","summary":"No check ran."}',
+    },
+  });
+  await expect(
+    nebiusPearlModel(fetcher as typeof fetch).complete({
+      ...input,
+      allowedTools: ["read_file"],
+      requiredTool: "complete_work",
+    }),
+  ).rejects.toThrow("Required action is unavailable");
+});
+
+it("classifies a provider refusal of required tool choice without exposing its response", async () => {
+  const model = nebiusPearlModel(
+    async () =>
+      new Response(
+        JSON.stringify({
+          error: { message: "Unsupported tool_choice for private request" },
+        }),
+        { status: 400 },
+      ),
+  );
+  await expect(
+    model.complete({
+      ...input,
+      allowedTools: ["complete_work"],
+      requiredTool: "complete_work",
+    }),
+  ).rejects.toThrow("Provider request failed (400; tool choice)");
+  await expect(
+    model.complete({
+      ...input,
+      allowedTools: ["complete_work"],
+      requiredTool: "complete_work",
+    }),
+  ).rejects.not.toThrow("private request");
+});
+
+it("sends approved image attachments as image input alongside user text", async () => {
+  const fetcher = vi.fn(async (_url: string, request: RequestInit) => {
+    const body = JSON.parse(String(request.body));
+    expect(body.messages[1].content).toEqual([
+      { type: "text", text: "Describe this screenshot" },
+      { type: "image_url", image_url: { url: "data:image/png;base64,YQ==" } },
+    ]);
+    return new Response(
+      JSON.stringify({
+        choices: [
+          { finish_reason: "stop", message: { content: "A screenshot." } },
+        ],
+      }),
+      { status: 200 },
+    );
+  });
+  await nebiusPearlModel(fetcher as typeof fetch).complete({
+    ...input,
+    messages: [
+      {
+        id: "image",
+        role: "user",
+        text: "Describe this screenshot",
+        at: "now",
+        modelImages: ["data:image/png;base64,YQ=="],
+      },
+    ],
+  });
+});
+
 it("replays a structured action batch as one assistant message followed by its observations", async () => {
   const fetcher = vi.fn(async (_url: string, request: RequestInit) => {
     const body = JSON.parse(String(request.body));

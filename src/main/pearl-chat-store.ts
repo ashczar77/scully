@@ -62,7 +62,12 @@ export class PearlChatStore {
     this.db.prepare("DELETE FROM pearl_chats WHERE id=?").run(chat.id);
   }
   save(chat: PearlChat): PearlChat {
-    chat.updatedAt = new Date().toISOString();
+    const previous = this.db
+      .prepare("SELECT updatedAt FROM pearl_chats WHERE id=?")
+      .get(chat.id) as { updatedAt: string } | undefined;
+    chat.updatedAt = new Date(
+      Math.max(Date.now(), Date.parse(previous?.updatedAt || "") + 1 || 0),
+    ).toISOString();
     this.db
       .prepare(
         "INSERT INTO pearl_chats (id,updatedAt,data) VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET updatedAt=excluded.updatedAt,data=excluded.data",

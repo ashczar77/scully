@@ -1,6 +1,14 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { ArrowLeft, CircleCheck, Info, PlugZap, Sparkles } from "lucide-react";
+import {
+  ArrowLeft,
+  CircleCheck,
+  Info,
+  PlugZap,
+  ShieldCheck,
+  Sparkles,
+} from "lucide-react";
 import type { DesktopAPI } from "../shared/contracts";
+import type { PearlChat } from "../shared/pearl-chat";
 import type { ModelOption, SessionInfo } from "../shared/runs";
 import { ModelPicker } from "./ModelPicker";
 import type { RemoteMcpInfo } from "../shared/pearl-chat";
@@ -14,17 +22,26 @@ const quickModels: ModelOption[] = [
   { id: "zai-org/GLM-5.3-Flash", name: "GLM 5.3 Flash" },
 ];
 const initialModel = quickModels[0].id;
+type ChatPermission = "commands" | "dependencyDownloads";
 
 export function PearlSettings({
   api,
+  initialSection = "models",
+  chat,
   onBack,
+  onChatChange,
   onSessionChange,
 }: {
   api: DesktopAPI;
+  chat?: PearlChat | null;
+  initialSection?: "models" | "connections" | "permissions";
   onBack: () => void;
+  onChatChange: (chat: PearlChat) => void;
   onSessionChange: (info: SessionInfo) => void;
 }) {
-  const [section, setSection] = useState<"models" | "connections">("models");
+  const [section, setSection] = useState<
+    "models" | "connections" | "permissions"
+  >(initialSection);
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [model, setModel] = useState(initialModel);
   const [fallbackEnabled, setFallbackEnabled] = useState(false);
@@ -48,6 +65,11 @@ export function PearlSettings({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [permissionPending, setPermissionPending] = useState(false);
+  const [permissionOverride, setPermissionOverride] = useState<
+    Partial<Record<ChatPermission, boolean>>
+  >({});
+  const [permissionError, setPermissionError] = useState("");
 
   async function loadModels(active = () => true) {
     setCatalogStatus("loading");
@@ -173,8 +195,45 @@ export function PearlSettings({
     });
   }
 
+  async function changePermission(
+    permission: ChatPermission,
+    enabled: boolean,
+  ) {
+    if (!chat || permissionPending) return;
+    setPermissionError("");
+    setPermissionOverride({ [permission]: enabled });
+    setPermissionPending(true);
+    try {
+      const updated = await api.updatePearlPermission(
+        chat.id,
+        permission,
+        enabled,
+      );
+      onChatChange(updated);
+    } catch (cause) {
+      setPermissionError(
+        cause instanceof Error ? cause.message : "Could not update permission.",
+      );
+    } finally {
+      setPermissionOverride({});
+      setPermissionPending(false);
+    }
+  }
+
   const modelChoices = catalogStatus === "ready" ? models : quickModels;
   const fallbackChoices = modelChoices.filter((option) => option.id !== model);
+  const commandsEnabled =
+    permissionOverride.commands ?? chat?.permissions?.commands !== false;
+  const downloadsEnabled =
+    permissionOverride.dependencyDownloads ??
+    chat?.permissions?.dependencyDownloads !== false;
+  const permissionsLocked =
+    !chat ||
+    busy ||
+    permissionPending ||
+    chat.status === "running" ||
+    chat.status === "awaiting_approval" ||
+    Boolean(chat.terminals?.some((terminal) => terminal.status === "running"));
 
   return (
     <main className="pearl-settings-page" id="pearl-settings-page">
@@ -202,6 +261,13 @@ export function PearlSettings({
               onClick={() => setSection("connections")}
             >
               <PlugZap size={17} aria-hidden="true" /> App & connection
+            </button>
+            <button
+              className={section === "permissions" ? "active" : ""}
+              aria-current={section === "permissions" ? "page" : undefined}
+              onClick={() => setSection("permissions")}
+            >
+              <ShieldCheck size={17} aria-hidden="true" /> Permissions
             </button>
           </nav>
           {error && (
@@ -291,6 +357,95 @@ export function PearlSettings({
                   Connect Nebius to save
                 </button>
               )}
+            </section>
+          )}
+          {section === "permissions" && (
+            <section
+              className="pearl-settings-card"
+              aria-label="Execution permissions"
+            >
+              <h2>Execution & permissions</h2>
+              <p>
+                Choose what Pearl may request in this chat. Each command,
+                dependency installation, and Sandbox check still requires its
+                own approval.
+              </p>
+              <dl className="pearl-permission-summary">
+                <div>
+                  <dt>Project files</dt>
+                  <dd>
+                    {chat?.project?.approved
+                      ? "Approved project folder"
+                      : "No project approved"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Work mode</dt>
+                  <dd>
+                    {chat?.sandbox?.active ? "Nebius Sandbox" : "Local project"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Commands</dt>
+                  <dd>
+                    <button
+                      className="pearl-permission-toggle"
+                      type="button"
+                      role="switch"
+                      aria-label="Allow Pearl to request commands"
+                      aria-checked={commandsEnabled}
+                      aria-busy={permissionPending}
+                      disabled={permissionsLocked}
+                      onClick={() =>
+                        void changePermission("commands", !commandsEnabled)
+                      }
+                    />
+                    <small>Ask before every command</small>
+                  </dd>
+                </div>
+                <div>
+                  <dt>Dependency downloads</dt>
+                  <dd>
+                    <button
+                      className="pearl-permission-toggle"
+                      type="button"
+                      role="switch"
+                      aria-label="Allow Pearl to request dependency downloads"
+                      aria-checked={downloadsEnabled}
+                      aria-busy={permissionPending}
+                      disabled={permissionsLocked || !commandsEnabled}
+                      onClick={() =>
+                        void changePermission(
+                          "dependencyDownloads",
+                          !downloadsEnabled,
+                        )
+                      }
+                    />
+                    <small>
+                      {!commandsEnabled
+                        ? "Enable commands first"
+                        : "Ask before command and network access"}
+                    </small>
+                  </dd>
+                </div>
+                <div>
+                  <dt>Local sync</dt>
+                  <dd>Review files and approve each sync</dd>
+                </div>
+                <div>
+                  <dt>External links</dt>
+                  <dd>Confirm before opening in a browser</dd>
+                </div>
+              </dl>
+              {permissionError && (
+                <p className="pearl-permission-error" role="alert">
+                  {permissionError}
+                </p>
+              )}
+              <p>
+                Approvals apply to the exact action shown. Changing settings
+                does not approve a pending action.
+              </p>
             </section>
           )}
           {section === "connections" && (
@@ -579,16 +734,6 @@ export function PearlSettings({
                     </ul>
                   </details>
                 )}
-              </section>
-              <section
-                className="pearl-settings-card"
-                aria-label="Execution permissions"
-              >
-                <h2>Execution & permissions</h2>
-                <p>
-                  Project access and commands require separate approval in the
-                  Room. File changes use revision checks and reviewable diffs.
-                </p>
               </section>
             </>
           )}

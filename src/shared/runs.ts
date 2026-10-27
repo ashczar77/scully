@@ -205,6 +205,7 @@ export type ModelOption = {
   disabledReason?: string;
   maxOutputTokens?: number;
   supportsThinking?: boolean;
+  supportsImages?: boolean;
 };
 export type RunAPI = {
   reviewCollaboration: (

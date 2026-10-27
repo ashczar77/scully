@@ -37,6 +37,18 @@ export function parseModelCatalog(value: unknown): ModelOption[] {
     if (output) option.maxOutputTokens = output;
     if (capabilities.reasoning === true || capabilities.thinking === true)
       option.supportsThinking = true;
+    const architecture =
+      item.architecture && typeof item.architecture === "object"
+        ? (item.architecture as Record<string, unknown>)
+        : {};
+    const inputModality =
+      typeof architecture.modality === "string"
+        ? architecture.modality.split("->")[0]
+        : "";
+    option.supportsImages =
+      capabilities.vision === true ||
+      capabilities.image_input === true ||
+      /image/i.test(inputModality);
     names.set(id, option);
   }
   if (!names.size) throw new Error("Nebius returned no selectable models");
@@ -48,7 +60,7 @@ export async function fetchModelCatalog(
   request: typeof fetch = fetch,
 ): Promise<ModelOption[]> {
   const response = await request(
-    "https://api.tokenfactory.nebius.com/v1/models",
+    "https://api.tokenfactory.nebius.com/v1/models?verbose=true",
     {
       method: "GET",
       headers: { Authorization: `Bearer ${key}` },

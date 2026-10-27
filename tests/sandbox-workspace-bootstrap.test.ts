@@ -3,7 +3,10 @@ import { createHash } from "node:crypto";
 import { expect, it, vi } from "vitest";
 import type { sandboxClient, SandboxCommand } from "../src/engine/sandbox";
 import { SandboxWorkspaceMissingError } from "../src/engine/sandbox";
-import { sandboxCollaborationWorkspace } from "../src/main/collaboration-workspace";
+import {
+  sandboxCollaborationWorkspace,
+  type TransferProgress,
+} from "../src/main/collaboration-workspace";
 
 const base = "11111111-1111-1111-1111-111111111111";
 const initialized = "22222222-2222-2222-2222-222222222222";
@@ -11,6 +14,57 @@ const uploaded = "33333333-3333-3333-3333-333333333333";
 const bootstrapOperation = "44444444-4444-4444-4444-444444444444";
 const uploadOperation = "55555555-5555-5555-5555-555555555555";
 const fileId = "66666666-6666-6666-6666-666666666666";
+
+it("reports a failed approved install with its command output and without a new checkpoint", async () => {
+  const requests: SandboxCommand[] = [];
+  const operations: { stage: string; status: string }[] = [];
+  const client = {
+    inspectExecutable: async () => "/usr/bin/npm",
+    submit: async (request: SandboxCommand) => {
+      requests.push(request);
+      return uploadOperation;
+    },
+    status: async () => ({
+      terminal: true,
+      commandPassed: false,
+      resultImage: null,
+      exitCode: 1,
+      stdout: "npm ERR! registry unavailable",
+      stderr: "network timeout",
+    }),
+    inspectImage: vi.fn(),
+  } as unknown as ReturnType<typeof sandboxClient>;
+  const result = await sandboxCollaborationWorkspace(client).install!(
+    initialized,
+    "npm",
+    ["install"],
+    "pearl",
+    initialized,
+    (operation) =>
+      operations.push({ stage: operation.stage, status: operation.status }),
+  );
+  expect(requests).toHaveLength(1);
+  expect(requests[0]).toMatchObject({
+    image: initialized,
+    command: "/usr/bin/npm",
+    args: ["install"],
+    cwd: "/workspace",
+    saveChanges: true,
+    network: true,
+  });
+  expect(result).toEqual({
+    imageId: initialized,
+    outcome: {
+      exitCode: 1,
+      stdout: "npm ERR! registry unavailable",
+      stderr: "network timeout",
+      passed: false,
+      unknown: false,
+    },
+  });
+  expect(operations.at(-1)).toEqual({ stage: "install", status: "failed" });
+  expect(client.inspectImage).not.toHaveBeenCalled();
+});
 
 it("creates an empty workspace checkpoint before uploading to a base image without one", async () => {
   const requests: SandboxCommand[] = [];
@@ -38,12 +92,14 @@ it("creates an empty workspace checkpoint before uploading to a base image witho
     downloadFile: async () => content,
   } as unknown as ReturnType<typeof sandboxClient>;
   const stages: string[] = [];
+  const progress: Parameters<TransferProgress>[0][] = [];
   const result = await sandboxCollaborationWorkspace(client).prepare(
     [{ path: "main.ts", content }],
     base,
     "pearl",
     "reviewed-revision",
     (operation) => stages.push(operation.stage),
+    (update) => progress.push(update),
   );
   expect(result).toBe(uploaded);
   expect(requests).toHaveLength(2);
@@ -62,6 +118,13 @@ it("creates an empty workspace checkpoint before uploading to a base image witho
   });
   expect(stages).toContain("bootstrap");
   expect(stages).toContain("upload");
+  expect(progress).toContainEqual({
+    phase: "verifying",
+    uploadedBytes: Buffer.byteLength(content),
+    totalBytes: Buffer.byteLength(content),
+    completedFiles: 1,
+    totalFiles: 1,
+  });
 });
 
 it("rejects a base image containing files without submitting an operation", async () => {
@@ -86,6 +149,7 @@ it("rejects a base image containing files without submitting an operation", asyn
 it("splits a large source file into bounded uploads and reassembles it in one saved checkpoint", async () => {
   const content = "abc\n".repeat(2_300_000);
   const uploads: string[] = [];
+  const progress: Parameters<TransferProgress>[0][] = [];
   const requests: SandboxCommand[] = [];
   const client = {
     inspectImage: async () => {},
@@ -111,12 +175,26 @@ it("splits a large source file into bounded uploads and reassembles it in one sa
     "pearl",
     "revision",
     () => {},
+    (update) => progress.push(update),
   );
   expect(uploads.length).toBeGreaterThan(1);
   expect(uploads.join("")).toBe(content);
   expect(uploads.every((piece) => Buffer.byteLength(piece) < 8_388_608)).toBe(
     true,
   );
+  expect(
+    progress.some(
+      (update) =>
+        update.phase === "transferring" &&
+        update.uploadedBytes > 0 &&
+        update.uploadedBytes < update.totalBytes,
+    ),
+  ).toBe(true);
+  expect(progress.at(-1)).toMatchObject({
+    phase: "verifying",
+    uploadedBytes: Buffer.byteLength(content),
+    totalBytes: Buffer.byteLength(content),
+  });
   expect(requests).toHaveLength(1);
   expect(requests[0].command).toBe("/bin/sh");
   expect(requests[0].args.join(" ")).toContain("src/large.ts");

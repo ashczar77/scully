@@ -1,11 +1,13 @@
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
   net,
   protocol,
   session,
+  shell,
 } from "electron";
 import { mkdirSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
@@ -19,10 +21,13 @@ import { PearlChatStore } from "./pearl-chat-store";
 import { roomChat, roomResult } from "./pearl-chat-view";
 import { PearlSession } from "./pearl-session";
 import { fetchModelCatalog } from "./model-catalog";
+import type { ModelOption } from "../shared/runs";
 import { PearlWebAccess, PearlWebConnection } from "./pearl-web";
 import { RemoteMcpConnection } from "./pearl-mcp";
 import { TavilyWebProvider } from "./pearl-tavily";
 import { cappedPearlModel, liveModelRequestLimit } from "./pearl-test-model";
+import { confirmExternalLink } from "./pearl-external-link";
+import { installedBrowsers, openInBrowser } from "./pearl-browser-launch";
 
 declare const __SCULLY_DEV_HARNESS__: boolean;
 
@@ -80,6 +85,7 @@ if (!ownsWorkspace) app.quit();
 let win: BrowserWindow | null = null;
 let chats: PearlChatStore | null = null;
 let pearl: PearlChatManager | null = null;
+let pearlModels: ModelOption[] = [];
 
 function window() {
   win = new BrowserWindow({
@@ -200,6 +206,10 @@ app
       undefined,
       remoteMcp,
       new PearlSandboxService(app.getPath("userData")),
+      (model) =>
+        pearlModels.some(
+          (item) => item.id === model && item.supportsImages === true,
+        ),
     );
 
     ipcMain.handle("pearl:sandbox:connection", (event) => {
@@ -284,6 +294,82 @@ app
       pearl!.deletePermanently(id),
     );
     handle("pearl:send", (_event, id, text) => pearl!.send(id, text));
+    handle("pearl:attachment:prepare", (_event, id, input) =>
+      pearl!.prepareAttachment(id, input),
+    );
+    handle("pearl:attachment:remove", (_event, id, attachmentId) =>
+      pearl!.removeAttachment(id, attachmentId),
+    );
+    handle("pearl:external-link", (_event, value) => {
+      let selectedBrowser:
+        ReturnType<typeof installedBrowsers>[number] | undefined;
+      return confirmExternalLink(
+        value,
+        async (url) => {
+          const browsers = installedBrowsers();
+          const { response } = await dialog.showMessageBox(win!, {
+            type: "question",
+            buttons: [
+              "Cancel",
+              "Copy link",
+              ...browsers.map((browser) => `Open in ${browser.label}`),
+              "Use system default",
+            ],
+            defaultId: 2,
+            cancelId: 0,
+            message: "Open external link?",
+            detail: url,
+          });
+          selectedBrowser = browsers[response - 2];
+          return response === 1 ? "copy" : response >= 2 ? "open" : "cancel";
+        },
+        (url) =>
+          selectedBrowser
+            ? openInBrowser(selectedBrowser, url)
+            : shell.openExternal(url),
+        (url) => clipboard.writeText(url),
+        async (url, canRetry) => {
+          const browsers = installedBrowsers();
+          const buttons = [
+            "Cancel",
+            "Copy link",
+            ...browsers.map((browser) => `Open in ${browser.label}`),
+            ...(canRetry ? ["Use system default"] : []),
+          ];
+          const { response } = await dialog.showMessageBox(win!, {
+            type: "warning",
+            buttons,
+            defaultId: 1,
+            cancelId: 0,
+            message: "The browser did not open",
+            detail: `Choose another installed browser or copy the link:\n${url}`,
+          });
+          if (response === 1) return "copy";
+          const browser = browsers[response - 2];
+          if (browser) {
+            try {
+              await openInBrowser(browser, url);
+              return "open";
+            } catch {
+              const failure = await dialog.showMessageBox(win!, {
+                type: "warning",
+                buttons: ["Cancel", "Copy link"],
+                defaultId: 1,
+                cancelId: 0,
+                message: `${browser.label} did not open`,
+                detail: url,
+              });
+              return failure.response === 1 ? "copy" : "cancel";
+            }
+          }
+          if (canRetry && response === buttons.length - 1) {
+            selectedBrowser = undefined;
+            return "retry";
+          }
+          return "cancel";
+        },
+      );
+    });
     handle("pearl:rename", (_event, id, title) => pearl!.rename(id, title));
     handle("pearl:workspace:list", (_event, id, directory, offset) =>
       pearl!.projectFiles(
@@ -323,6 +409,9 @@ app
     handle("pearl:project:approve", (_event, id, approved) =>
       pearl!.approveProject(id, approved),
     );
+    handle("pearl:permission:update", (_event, id, permission, enabled) =>
+      pearl!.updatePermission(id, permission, enabled),
+    );
     handle("pearl:tool:decide", (_event, id, callId, approved) =>
       pearl!.decideTool(id, callId, approved),
     );
@@ -344,14 +433,18 @@ app
       trusted(event);
       return settings.info();
     });
-    handle("session:configure", (_event, value) => settings.configure(value));
+    handle("session:configure", (_event, value) => {
+      pearlModels = [];
+      return settings.configure(value);
+    });
     handle("session:pearl-model-choice", (_event, value) =>
       settings.selectModels(value),
     );
-    handle("session:pearl-models", () => {
+    handle("session:pearl-models", async () => {
       const key = settings.current()?.key;
       if (!key) throw new Error("Connect Nebius before loading models.");
-      return fetchModelCatalog(key);
+      pearlModels = await fetchModelCatalog(key);
+      return pearlModels;
     });
     ipcMain.handle("metrics:read", (event) => {
       trusted(event);

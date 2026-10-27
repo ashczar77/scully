@@ -82,6 +82,22 @@ it("counts a paused agent loop without recording its reason text", () => {
     durationMs: 0,
   });
 });
+it("records rejected completion pauses without saving their contents", () => {
+  expect(
+    sanitizeMetric({
+      version: 1,
+      operation: "agent.pause.completion_rejected",
+      outcome: "returned",
+      durationMs: 0,
+      reason: "private completion report",
+    }),
+  ).toEqual({
+    version: 1,
+    operation: "agent.pause.completion_rejected",
+    outcome: "returned",
+    durationMs: 0,
+  });
+});
 it("records storage inspection without paths or inventory values", () => {
   expect(
     sanitizeMetric({

@@ -1,12 +1,47 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 const KEYWORDS = new Set([
+  "abstract",
+  "as",
+  "assert",
   "async",
   "await",
   "break",
   "case",
   "catch",
   "class",
+  "def",
+  "fn",
+  "fun",
+  "func",
+  "go",
+  "impl",
+  "package",
+  "public",
+  "private",
+  "protected",
+  "final",
+  "enum",
+  "struct",
+  "trait",
+  "match",
+  "mut",
+  "pub",
+  "yield",
+  "lambda",
+  "none",
+  "self",
+  "elif",
+  "except",
+  "raise",
+  "with",
+  "select",
+  "insert",
+  "update",
+  "where",
+  "join",
+  "table",
+  "create",
   "const",
   "continue",
   "default",
@@ -43,11 +78,38 @@ const KEYWORDS = new Set([
   "while",
 ]);
 const TOKEN =
-  /(\/\/.*$|\/\*[\s\S]*?\*\/|#[^\n]*$|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\b\d+(?:\.\d+)?\b|\b[A-Za-z_$][\w$]*\b)/gm;
+  /(\/\/.*$|--.*$|\/\*[\s\S]*?\*\/|#[^\n]*$|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\b\d+(?:\.\d+)?\b|\b[A-Za-z_$][\w$]*\b)/gm;
 
 function language(path: string): string {
   const extension = path.split(".").at(-1)?.toLowerCase() || "";
   if (["ts", "tsx", "js", "jsx", "mjs", "cjs"].includes(extension))
+    return "code";
+  if (
+    [
+      "java",
+      "kt",
+      "kts",
+      "py",
+      "go",
+      "rs",
+      "rb",
+      "php",
+      "c",
+      "h",
+      "cc",
+      "cpp",
+      "hpp",
+      "cs",
+      "swift",
+      "sh",
+      "bash",
+      "zsh",
+      "sql",
+      "yaml",
+      "yml",
+      "toml",
+    ].includes(extension)
+  )
     return "code";
   if (extension === "json" || extension === "jsonc") return "json";
   if (extension === "css" || extension === "scss") return "css";
@@ -73,6 +135,7 @@ export function highlightedLine(line: string, kind: string): ReactNode[] {
     const value = match[0];
     const token =
       value.startsWith("//") ||
+      value.startsWith("--") ||
       value.startsWith("/*") ||
       (kind === "markdown" && value.startsWith("#"))
         ? "comment"
@@ -80,7 +143,7 @@ export function highlightedLine(line: string, kind: string): ReactNode[] {
           ? "string"
           : /^\d/.test(value)
             ? "number"
-            : KEYWORDS.has(value)
+            : KEYWORDS.has(value.toLowerCase())
               ? "keyword"
               : kind === "html" &&
                   /^(?:html|head|body|div|span|script|style|main|section|a|p|h\d)$/.test(
@@ -119,10 +182,14 @@ export function PearlCodePreview({
   path,
   content,
   jumpLine,
+  changedLines,
+  changeKind,
 }: {
   path: string;
   content: string;
   jumpLine?: number | null;
+  changedLines?: ReadonlySet<number>;
+  changeKind?: "added" | "removed";
 }) {
   const kind = language(path);
   const container = useRef<HTMLDivElement>(null);
@@ -149,7 +216,10 @@ export function PearlCodePreview({
       <div className="pearl-code-lines">
         <div style={{ height: start * lineStep }} aria-hidden="true" />
         {lines.slice(start, end).map((line, index) => (
-          <div className="pearl-code-line" key={start + index}>
+          <div
+            className={`pearl-code-line${changeKind && changedLines?.has(start + index + 1) ? ` is-${changeKind}` : ""}`}
+            key={start + index}
+          >
             <span className="pearl-code-number" aria-hidden="true">
               {start + index + 1}
             </span>

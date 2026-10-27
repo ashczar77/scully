@@ -19,6 +19,14 @@ export type TaskChangeSet = {
   at: string;
   files: TaskFileChange[];
   undoAvailable: boolean;
+  source?: "local" | "sandbox";
+  sandboxRevision?: {
+    branchId: string;
+    beforeHead: string;
+    afterHead: string;
+    beforeFiles: Record<string, string | null>;
+    afterFiles: Record<string, string>;
+  };
   reason?: string;
   undone?: boolean;
 };

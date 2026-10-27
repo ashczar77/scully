@@ -93,19 +93,23 @@ try {
         input.getBoundingClientRect().bottom,
       sendWidth: send.getBoundingClientRect().width,
       addFilesDisabled: toolbar.querySelector(
-        '[aria-label="Add files (coming soon)"]',
+        '[aria-label="Attach images or documents"]',
       ).disabled,
       permissionsDisabled: toolbar.querySelector(
-        '[aria-label="Permissions (coming soon)"]',
+        '[aria-label="View Pearl permissions"]',
       ).disabled,
+      attachmentInputDisplay: getComputedStyle(
+        document.querySelector(".pearl-attachment-input"),
+      ).display,
     };
   });
   assert.equal(composerAndRail.railBackground, "rgba(0, 0, 0, 0)");
   assert.match(composerAndRail.railShadow, /1px 0px 0px 0px inset/);
   assert.equal(composerAndRail.toolbarBelowInput, true);
   assert.equal(composerAndRail.sendWidth, 30);
-  assert.equal(composerAndRail.addFilesDisabled, true);
-  assert.equal(composerAndRail.permissionsDisabled, true);
+  assert.equal(composerAndRail.addFilesDisabled, false);
+  assert.equal(composerAndRail.permissionsDisabled, false);
+  assert.equal(composerAndRail.attachmentInputDisplay, "none");
   await page.screenshot({ path: "test-results/pearl-terminal-welcome.png" });
   const desktopViewport = page.viewportSize();
   await page.setViewportSize({ width: 760, height: 720 });
@@ -154,6 +158,18 @@ try {
   assert.equal(selectedTab.bottomBorder, "rgba(0, 0, 0, 0)");
   await page.getByRole("heading", { level: 1, name: "Settings" }).waitFor();
   await page.getByRole("heading", { name: "Pearl’s model" }).waitFor();
+  const settingsTabRows = () =>
+    page
+      .locator(".pearl-settings-tabs button")
+      .evaluateAll((buttons) =>
+        buttons.map((button) => Math.round(button.getBoundingClientRect().top)),
+      );
+  const wideTabRows = await settingsTabRows();
+  assert.equal(new Set(wideTabRows).size, 1);
+  await page.setViewportSize({ width: 430, height: 720 });
+  const smallTabRows = await settingsTabRows();
+  assert(new Set(smallTabRows).size > 1);
+  if (desktopViewport) await page.setViewportSize(desktopViewport);
   assert.equal(
     await page
       .locator(".pearl-settings-card")
@@ -197,16 +213,19 @@ try {
     "listPearlProjectFiles",
     "metrics",
     "onPearlChatUpdate",
+    "openPearlExternalLink",
     "pearlGitCommitFiles",
     "pearlGitDiff",
     "pearlGitView",
     "pearlSandboxConnection",
     "pearlSandboxImages",
     "pearlSandboxSnapshot",
+    "preparePearlAttachment",
     "preparePearlSandbox",
     "readPearlProjectFile",
     "reconcilePearlSandbox",
     "remoteMcpInfo",
+    "removePearlAttachment",
     "renamePearlChat",
     "resizePearlTerminal",
     "restorePearlChat",
@@ -223,12 +242,17 @@ try {
     "stopPearlTerminal",
     "switchPearlSandboxBranch",
     "undoPearlTask",
+    "updatePearlPermission",
     "webSearchInfo",
   ]);
   const channels = await app.evaluate(({ ipcMain }) => [
     ...ipcMain._invokeHandlers.keys(),
   ]);
   assert(channels.includes("pearl:send"));
+  assert(channels.includes("pearl:permission:update"));
+  assert(channels.includes("pearl:attachment:prepare"));
+  assert(channels.includes("pearl:attachment:remove"));
+  assert(channels.includes("pearl:external-link"));
   assert(channels.includes("pearl:web:configure"));
   assert(channels.includes("pearl:mcp:connect"));
   assert(channels.includes("pearl:sandbox:prepare"));
@@ -421,13 +445,55 @@ try {
     await page.getByRole("region", { name: "Code preview" }).count(),
     1,
   );
+  const tabOverflowStyle = await page
+    .locator(".pearl-file-workbench-tabs")
+    .evaluate((strip) => ({
+      width: getComputedStyle(strip).scrollbarWidth,
+      webkitDisplay: getComputedStyle(strip, "::-webkit-scrollbar").display,
+    }));
+  assert.equal(tabOverflowStyle.width, "none");
+  assert.equal(tabOverflowStyle.webkitDisplay, "none");
   await page.screenshot({ path: "test-results/pearl-files.png" });
+  const overflowFiles = Array.from(
+    { length: 12 },
+    (_, index) => `overflow-sample-${String(index + 1).padStart(2, "0")}.ts`,
+  );
+  for (const name of overflowFiles) {
+    await writeFile(join(project, name), `export const file = "${name}";\n`);
+  }
+  await page.getByRole("button", { name: "Refresh panel" }).click();
+  for (const name of overflowFiles) {
+    await page.getByRole("button", { name, exact: true }).click();
+  }
+  const overflowTabs = await page
+    .locator(".pearl-file-workbench-tabs")
+    .evaluate((strip) => ({
+      tabs: strip.querySelectorAll('[role="tab"]').length,
+      overflowing: strip.scrollWidth > strip.clientWidth,
+      scrollbar: getComputedStyle(strip, "::-webkit-scrollbar").display,
+    }));
+  assert.equal(overflowTabs.tabs, 10);
+  assert.equal(overflowTabs.overflowing, true);
+  assert.equal(overflowTabs.scrollbar, "none");
+  await page.screenshot({ path: "test-results/pearl-files-overflow.png" });
   await page.getByRole("button", { name: "Close file editor" }).click();
+  for (const name of overflowFiles) {
+    await rm(join(project, name));
+  }
   await page.getByRole("button", { name: "Refresh panel" }).click();
   await page.getByRole("button", { name: "Close panel" }).click();
   await page.locator(".pearl-inspector.is-closing").waitFor();
   await page.locator(".pearl-inspector").waitFor({ state: "detached" });
   await page.getByRole("button", { name: "Files", exact: true }).click();
+  await page
+    .locator(".pearl-inspector")
+    .evaluate((element) =>
+      Promise.all(
+        element
+          .getAnimations()
+          .map((animation) => animation.finished.catch(() => {})),
+      ),
+    );
   const collapseGrip = await page
     .getByRole("separator", { name: "Resize panel" })
     .boundingBox();
@@ -437,7 +503,9 @@ try {
     collapseGrip.y + 80,
   );
   await page.mouse.down();
-  await page.mouse.move(collapseGrip.x + 550, collapseGrip.y + 80);
+  await page.mouse.move(collapseGrip.x + 260, collapseGrip.y + 80, {
+    steps: 8,
+  });
   await page.mouse.up();
   await page.locator(".pearl-inspector").waitFor({ state: "detached" });
   await page.getByRole("button", { name: "Files", exact: true }).click();

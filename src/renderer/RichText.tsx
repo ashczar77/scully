@@ -67,9 +67,11 @@ export function plainTextFromMarkdown(markdown: string): string {
 export function RichText({
   text,
   readableProse = false,
+  onOpenLink,
 }: {
   text: string;
   readableProse?: boolean;
+  onOpenLink?: (url: string) => void;
 }) {
   return (
     <div className="rich-text">
@@ -78,8 +80,17 @@ export function RichText({
         skipHtml
         components={{
           a({ href, children }) {
-            return href && /^https:\/\//i.test(href) ? (
-              <a href={href} target="_blank" rel="noopener noreferrer">
+            return href && /^https?:\/\//i.test(href) ? (
+              <a
+                href={href}
+                onClick={(event) => {
+                  if (!onOpenLink) return;
+                  event.preventDefault();
+                  onOpenLink(href);
+                }}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
                 {children}
               </a>
             ) : (

@@ -1,8 +1,9 @@
 module.exports = {
   packagerConfig: {
-    asar: { unpackDir: "node_modules/node-pty" },
+    asar: { unpack: "**/*.node", unpackDir: "node_modules/node-pty" },
     executableName: "scully",
     icon: "assets/branding/scully",
+    electronZipDir: process.env.SCULLY_ELECTRON_ZIP_DIR || undefined,
     ignore: (path) =>
       path !== "" &&
       (/^\/node_modules\/node-pty\/prebuilds(\/|$)/.test(path) ||
@@ -10,7 +11,9 @@ module.exports = {
           path,
         ) &&
           path !== "/node_modules" &&
-          !/^\/node_modules\/(node-pty|node-addon-api)(\/|$)/.test(path))),
+          !/^\/node_modules\/(node-pty|node-addon-api|pdfjs-dist|@napi-rs)(\/|$)/.test(
+            path,
+          ))),
   },
   makers: [],
 };

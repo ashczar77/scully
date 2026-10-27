@@ -42,10 +42,13 @@
   },
   "dependencies": {
     "@modelcontextprotocol/client": "2.3.1",
+    "@napi-rs/canvas": "^1.0.13",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
     "ipaddr.js": "2.2.0",
+    "mammoth": "^1.13.0",
     "node-pty": "^1.1.0",
+    "pdfjs-dist": "^6.4.299",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "remark-parse": "^11.0.0",

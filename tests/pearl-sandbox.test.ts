@@ -130,6 +130,152 @@ it("requires explicit upload review and excludes private paths", async () => {
   );
 });
 
+it("reviews and undoes only the file changed in a Sandbox turn", async () => {
+  const f = fixture();
+  await f.service.images();
+  f.service.prepare(f.chat, f.base);
+  await f.service.start(f.chat, () => {});
+  const turnId = randomUUID();
+  f.service.beginTurn(f.chat, turnId);
+  const before = await f.service.read(f.chat, "main.ts");
+  await f.service.write(
+    f.chat,
+    "main.ts",
+    "export const value = 2;\n",
+    before.sha256,
+    () => {},
+  );
+  const change = f.service.finishTurn(f.chat, turnId);
+  expect(change?.files.map((file) => file.path)).toEqual(["main.ts"]);
+  expect(change?.source).toBe("sandbox");
+  expect(await f.service.taskFileReview(f.chat, change!, "main.ts")).toEqual({
+    path: "main.ts",
+    before: "export const value = 1;\n",
+    after: "export const value = 2;\n",
+    binary: false,
+  });
+  expect(f.service.undoTurn(f.chat, change!).undone).toBe(true);
+  expect((await f.service.read(f.chat, "main.ts")).content).toBe(
+    "export const value = 1;\n",
+  );
+  expect(readFileSync(join(f.project, "main.ts"), "utf8")).toBe(
+    "export const value = 1;\n",
+  );
+});
+
+it("routes saved Sandbox turn review and Undo through the chat manager", async () => {
+  const f = fixture();
+  await f.service.images();
+  f.service.prepare(f.chat, f.base);
+  await f.service.start(f.chat, () => {});
+  const turnId = randomUUID();
+  f.service.beginTurn(f.chat, turnId);
+  const read = await f.service.read(f.chat, "main.ts");
+  await f.service.write(
+    f.chat,
+    "main.ts",
+    "export const value = 3;\n",
+    read.sha256,
+    () => {},
+  );
+  f.chat.taskChanges = [f.service.finishTurn(f.chat, turnId)!];
+  const store = new PearlChatStore(join(f.data, "turns.sqlite"));
+  try {
+    store.save(f.chat);
+    const manager = new PearlChatManager(
+      store,
+      f.data,
+      () => null,
+      () => {},
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      f.service,
+    );
+    expect(
+      (await manager.taskFileReview(f.chat.id, turnId, "main.ts")).after,
+    ).toBe("export const value = 3;\n");
+    await expect(
+      manager.taskFileReview(f.chat.id, turnId, ".env"),
+    ).rejects.toThrow();
+    const undone = manager.undoTask(f.chat.id, turnId);
+    expect(undone.taskChanges?.[0].undone).toBe(true);
+    expect((await f.service.read(undone, "main.ts")).content).toBe(
+      "export const value = 1;\n",
+    );
+    expect(readFileSync(join(f.project, "main.ts"), "utf8")).toBe(
+      "export const value = 1;\n",
+    );
+  } finally {
+    store.close();
+  }
+});
+
+it("refuses Sandbox Undo when a later checkpoint supersedes the reviewed turn", async () => {
+  const f = fixture();
+  await f.service.images();
+  f.service.prepare(f.chat, f.base);
+  await f.service.start(f.chat, () => {});
+  const turnId = randomUUID();
+  f.service.beginTurn(f.chat, turnId);
+  const before = await f.service.read(f.chat, "main.ts");
+  await f.service.write(
+    f.chat,
+    "main.ts",
+    "value 2\n",
+    before.sha256,
+    () => {},
+  );
+  const change = f.service.finishTurn(f.chat, turnId)!;
+  const next = await f.service.read(f.chat, "main.ts");
+  await f.service.write(f.chat, "main.ts", "value 3\n", next.sha256, () => {});
+  expect(() => f.service.undoTurn(f.chat, change)).toThrow(
+    /changed since this turn/i,
+  );
+  expect((await f.service.read(f.chat, "main.ts")).content).toBe("value 3\n");
+});
+
+it("publishes measured upload stages without treating transferred bytes as a saved checkpoint", async () => {
+  const f = fixture();
+  await f.service.images();
+  f.service.prepare(f.chat, f.base);
+  const original = f.workspace.prepare;
+  f.workspace.prepare = async (...args) => {
+    args[5]?.({
+      phase: "transferring",
+      uploadedBytes: 10,
+      totalBytes: 24,
+      completedFiles: 0,
+      totalFiles: 1,
+    });
+    args[5]?.({
+      phase: "verifying",
+      uploadedBytes: 24,
+      totalBytes: 24,
+      completedFiles: 1,
+      totalFiles: 1,
+    });
+    return original(...args);
+  };
+  const states: string[] = [];
+  await f.service.start(f.chat, () =>
+    states.push(
+      `${f.chat.sandbox?.status}:${f.chat.sandbox?.uploadProgress?.phase || "done"}`,
+    ),
+  );
+  expect(states).toContain("uploading:preparing");
+  expect(states).toContain("uploading:verifying");
+  expect(states.at(-1)).toBe("ready:done");
+  expect(f.chat.sandbox?.baseImageTag).toBe("test");
+});
+
 it("lists approved Sandbox files in pages and rejects invalid offsets", async () => {
   const f = fixture();
   for (let index = 0; index < 502; index++)
@@ -496,6 +642,99 @@ it("exposes remote file and check tools while a Sandbox task is active", async (
   }
 });
 
+it("checks a Sandbox edit with approval and completes without changing local files", async () => {
+  const f = fixture();
+  const store = new PearlChatStore(join(f.data, "completion-flow.sqlite"));
+  const responses = [
+    {
+      kind: "tool" as const,
+      text: "",
+      call: {
+        id: "write",
+        name: "create_file",
+        arguments: JSON.stringify({
+          path: "new.txt",
+          content: "sandbox edit\n",
+        }),
+      },
+    },
+    { kind: "reply" as const, text: "I changed the file." },
+    {
+      kind: "tool" as const,
+      text: "",
+      call: {
+        id: "check",
+        name: "sandbox_run_check",
+        arguments: JSON.stringify({ command: "node", args: ["--version"] }),
+      },
+    },
+    {
+      kind: "tool" as const,
+      text: "",
+      call: {
+        id: "finish",
+        name: "complete_work",
+        arguments: JSON.stringify({
+          status: "done",
+          summary: "Changed and checked new.txt.",
+        }),
+      },
+    },
+  ];
+  const complete = vi.fn(
+    async (_input: Parameters<PearlModel["complete"]>[0]) => {
+      const next = responses.shift();
+      if (!next) throw new Error("No model fixture response");
+      return next;
+    },
+  );
+  try {
+    const manager = new PearlChatManager(
+      store,
+      f.data,
+      () => ({
+        key: "fixture-key",
+        model: "fixture-model",
+        outputTokens: 8192,
+      }),
+      () => {},
+      { complete } as PearlModel,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      f.service,
+    );
+    await f.service.images();
+    f.service.prepare(f.chat, f.base);
+    await f.service.start(f.chat, () => {});
+    store.save(f.chat);
+    manager.send(f.chat.id, "Create and check new.txt");
+    await vi.waitFor(() =>
+      expect(store.get(f.chat.id).pendingTool?.id).toBe("check"),
+    );
+    expect(complete.mock.calls[2][0].system).toContain("sandbox_run_check");
+    expect(complete.mock.calls[2][0].allowedTools).not.toContain("run_command");
+    manager.decideTool(f.chat.id, "check", true);
+    await vi.waitFor(() => expect(store.get(f.chat.id).status).toBe("idle"));
+    const done = store.get(f.chat.id);
+    expect(done.messages.at(-1)?.completion?.status).toBe("done");
+    expect(readFileSync(join(f.project, "main.ts"), "utf8")).toBe(
+      "export const value = 1;\n",
+    );
+    expect((await f.service.read(done, "new.txt")).content).toBe(
+      "sandbox edit\n",
+    );
+  } finally {
+    store.close();
+  }
+});
+
 it("can search current public information in Sandbox without sending project files", async () => {
   const f = fixture();
   const store = new PearlChatStore(join(f.data, "sandbox-web.sqlite"));
@@ -656,8 +895,42 @@ it("resumes an older synchronized checkpoint only when local files still match",
   writeFileSync(join(f.project, "main.ts"), "export const value = 1;\n");
   f.service.switchBranch(f.chat, branchId);
   expect(f.chat.sandbox?.active).toBe(true);
-  expect(f.chat.sandbox?.activeBranchId).not.toBe(branchId);
+  expect(f.chat.sandbox?.activeBranchId).toBe(branchId);
   expect(f.chat.sandbox?.branches[0].syncedHead).toBeUndefined();
+});
+
+it("keeps Main and other checkpoints after synchronizing a fork", async () => {
+  const f = fixture();
+  await f.service.images();
+  f.service.prepare(f.chat, f.base);
+  await f.service.start(f.chat, () => {});
+  const main = f.chat.sandbox!.branches[0];
+  f.service.fork(f.chat, "feature");
+  const featureId = f.chat.sandbox!.activeBranchId!;
+  const before = await f.service.read(f.chat, "main.ts");
+  await f.service.write(
+    f.chat,
+    "main.ts",
+    "export const value = 2;\n",
+    before.sha256,
+    () => {},
+  );
+  f.service.leave(f.chat);
+  await f.service.reviewSync(f.chat);
+  const token = f.chat.sandbox!.pendingSync!.token;
+  await f.service.fileReview(f.chat, "main.ts");
+  await f.service.approveSync(f.chat, token);
+  expect(f.chat.sandbox?.branches.map(({ name }) => name)).toEqual([
+    "Main",
+    "feature",
+  ]);
+  expect(f.chat.sandbox?.branches[0].id).toBe(main.id);
+  expect(f.chat.sandbox?.activeBranchId).toBe(featureId);
+  f.service.switchBranch(f.chat, featureId);
+  expect(f.chat.sandbox?.branches.map(({ name }) => name)).toEqual([
+    "Main",
+    "feature",
+  ]);
 });
 
 it("forks independent checkpoints and binds writes and checks to the selected revision", async () => {
@@ -699,6 +972,233 @@ it("forks independent checkpoints and binds writes and checks to the selected re
   expect(readFileSync(join(f.project, "main.ts"), "utf8")).toContain(
     "value = 1",
   );
+});
+
+it("saves an approved dependency install as a branch checkpoint and rejects stale approval", async () => {
+  const f = fixture();
+  await f.service.images();
+  f.service.prepare(f.chat, f.base);
+  await f.service.start(f.chat, () => {});
+  const before = f.chat.sandbox!.branches[0].headImage;
+  const installed = randomUUID();
+  f.images.set(installed, { ...f.images.get(before) });
+  f.workspace.install = vi.fn(async () => ({
+    imageId: installed,
+    outcome: {
+      exitCode: 0,
+      stdout: "installed",
+      stderr: "",
+      passed: true,
+      unknown: false,
+    },
+  }));
+  await expect(
+    f.service.install(f.chat, "npm", ["install"], "stale", () => {}),
+  ).rejects.toThrow(/changed/);
+  expect(f.workspace.install).not.toHaveBeenCalled();
+  const result = await f.service.install(
+    f.chat,
+    "npm",
+    ["install"],
+    before,
+    () => {},
+  );
+  expect(result.checkpoint).toBe(installed);
+  expect(f.chat.sandbox!.branches[0].headImage).toBe(installed);
+  expect(f.workspace.install).toHaveBeenCalledTimes(1);
+  await expect(
+    f.service.install(f.chat, "npm", ["install"], before, () => {}),
+  ).rejects.toThrow(/changed/);
+});
+
+it("keeps a failed dependency install visible without moving or disabling the Sandbox branch", async () => {
+  const f = fixture();
+  await f.service.images();
+  f.service.prepare(f.chat, f.base);
+  await f.service.start(f.chat, () => {});
+  const before = f.chat.sandbox!.branches[0].headImage;
+  f.workspace.install = vi.fn(async () => ({
+    imageId: before,
+    outcome: {
+      exitCode: 1,
+      stdout: "npm ERR! registry unavailable",
+      stderr: "network timeout",
+      passed: false,
+      unknown: false,
+    },
+  }));
+  const result = await f.service.install(
+    f.chat,
+    "npm",
+    ["install"],
+    before,
+    () => {},
+  );
+  expect(result).toMatchObject({
+    exitCode: 1,
+    passed: false,
+    writesPersisted: false,
+    stderr: "network timeout",
+  });
+  expect(f.chat.sandbox!.branches[0].headImage).toBe(before);
+  expect(f.chat.sandbox!.status).toBe("ready");
+  expect(f.chat.sandbox!.pendingInstall).toBeUndefined();
+});
+
+it("runs an approved Sandbox install once, checks the new checkpoint, and does not ask again for the same install", async () => {
+  const f = fixture();
+  const store = new PearlChatStore(join(f.data, "install-flow.sqlite"));
+  const responses = [
+    {
+      kind: "tool" as const,
+      text: "",
+      call: {
+        id: "write",
+        name: "create_file",
+        arguments: JSON.stringify({ path: "new.txt", content: "changed\n" }),
+      },
+    },
+    {
+      kind: "tool" as const,
+      text: "",
+      call: {
+        id: "missing-test",
+        name: "sandbox_run_check",
+        arguments: JSON.stringify({ command: "npm", args: ["test"] }),
+      },
+    },
+    {
+      kind: "tool" as const,
+      text: "",
+      call: {
+        id: "install-first",
+        name: "install_dependencies",
+        arguments: JSON.stringify({ command: "npm", args: ["install"] }),
+      },
+    },
+    {
+      kind: "tool" as const,
+      text: "",
+      call: {
+        id: "install-again",
+        name: "install_dependencies",
+        arguments: JSON.stringify({ command: "npm", args: ["install"] }),
+      },
+    },
+    {
+      kind: "tool" as const,
+      text: "",
+      call: {
+        id: "passing-test",
+        name: "sandbox_run_check",
+        arguments: JSON.stringify({ command: "npm", args: ["test"] }),
+      },
+    },
+    {
+      kind: "tool" as const,
+      text: "",
+      call: {
+        id: "finish",
+        name: "complete_work",
+        arguments: JSON.stringify({
+          status: "done",
+          summary: "Changed the file and verified tests.",
+        }),
+      },
+    },
+  ];
+  const complete = vi.fn(async () => {
+    const response = responses.shift();
+    if (!response) throw new Error("No model fixture response");
+    return response;
+  });
+  try {
+    const manager = new PearlChatManager(
+      store,
+      f.data,
+      () => ({
+        key: "fixture-key",
+        model: "fixture-model",
+        outputTokens: 8192,
+      }),
+      () => {},
+      { complete } as unknown as PearlModel,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      f.service,
+    );
+    await f.service.images();
+    f.service.prepare(f.chat, f.base);
+    await f.service.start(f.chat, () => {});
+    const originalHead = f.chat.sandbox!.branches[0].headImage;
+    const installedHead = randomUUID();
+    f.images.set(installedHead, { ...f.images.get(originalHead) });
+    f.workspace.check = vi.fn(async () => ({
+      exitCode:
+        f.workspace.install && vi.mocked(f.workspace.install).mock.calls.length
+          ? 0
+          : 127,
+      stdout: "",
+      stderr:
+        f.workspace.install && vi.mocked(f.workspace.install).mock.calls.length
+          ? ""
+          : "vitest: not found",
+      passed: !!(
+        f.workspace.install && vi.mocked(f.workspace.install).mock.calls.length
+      ),
+      unknown: false,
+    }));
+    f.workspace.install = vi.fn(async () => ({
+      imageId: installedHead,
+      outcome: {
+        exitCode: 0,
+        stdout: "installed",
+        stderr: "",
+        passed: true,
+        unknown: false,
+      },
+    }));
+    store.save(f.chat);
+    manager.send(f.chat.id, "Change new.txt and run tests");
+    await vi.waitFor(() =>
+      expect(store.get(f.chat.id).pendingTool?.id).toBe("missing-test"),
+    );
+    manager.decideTool(f.chat.id, "missing-test", true);
+    await vi.waitFor(() =>
+      expect(store.get(f.chat.id).pendingTool?.id).toBe("install-first"),
+    );
+    manager.decideTool(f.chat.id, "install-first", true);
+    await vi.waitFor(() =>
+      expect(store.get(f.chat.id).pendingTool?.id).toBe("passing-test"),
+    );
+    expect(f.workspace.install).toHaveBeenCalledTimes(1);
+    expect(
+      store
+        .get(f.chat.id)
+        .messages.find(
+          (message) =>
+            message.toolCallId === "install-again" && message.role === "tool",
+        )?.text,
+    ).toContain("already ran");
+    manager.decideTool(f.chat.id, "passing-test", true);
+    await vi.waitFor(() => expect(store.get(f.chat.id).status).toBe("idle"));
+    const done = store.get(f.chat.id);
+    expect(done.pendingTool).toBeUndefined();
+    expect(done.messages.at(-1)?.completion?.status).toBe("done");
+    expect(done.sandbox?.branches[0].headImage).toBe(installedHead);
+    expect(readFileSync(join(f.project, "main.ts"), "utf8")).toBe(
+      "export const value = 1;\n",
+    );
+  } finally {
+    store.close();
+  }
 });
 
 it("recovers an uncertain remote write only after inspecting its saved result", async () => {

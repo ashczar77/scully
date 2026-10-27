@@ -11,6 +11,15 @@ import type { PearlChat } from "../shared/pearl-chat";
 import type { PearlSandboxImageList } from "../shared/pearl-sandbox";
 import type { FileReview } from "../shared/pearl-workspace";
 import { ModelPicker } from "./ModelPicker";
+import { imageCompatibilityWarning } from "./pearl-image-compatibility";
+
+function readableBytes(bytes: number): string {
+  return bytes >= 1024 * 1024
+    ? `${(bytes / (1024 * 1024)).toFixed(1)} MiB`
+    : bytes >= 1024
+      ? `${(bytes / 1024).toFixed(1)} KiB`
+      : `${bytes} B`;
+}
 
 export function PearlSandboxPanel({
   api,
@@ -32,6 +41,7 @@ export function PearlSandboxPanel({
   const [branchName, setBranchName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [connectionIssue, setConnectionIssue] = useState("");
   const [expanded, setExpanded] = useState(chat.sandbox?.status !== "ready");
   const sandbox = chat.sandbox;
   useEffect(() => {
@@ -51,6 +61,16 @@ export function PearlSandboxPanel({
       ([path, digest]) => baselineFiles.get(path) !== digest,
     ),
   );
+  const imageWarning =
+    sandbox?.status === "prepared"
+      ? imageCompatibilityWarning(
+          sandbox.manifest,
+          sandbox.baseImageTag ||
+            catalog?.images.find((item) => item.uuid === sandbox.baseImage)
+              ?.tag,
+        )
+      : null;
+  const uploadProgress = sandbox?.uploadProgress;
   async function run(work: () => Promise<PearlChat>) {
     setBusy(true);
     setError("");
@@ -64,27 +84,36 @@ export function PearlSandboxPanel({
       setBusy(false);
     }
   }
-  function loadImages() {
+  async function loadImages() {
     setBusy(true);
     setError("");
-    void api
-      .pearlSandboxImages()
-      .then((list) => {
-        setCatalog(list);
-        setImage(
-          sandbox && list.images.some((item) => item.uuid === sandbox.baseImage)
-            ? sandbox.baseImage
-            : list.images[0]?.uuid || "",
+    setConnectionIssue("");
+    try {
+      const connection = await api.pearlSandboxConnection();
+      if (!connection.configured) {
+        onSettings();
+        return;
+      }
+      if (sandbox?.projectId && sandbox.projectId !== connection.projectId) {
+        setConnectionIssue(
+          "This chat uses a different Nebius Sandbox project. Connect that project in Settings to continue.",
         );
-      })
-      .catch((cause) =>
-        setError(
-          cause instanceof Error
-            ? cause.message
-            : "Could not list images. Connect Sandbox in Settings.",
-        ),
-      )
-      .finally(() => setBusy(false));
+        return;
+      }
+      const list = await api.pearlSandboxImages();
+      setCatalog(list);
+      setImage(
+        sandbox && list.images.some((item) => item.uuid === sandbox.baseImage)
+          ? sandbox.baseImage
+          : list.images[0]?.uuid || "",
+      );
+    } catch {
+      setError(
+        "Could not load Sandbox images. Check the connection and try again.",
+      );
+    } finally {
+      setBusy(false);
+    }
   }
   if (!chat.project?.approved || chat.lifecycle) return null;
   return (
@@ -132,6 +161,14 @@ export function PearlSandboxPanel({
             {error}
           </p>
         )}
+        {connectionIssue && (
+          <div className="pearl-sandbox-connection-issue" role="alert">
+            <p>{connectionIssue}</p>
+            <button type="button" onClick={onSettings}>
+              Open Sandbox settings
+            </button>
+          </div>
+        )}
         {!sandbox && (
           <>
             <p>
@@ -140,7 +177,11 @@ export function PearlSandboxPanel({
             </p>
             <div className="pearl-sandbox-controls">
               {!catalog ? (
-                <button type="button" disabled={busy} onClick={loadImages}>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void loadImages()}
+                >
                   Work in Sandbox
                 </button>
               ) : (
@@ -195,6 +236,11 @@ export function PearlSandboxPanel({
                 ))}
               </ul>
             </details>
+            {imageWarning && (
+              <p className="pearl-sandbox-image-warning" role="status">
+                {imageWarning}
+              </p>
+            )}
             {sandbox.excluded.length > 0 && (
               <details>
                 <summary>Excluded paths ({sandbox.excluded.length})</summary>
@@ -236,7 +282,11 @@ export function PearlSandboxPanel({
                   )}
                 </>
               ) : (
-                <button type="button" disabled={busy} onClick={loadImages}>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void loadImages()}
+                >
                   Choose another image
                 </button>
               )}
@@ -253,9 +303,55 @@ export function PearlSandboxPanel({
           </>
         )}
         {sandbox?.status === "uploading" && (
-          <p role="status">
-            Uploading source snapshot. Wait for a saved checkpoint.
-          </p>
+          <div className="pearl-sandbox-progress" role="status">
+            {uploadProgress?.phase === "transferring" ? (
+              <>
+                <span>
+                  Uploading {uploadProgress.completedFiles} of{" "}
+                  {uploadProgress.totalFiles} files (
+                  {readableBytes(uploadProgress.uploadedBytes)} of{" "}
+                  {readableBytes(uploadProgress.totalBytes)} transferred).
+                </span>
+                <div
+                  className="pearl-sandbox-progress-track"
+                  role="progressbar"
+                  aria-label="Sandbox upload"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={
+                    uploadProgress.totalBytes
+                      ? Math.min(
+                          100,
+                          Math.round(
+                            (uploadProgress.uploadedBytes /
+                              uploadProgress.totalBytes) *
+                              100,
+                          ),
+                        )
+                      : 0
+                  }
+                >
+                  <span
+                    style={{
+                      width: `${uploadProgress.totalBytes ? Math.min(100, (uploadProgress.uploadedBytes / uploadProgress.totalBytes) * 100) : 0}%`,
+                    }}
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <span>
+                  {uploadProgress?.phase === "verifying"
+                    ? "Verifying saved checkpoint…"
+                    : "Preparing Sandbox upload…"}
+                </span>
+                <span
+                  className="pearl-sandbox-progress-indeterminate"
+                  aria-hidden="true"
+                />
+              </>
+            )}
+          </div>
         )}
         {sandbox?.status === "uncertain" && (
           <>

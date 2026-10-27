@@ -10,6 +10,12 @@ type PearlDesktopAPI = PearlChatAPI & {
 };
 
 const api: PearlDesktopAPI = {
+  openPearlExternalLink: (url) =>
+    ipcRenderer.invoke("pearl:external-link", url),
+  preparePearlAttachment: (id, input) =>
+    ipcRenderer.invoke("pearl:attachment:prepare", id, input),
+  removePearlAttachment: (id, attachmentId) =>
+    ipcRenderer.invoke("pearl:attachment:remove", id, attachmentId),
   pearlSandboxConnection: () => ipcRenderer.invoke("pearl:sandbox:connection"),
   configurePearlSandbox: (key, projectId) =>
     ipcRenderer.invoke("pearl:sandbox:configure", key, projectId),
@@ -69,6 +75,8 @@ const api: PearlDesktopAPI = {
   choosePearlProject: (id) => ipcRenderer.invoke("pearl:project:choose", id),
   approvePearlProject: (id, approved) =>
     ipcRenderer.invoke("pearl:project:approve", id, approved),
+  updatePearlPermission: (id, permission, enabled) =>
+    ipcRenderer.invoke("pearl:permission:update", id, permission, enabled),
   decidePearlTool: (id, toolCallId, approved) =>
     ipcRenderer.invoke("pearl:tool:decide", id, toolCallId, approved),
   answerPearlQuestion: (id, questionId, answer) =>

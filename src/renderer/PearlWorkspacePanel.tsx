@@ -447,7 +447,8 @@ export function PearlWorkspacePanel({
                     <p className="pearl-inspector-error">{task.reason}</p>
                   )}
                   <div className="pearl-inspector-section">
-                    {task.files.length} changed project item
+                    {task.files.length} changed{" "}
+                    {task.source === "sandbox" ? "Sandbox" : "local"} item
                     {task.files.length === 1 ? "" : "s"}
                   </div>
                   {task.files.map((file) => (

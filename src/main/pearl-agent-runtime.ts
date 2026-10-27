@@ -17,6 +17,7 @@ export type PearlAgentHost = {
     allowedTools: string[],
     signal: AbortSignal,
     suffix?: string,
+    requiredTool?: "complete_work",
   ) => Promise<PearlModelResult>;
   recordActions: (
     chat: PearlChat,
@@ -27,7 +28,12 @@ export type PearlAgentHost = {
   ) => void;
   observe: (chat: PearlChat, call: PearlToolCall, observation: string) => void;
   execute: (chat: PearlChat, call: PearlToolCall) => Promise<ActionDisposition>;
-  finish: (chat: PearlChat, text: string, fallbackModel?: string) => void;
+  finish: (
+    chat: PearlChat,
+    text: string,
+    fallbackModel?: string,
+    completion?: PearlChat["messages"][number]["completion"],
+  ) => void;
   pause: (
     chat: PearlChat,
     reason: string,
@@ -169,10 +175,12 @@ export async function runPearlAgentTurn(
   let verificationRequested = false;
   let browserRequested = false;
   let completionRequested = false;
+  let completionRejections = 0;
   let repetitionNudge = "";
   const seenCycles = new Map<string, number>();
   const recentProgress: boolean[] = [];
   const saved = host.load();
+  if (saved.pauseKind === "completion_missing") completionRequested = true;
   const start = saved.messages.findIndex(
     (message) => message.id === saved.activeUserMessageId,
   );
@@ -267,7 +275,7 @@ export async function runPearlAgentTurn(
     const allowed = host.allowedTools(chat);
     const suffix =
       (verificationRequested && host.needsCheck(chat)
-        ? "\nFiles changed after the latest successful command check. Request a relevant check through run_command before concluding if one is available. If you cannot check, clearly state that the edits are unverified. Do not claim the task is complete based only on file writes."
+        ? `\nFiles changed after the latest successful command check. Request a relevant check through ${chat.sandbox?.active ? "sandbox_run_check" : "run_command"} before concluding if one is available. If you cannot check, clearly state why the edits are unchecked. Do not claim the task is complete based only on file writes.`
         : "") +
       (browserRequested && host.needsBrowserCheck?.(chat)
         ? "\nBrowser verification is missing, failed, or predates an edit. Use browser_check for static HTML or preview_app for the running application and inspect rendered behavior, errors, and hidden-state violations before concluding. If the browser check is unavailable or fails, report the UI as unverified."
@@ -277,11 +285,16 @@ export async function runPearlAgentTurn(
         : "") +
       repetitionNudge;
     repetitionNudge = "";
+    const requiredTool =
+      completionRequested && host.needsCompletion(chat)
+        ? "complete_work"
+        : undefined;
     const result = await host.request(
       chat,
-      allowed,
+      requiredTool ? [requiredTool] : allowed,
       signal,
       suffix || undefined,
+      requiredTool,
     );
     if (signal.aborted) throw new Error("Stopped by user");
     if (result.kind === "reply") {
@@ -300,7 +313,7 @@ export async function runPearlAgentTurn(
         }
         host.pause(
           chat,
-          "Pearl's remote file edits and check results are saved. Her draft reply was not a completion record, so the task paused before marking it done. Continue asks Pearl to finish from the saved checkpoint, or send a new instruction.",
+          "The selected model replied without the required completion action. Your file changes are saved, but Scully cannot confirm the task is finished. Choose another model in Settings, then Continue; or retry if the provider had a temporary problem.",
           "completion_missing",
           result.text,
         );
@@ -354,6 +367,29 @@ export async function runPearlAgentTurn(
       }
       const disposition = await host.execute(chat, call);
       if (disposition === "paused" || disposition === "finished") return;
+      if (call.name === "complete_work") {
+        const rejected = [...host.load().messages]
+          .reverse()
+          .find(
+            (message) =>
+              message.role === "tool" && message.toolCallId === call.id,
+          )
+          ?.text.startsWith("Completion rejected:");
+        if (rejected) {
+          completionRejections++;
+          completionRequested = false;
+          verificationRequested = false;
+          browserRequested = false;
+          if (completionRejections >= 3) {
+            host.pause(
+              host.load(),
+              "Pearl submitted three completion reports that Scully could not accept. Your edits are saved. Review the reason in Activity. Continue lets Pearl address it, or choose another model in Settings if it keeps happening.",
+              "completion_rejected",
+            );
+            return;
+          }
+        }
+      }
     }
     if (inspectCycle(calls)) return;
     if (

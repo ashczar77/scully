@@ -1,5 +1,6 @@
 import React from "react";
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -10,6 +11,152 @@ import { expect, it, vi } from "vitest";
 import { PearlApp } from "../src/renderer/PearlApp";
 import type { DesktopAPI } from "../src/shared/contracts";
 import type { PearlChat } from "../src/shared/pearl-chat";
+
+it("disables Send with a model capability explanation for an attached image", async () => {
+  const staged = {
+    id: "11111111-1111-1111-1111-111111111111",
+    title: "Attachment chat",
+    createdAt: "now",
+    updatedAt: "now",
+    status: "idle",
+    messages: [],
+    questions: [],
+    pendingAttachments: [
+      {
+        id: "22222222-2222-2222-2222-222222222222",
+        name: "screen.png",
+        kind: "image",
+        bytes: 100,
+        needsVision: true,
+      },
+    ],
+  } as PearlChat;
+  const api = {
+    listPearlChats: vi.fn(async () => [staged]),
+    getPearlChat: vi.fn(async () => staged),
+    session: vi.fn(async () => ({ configured: true, model: "text-only" })),
+    listPearlModels: vi.fn(async () => [
+      { id: "text-only", name: "Text only", supportsImages: false },
+    ]),
+    sendPearlMessage: vi.fn(),
+    onPearlChatUpdate: vi.fn(() => () => {}),
+  } as unknown as DesktopAPI;
+  render(<PearlApp api={api} />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Attachment chat" }),
+  );
+  fireEvent.change(screen.getByRole("textbox", { name: "Message Pearl" }), {
+    target: { value: "Please explain" },
+  });
+  expect(
+    await screen.findByText(/This model does not support image analysis/),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+  fireEvent.submit(
+    screen.getByRole("textbox", { name: "Message Pearl" }).closest("form")!,
+  );
+  expect(api.sendPearlMessage).not.toHaveBeenCalled();
+});
+
+it("stages a selected document and sends it in the same chat", async () => {
+  const created = {
+    id: "11111111-1111-1111-1111-111111111111",
+    title: "New chat",
+    createdAt: "now",
+    updatedAt: "now",
+    status: "idle",
+    messages: [],
+    questions: [],
+  } as PearlChat;
+  const staged = {
+    ...created,
+    pendingAttachments: [
+      {
+        id: "22222222-2222-2222-2222-222222222222",
+        name: "notes.txt",
+        kind: "text",
+        bytes: 12,
+        needsVision: false,
+      },
+    ],
+  } as PearlChat;
+  let current = created;
+  const api = {
+    listPearlChats: vi.fn(async () => []),
+    createPearlChat: vi.fn(async () => created),
+    preparePearlAttachment: vi.fn(async () => {
+      current = staged;
+      return staged;
+    }),
+    getPearlChat: vi.fn(async () => current),
+    sendPearlMessage: vi.fn(async () => {
+      current = { ...staged, pendingAttachments: [] };
+      return current;
+    }),
+    session: vi.fn(async () => ({ configured: true, model: "text-only" })),
+    listPearlModels: vi.fn(async () => [
+      { id: "text-only", name: "Text only", supportsImages: false },
+    ]),
+    onPearlChatUpdate: vi.fn(() => () => {}),
+  } as unknown as DesktopAPI;
+  render(<PearlApp api={api} />);
+  expect(screen.getByLabelText("Choose files to attach")).toHaveAttribute(
+    "hidden",
+  );
+  expect(screen.getByLabelText("Choose files to attach")).toHaveStyle({
+    display: "none",
+  });
+  const file = new File(["Project notes"], "notes.txt", { type: "text/plain" });
+  Object.defineProperty(file, "arrayBuffer", {
+    value: async () => new TextEncoder().encode("Project notes").buffer,
+  });
+  fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+    target: { files: [file] },
+  });
+  expect(await screen.findByText("notes.txt")).toBeInTheDocument();
+  expect(api.preparePearlAttachment).toHaveBeenCalledWith(created.id, {
+    name: "notes.txt",
+    base64: btoa("Project notes"),
+  });
+  expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+  await waitFor(() =>
+    expect(api.sendPearlMessage).toHaveBeenCalledWith(
+      created.id,
+      "Analyze the attached files.",
+    ),
+  );
+});
+
+it("reopens an empty Sandbox inspector from the left rail", async () => {
+  const selected = {
+    id: "11111111-1111-1111-1111-111111111111",
+    title: "Local chat",
+    createdAt: "now",
+    updatedAt: "now",
+    status: "idle",
+    messages: [],
+    questions: [],
+  } as PearlChat;
+  const api = {
+    listPearlChats: vi.fn(async () => [selected]),
+    getPearlChat: vi.fn(async () => selected),
+    session: vi.fn(async () => ({ configured: true, model: "fixture" })),
+    pearlSandboxSnapshot: vi.fn(),
+    onPearlChatUpdate: vi.fn(() => () => {}),
+  } as unknown as DesktopAPI;
+  render(<PearlApp api={api} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Local chat" }));
+  await screen.findByRole("heading", { name: "Local chat" });
+  fireEvent.click(screen.getByRole("button", { name: "Sandbox" }));
+  expect(
+    await screen.findByText(/No saved Sandbox checkpoint/),
+  ).toBeInTheDocument();
+  expect(api.pearlSandboxSnapshot).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Close panel" }));
+  fireEvent.click(screen.getByRole("button", { name: "Sandbox" }));
+  expect(screen.getByText(/No saved Sandbox checkpoint/)).toBeInTheDocument();
+});
 
 it("shows project selection on the landing page and opens the picker for a fresh chat", async () => {
   const created = {
@@ -455,6 +602,214 @@ it("shows the complete reviewed file diff before applying a transaction", async 
   );
 });
 
+it("does not redisplay an old install approval after the backend accepts it", async () => {
+  const pending = {
+    id: "12345678-1234-1234-1234-123456789abc",
+    title: "Install dependencies",
+    createdAt: "2026-10-20T00:00:00.000Z",
+    updatedAt: "2026-10-20T00:00:00.000Z",
+    status: "awaiting_approval",
+    messages: [],
+    questions: [],
+    pendingTool: {
+      id: "install-one",
+      name: "install_dependencies",
+      arguments: JSON.stringify({ command: "npm", args: ["install"] }),
+    },
+  } as PearlChat;
+  const running = {
+    ...pending,
+    updatedAt: "2026-10-20T00:00:00.001Z",
+    status: "running" as const,
+    pendingTool: undefined,
+  };
+  let listener: ((chat: PearlChat) => void) | undefined;
+  let resolveRead: ((chat: PearlChat) => void) | undefined;
+  const api = {
+    listPearlChats: vi.fn(async () => []),
+    session: vi.fn(async () => ({ configured: true, model: "fixture" })),
+    onPearlChatUpdate: vi.fn((callback: (chat: PearlChat) => void) => {
+      listener = callback;
+      return () => {};
+    }),
+    createPearlChat: vi.fn(async () => pending),
+    decidePearlTool: vi.fn(async () => running),
+    getPearlChat: vi.fn(
+      () =>
+        new Promise<PearlChat>((resolve) => {
+          resolveRead = resolve;
+        }),
+    ),
+  } as unknown as DesktopAPI;
+  render(<PearlApp api={api} />);
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Install dependencies" }),
+  );
+  await waitFor(() => expect(resolveRead).toBeDefined());
+  act(() => listener!(running));
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("button", { name: "Install dependencies" }),
+    ).toBeNull(),
+  );
+  await act(async () => resolveRead!(pending));
+  expect(
+    screen.queryByRole("button", { name: "Install dependencies" }),
+  ).toBeNull();
+});
+
+it("explains that a failed Sandbox check is followed by a separate install approval", async () => {
+  const chat = {
+    id: "12345678-1234-1234-1234-123456789abc",
+    title: "Install after check",
+    createdAt: "2026-10-20T00:00:00.000Z",
+    updatedAt: "2026-10-20T00:00:00.000Z",
+    status: "awaiting_approval",
+    activeUserMessageId: "request",
+    messages: [
+      { id: "request", role: "user", text: "Run the tests", at: "now" },
+      {
+        id: "failed-test",
+        role: "tool",
+        toolName: "sandbox_run_check",
+        text: JSON.stringify({
+          command: "npm",
+          exitCode: 127,
+          stderr: "sh: vitest: not found\n",
+          passed: false,
+        }),
+        at: "now",
+      },
+    ],
+    questions: [],
+    pendingTool: {
+      id: "install",
+      name: "install_dependencies",
+      arguments: JSON.stringify({ command: "npm", args: ["install"] }),
+    },
+  } as PearlChat;
+  const api = {
+    listPearlChats: vi.fn(async () => []),
+    session: vi.fn(async () => ({ configured: true, model: "fixture" })),
+    onPearlChatUpdate: vi.fn(() => () => {}),
+    createPearlChat: vi.fn(async () => chat),
+  } as unknown as DesktopAPI;
+  render(<PearlApp api={api} />);
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  const approval = await screen.findByRole("region", {
+    name: "Dependency installation approval",
+  });
+  expect(
+    within(approval).getByText("Install dependencies: npm install"),
+  ).toBeInTheDocument();
+  expect(
+    within(approval).getByText(/Previous check failed.*127.*vitest: not found/),
+  ).toBeInTheDocument();
+  expect(
+    within(approval).getByText(/separate approval.*retrie/),
+  ).toBeInTheDocument();
+  expect(
+    within(approval).getByRole("button", { name: "Install dependencies" }),
+  ).toBeInTheDocument();
+});
+
+it("explains that checking after installation is a new approval", async () => {
+  const chat = {
+    id: "12345678-1234-1234-1234-123456789abc",
+    title: "Check after install",
+    createdAt: "2026-10-20T00:00:00.000Z",
+    updatedAt: "2026-10-20T00:00:00.000Z",
+    status: "awaiting_approval",
+    activeUserMessageId: "request",
+    messages: [
+      { id: "request", role: "user", text: "Run the tests", at: "now" },
+      {
+        id: "installed",
+        role: "tool",
+        toolName: "install_dependencies",
+        text: JSON.stringify({
+          command: "npm",
+          exitCode: 0,
+          passed: true,
+          writesPersisted: true,
+        }),
+        at: "now",
+      },
+    ],
+    questions: [],
+    pendingTool: {
+      id: "test",
+      name: "sandbox_run_check",
+      arguments: JSON.stringify({ command: "npm", args: ["test"] }),
+    },
+  } as PearlChat;
+  const api = {
+    listPearlChats: vi.fn(async () => []),
+    session: vi.fn(async () => ({ configured: true, model: "fixture" })),
+    onPearlChatUpdate: vi.fn(() => () => {}),
+    createPearlChat: vi.fn(async () => chat),
+  } as unknown as DesktopAPI;
+  render(<PearlApp api={api} />);
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  const approval = await screen.findByRole("region", {
+    name: "Sandbox check approval",
+  });
+  expect(
+    within(approval).getByText("Run Sandbox check: npm test"),
+  ).toBeInTheDocument();
+  expect(
+    within(approval).getByText(
+      /Dependencies installed successfully.*new approval.*check/,
+    ),
+  ).toBeInTheDocument();
+  expect(
+    within(approval).getByRole("button", { name: "Run check" }),
+  ).toBeInTheDocument();
+});
+
+it("keeps an approval usable when a recorded command result is malformed", async () => {
+  const chat = {
+    id: "12345678-1234-1234-1234-123456789abc",
+    title: "Malformed result",
+    createdAt: "2026-10-20T00:00:00.000Z",
+    updatedAt: "2026-10-20T00:00:00.000Z",
+    status: "awaiting_approval",
+    messages: [
+      {
+        id: "bad-result",
+        role: "tool",
+        toolName: "install_dependencies",
+        text: "null",
+        at: "now",
+      },
+    ],
+    questions: [],
+    pendingTool: {
+      id: "test",
+      name: "sandbox_run_check",
+      arguments: JSON.stringify({ command: "npm", args: ["test"] }),
+    },
+  } as PearlChat;
+  const api = {
+    listPearlChats: vi.fn(async () => []),
+    session: vi.fn(async () => ({ configured: true, model: "fixture" })),
+    onPearlChatUpdate: vi.fn(() => () => {}),
+    createPearlChat: vi.fn(async () => chat),
+  } as unknown as DesktopAPI;
+  render(<PearlApp api={api} />);
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  const approval = await screen.findByRole("region", {
+    name: "Sandbox check approval",
+  });
+  expect(
+    within(approval).getByText("Run Sandbox check: npm test"),
+  ).toBeInTheDocument();
+  expect(
+    within(approval).getByRole("button", { name: "Run check" }),
+  ).toBeInTheDocument();
+});
+
 it("keeps one pristine New chat row across repeated clicks", async () => {
   const created: PearlChat = {
     id: "12345678-1234-1234-1234-123456789abc",
@@ -857,6 +1212,113 @@ it("uses a full-width header and opens one navigation panel at a time", async ()
   );
 });
 
+it("updates per-chat command permissions while retaining one-use approvals", async () => {
+  let releaseFirstSave: (() => void) | undefined;
+  const firstSave = new Promise<void>((resolve) => {
+    releaseFirstSave = resolve;
+  });
+  let saveCount = 0;
+  let chat = {
+    id: "12345678-1234-1234-1234-123456789abc",
+    title: "Permission chat",
+    createdAt: "now",
+    updatedAt: "now",
+    status: "idle",
+    messages: [],
+    questions: [],
+  } as PearlChat;
+  const api = {
+    listPearlChats: vi.fn(async () => [chat]),
+    getPearlChat: vi.fn(async () => chat),
+    session: vi.fn(async () => ({ configured: true, model: "fixture" })),
+    updatePearlPermission: vi.fn(async (_id, permission, enabled) => {
+      if (saveCount++ === 0) await firstSave;
+      chat = {
+        ...chat,
+        permissions: {
+          commands: chat.permissions?.commands !== false,
+          dependencyDownloads: chat.permissions?.dependencyDownloads !== false,
+          [permission]: enabled,
+        },
+      };
+      return chat;
+    }),
+    onPearlChatUpdate: vi.fn(() => () => {}),
+  } as unknown as DesktopAPI;
+  render(<PearlApp api={api} />);
+  fireEvent.click(await screen.findByRole("button", { name: chat.title }));
+  await screen.findByRole("heading", { name: chat.title });
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  fireEvent.click(screen.getByRole("button", { name: "Permissions" }));
+  const commands = screen.getByRole("switch", {
+    name: "Allow Pearl to request commands",
+  });
+  const downloads = screen.getByRole("switch", {
+    name: "Allow Pearl to request dependency downloads",
+  });
+  expect(commands).toHaveAttribute("aria-checked", "true");
+  fireEvent.click(commands);
+  expect(commands).toHaveAttribute("aria-checked", "false");
+  expect(screen.queryByText(/Permission updated for this chat/)).toBeNull();
+  expect(downloads).toBeDisabled();
+  releaseFirstSave?.();
+  await waitFor(() =>
+    expect(api.updatePearlPermission).toHaveBeenCalledWith(
+      chat.id,
+      "commands",
+      false,
+    ),
+  );
+  expect(commands).toHaveAttribute("aria-checked", "false");
+  expect(screen.getByText("Ask before every command")).toBeInTheDocument();
+  fireEvent.click(commands);
+  await waitFor(() => expect(commands).toHaveAttribute("aria-checked", "true"));
+  fireEvent.click(downloads);
+  await waitFor(() =>
+    expect(api.updatePearlPermission).toHaveBeenCalledWith(
+      chat.id,
+      "dependencyDownloads",
+      false,
+    ),
+  );
+  expect(downloads).toHaveAttribute("aria-checked", "false");
+});
+
+it("restores a permission switch if saving fails", async () => {
+  const chat = {
+    id: "12345678-1234-1234-1234-123456789abc",
+    title: "Permission error chat",
+    createdAt: "now",
+    updatedAt: "now",
+    status: "idle",
+    messages: [],
+    questions: [],
+  } as PearlChat;
+  const api = {
+    listPearlChats: vi.fn(async () => [chat]),
+    getPearlChat: vi.fn(async () => chat),
+    session: vi.fn(async () => ({ configured: true, model: "fixture" })),
+    updatePearlPermission: vi.fn(async () => {
+      throw new Error("Permission could not be saved");
+    }),
+    onPearlChatUpdate: vi.fn(() => () => {}),
+  } as unknown as DesktopAPI;
+  render(<PearlApp api={api} />);
+  fireEvent.click(await screen.findByRole("button", { name: chat.title }));
+  await screen.findByRole("heading", { name: chat.title });
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  fireEvent.click(screen.getByRole("button", { name: "Permissions" }));
+  const commands = screen.getByRole("switch", {
+    name: "Allow Pearl to request commands",
+  });
+  fireEvent.click(commands);
+  expect(commands).toHaveAttribute("aria-checked", "false");
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Permission could not be saved",
+  );
+  expect(commands).toHaveAttribute("aria-checked", "true");
+});
+
 it("closes side panels when dragged narrow and restores their usable widths", async () => {
   const chat = {
     id: "12345678-1234-1234-1234-123456789abc",
@@ -972,11 +1434,11 @@ it("keeps message input above a compact action toolbar", async () => {
   expect(toolbar).not.toBeNull();
   expect(input.nextElementSibling).toBe(toolbar);
   expect(
-    screen.getByRole("button", { name: "Add files (coming soon)" }),
-  ).toBeDisabled();
+    screen.getByRole("button", { name: "Attach images or documents" }),
+  ).toBeEnabled();
   expect(
-    screen.getByRole("button", { name: "Permissions (coming soon)" }),
-  ).toBeDisabled();
+    screen.getByRole("button", { name: "View Pearl permissions" }),
+  ).toBeEnabled();
   expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
   fireEvent.change(input, { target: { value: "Hello" } });
   expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled();
@@ -1020,6 +1482,35 @@ it("shows a paused coding turn as resumable work", async () => {
   await waitFor(() => expect(retryPearlChat).toHaveBeenCalledWith(chat.id));
 });
 
+it("explains a missing completion action and offers model settings", async () => {
+  const chat: PearlChat = {
+    id: "12345678-1234-1234-1234-123456789abc",
+    title: "Coding chat",
+    createdAt: "2026-10-20T00:00:00.000Z",
+    updatedAt: "2026-10-20T00:00:00.000Z",
+    status: "failed",
+    error:
+      "Required completion action was not returned. Your edits are saved. Choose another model in Settings, then Continue.",
+    messages: [],
+    questions: [],
+  };
+  const api = {
+    listPearlChats: vi.fn(async () => [chat]),
+    session: vi.fn(async () => ({ configured: true, model: "fixture" })),
+    onPearlChatUpdate: vi.fn(() => () => {}),
+    getPearlChat: vi.fn(async () => chat),
+  } as unknown as DesktopAPI;
+  render(<PearlApp api={api} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Coding chat" }));
+  expect(
+    await screen.findByText("Pearl could not finish this turn"),
+  ).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Choose another model" }));
+  expect(
+    await screen.findByRole("heading", { name: "Settings", level: 1 }),
+  ).toBeInTheDocument();
+});
+
 it("explains that Continue retries from the saved chat", async () => {
   const chat: PearlChat = {
     id: "12345678-1234-1234-1234-123456789abc",
@@ -1044,7 +1535,9 @@ it("explains that Continue retries from the saved chat", async () => {
       /retrying from your saved chat.*waiting for Nebius/i,
     ),
   ).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "Stop Pearl" }),
+  ).toBeInTheDocument();
 });
 
 it("shows the backend completion status and remaining work", async () => {
@@ -1090,6 +1583,49 @@ it("shows the backend completion status and remaining work", async () => {
   expect(screen.getByText(/No command checks completed/)).toBeInTheDocument();
   expect(
     screen.getByText(/No clean browser check after the latest UI edit/),
+  ).toBeInTheDocument();
+});
+
+it("explains an unchecked edit without presenting it as a safety finding", async () => {
+  const chat: PearlChat = {
+    id: "12345678-1234-1234-1234-123456789abc",
+    title: "New chat",
+    createdAt: "2026-10-20T00:00:00.000Z",
+    updatedAt: "2026-10-20T00:00:00.000Z",
+    status: "idle",
+    messages: [
+      {
+        id: "result",
+        role: "assistant",
+        text: "Added a comment.",
+        at: "2026-10-20T00:00:00.000Z",
+        completion: { status: "unverified" },
+        evidence: {
+          projectApproved: true,
+          filesWritten: 1,
+          uiFilesWritten: 0,
+          commandsCompleted: 0,
+          browserChecks: 0,
+          successfulCommandAfterLatestWrite: false,
+          successfulBrowserAfterLatestUiWrite: false,
+        },
+      },
+    ],
+    questions: [],
+  };
+  const api = {
+    listPearlChats: vi.fn(async () => []),
+    session: vi.fn(async () => ({ configured: true, model: "fixture" })),
+    onPearlChatUpdate: vi.fn(() => () => {}),
+    createPearlChat: vi.fn(async () => chat),
+  } as unknown as DesktopAPI;
+  render(<PearlApp api={api} />);
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  expect(
+    await screen.findByText(/Work status: not checked/),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText(/Review the change or ask Pearl to run a check/),
   ).toBeInTheDocument();
 });
 

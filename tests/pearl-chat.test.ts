@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { afterEach, expect, it, vi } from "vitest";
 import {
+  existsSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
@@ -62,6 +63,7 @@ function fixture(
   web?: PearlWebAccess,
   webEnabled: () => boolean = () => true,
   remoteMcp?: RemoteMcpConnection,
+  imageCapable: (model: string) => boolean = () => false,
 ) {
   const root = mkdtempSync(join(tmpdir(), "scully-pearl-"));
   roots.push(root);
@@ -100,6 +102,8 @@ function fixture(
     undefined,
     undefined,
     remoteMcp,
+    undefined,
+    imageCapable,
   );
   return { root, data, project, store, manager, complete };
 }
@@ -470,6 +474,106 @@ it("archives and restores a saved chat without losing its messages", () => {
   f.manager.restore(chat.id);
   expect(f.manager.list().map((item) => item.id)).toEqual([chat.id]);
   expect(f.manager.get(chat.id).messages[0].text).toBe("Keep this history");
+});
+
+it("blocks image attachments for a text-only model even when Send is called directly", async () => {
+  const f = fixture([]);
+  const chat = f.manager.create();
+  const png =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lXcAAAAASUVORK5CYII=";
+  const staged = await f.manager.prepareAttachment(chat.id, {
+    name: "screen.png",
+    base64: png,
+  });
+  expect(staged.pendingAttachments).toHaveLength(1);
+  expect(() => f.manager.send(chat.id, "Analyze this screenshot")).toThrow(
+    /does not support image analysis/i,
+  );
+  expect(f.manager.get(chat.id).pendingAttachments).toHaveLength(1);
+  expect(f.manager.get(chat.id).messages).toHaveLength(0);
+  expect(() => f.manager.removeAttachment(chat.id, "../../other")).toThrow(
+    /not pending/i,
+  );
+  expect(
+    f.manager.removeAttachment(chat.id, staged.pendingAttachments![0].id)
+      .pendingAttachments,
+  ).toEqual([]);
+});
+
+it("shows attachment labels without exposing extracted document context to the Room", () => {
+  const f = fixture([]);
+  const chat = f.manager.create();
+  chat.messages.push({
+    id: "attached",
+    role: "user",
+    text: "Summarize this\n[Attached document]\nPrivate document body",
+    displayText: "Summarize this",
+    attachments: [
+      {
+        id: "22222222-2222-2222-2222-222222222222",
+        name: "notes.txt",
+        kind: "text",
+        bytes: 20,
+        needsVision: false,
+      },
+    ],
+    at: chat.createdAt,
+  });
+  const visible = roomChat(chat);
+  expect(visible.messages[0].text).toBe("Summarize this");
+  expect(JSON.stringify(visible)).not.toContain("Private document body");
+  expect(visible.messages[0].attachments?.[0].name).toBe("notes.txt");
+});
+
+it("lets Pearl read later sections of a long attached document by ID", async () => {
+  const responses: PearlModelResult[] = [];
+  const f = fixture(responses);
+  const chat = f.manager.create();
+  const body = `${"A".repeat(13_000)}MIDDLE SECTION${"Z".repeat(15_000)}`;
+  const staged = await f.manager.prepareAttachment(chat.id, {
+    name: "long.txt",
+    base64: Buffer.from(body).toString("base64"),
+  });
+  const id = staged.pendingAttachments![0].id;
+  responses.push(
+    tool("read_attachment", { id, offset: 13_000, length: 14 }),
+    reply("I read the middle section."),
+  );
+  f.manager.send(chat.id, "Find the middle section");
+  const done = await settled(f.store, chat.id);
+  expect(f.complete.mock.calls[0][0].allowedTools).toContain("read_attachment");
+  expect(
+    f.complete.mock.calls[0][0].messages.find((item) => item.role === "user")
+      ?.text,
+  ).toContain("Middle omitted");
+  expect(
+    done.messages.find(
+      (item) => item.toolName === "read_attachment" && item.role === "tool",
+    )?.text,
+  ).toContain("MIDDLE SECTION");
+});
+
+it("rejects a model request for an attachment outside this chat", async () => {
+  const f = fixture([
+    tool("read_attachment", {
+      id: "22222222-2222-2222-2222-222222222222",
+      offset: 0,
+      length: 100,
+    }),
+    reply("No document access."),
+  ]);
+  const chat = f.manager.create();
+  await f.manager.prepareAttachment(chat.id, {
+    name: "here.txt",
+    base64: Buffer.from("Allowed content").toString("base64"),
+  });
+  f.manager.send(chat.id, "Read the document");
+  const done = await settled(f.store, chat.id);
+  expect(
+    done.messages.find(
+      (item) => item.toolName === "read_attachment" && item.role === "tool",
+    )?.text,
+  ).toContain("does not belong to this chat");
 });
 
 it("deletes only archived chats and keeps active chats protected", () => {
@@ -973,10 +1077,17 @@ it("records project changes that occur outside file editing tools during a turn"
     ["generated.txt", "added"],
     ["notes.txt", "modified"],
   ]);
+  expect(
+    f.manager.taskFileReview(chat.id, done.taskChanges![0].turnId, "notes.txt"),
+  ).toMatchObject({
+    before: "existing work\n",
+    after: "changed by a command\n",
+  });
   f.manager.undoTask(chat.id, done.taskChanges![0].turnId);
   expect(readFileSync(join(f.project, "notes.txt"), "utf8")).toBe(
     "existing work\n",
   );
+  expect(existsSync(join(f.project, "generated.txt"))).toBe(false);
 });
 
 it.each(["ask_user", "run_command"])(
@@ -1611,6 +1722,69 @@ it("writes a revision-bound file with a backup and pauses commands for one-use r
       (message) => message.role === "tool" && message.toolCallId === "call-3",
     )?.text,
   ).toContain("denied");
+});
+
+it("asks once before a local dependency setup command and records its project writes", async () => {
+  const f = fixture([
+    tool(
+      "install_dependencies",
+      {
+        command: "node",
+        args: ["-e", "require('fs').writeFileSync('installed.txt','ready')"],
+      },
+      "install-once",
+    ),
+    reply("The setup command completed."),
+  ]);
+  const chat = f.manager.create();
+  f.manager.chooseProject(chat.id, f.project);
+  f.manager.approveProject(chat.id, true);
+  f.manager.send(chat.id, "Set up the workspace");
+  const pending = await settled(f.store, chat.id);
+  expect(pending.pendingTool?.name).toBe("install_dependencies");
+  expect(pending.pendingTool?.executable?.path).toBeTruthy();
+  expect(existsSync(join(f.project, "installed.txt"))).toBe(false);
+  f.manager.decideTool(chat.id, "install-once", true);
+  const done = await settled(f.store, chat.id);
+  expect(readFileSync(join(f.project, "installed.txt"), "utf8")).toBe("ready");
+  expect(done.taskChanges?.at(-1)?.files.map((file) => file.path)).toContain(
+    "installed.txt",
+  );
+  expect(() => f.manager.decideTool(chat.id, "install-once", true)).toThrow(
+    /no longer current/,
+  );
+});
+
+it("does not run a denied dependency setup command", async () => {
+  const f = fixture([
+    tool(
+      "install_dependencies",
+      {
+        command: "node",
+        args: ["-e", "require('fs').writeFileSync('installed.txt','ready')"],
+      },
+      "install-denied",
+    ),
+    reply("The user declined dependency setup."),
+  ]);
+  const chat = f.manager.create();
+  f.manager.chooseProject(chat.id, f.project);
+  f.manager.approveProject(chat.id, true);
+  f.manager.send(chat.id, "Set up the workspace");
+  const pending = await settled(f.store, chat.id);
+  expect(pending.pendingTool?.name).toBe("install_dependencies");
+  f.manager.decideTool(chat.id, "install-denied", false);
+  const done = await settled(f.store, chat.id);
+  expect(existsSync(join(f.project, "installed.txt"))).toBe(false);
+  expect(
+    done.messages.find(
+      (message) =>
+        message.toolCallId === "install-denied" && message.role === "tool",
+    )?.text,
+  ).toContain("User denied this command");
+  expect(() => f.manager.decideTool(chat.id, "install-denied", true)).toThrow(
+    /no longer current/,
+  );
 });
 
 it.each([false, true])(
@@ -2424,6 +2598,43 @@ it("continues after an unverified edit to request a real command check", async (
   expect(done.messages.at(-1)?.text).toContain("after the edit");
 });
 
+it("returns to check tools after rejecting a forced done report without a check", async () => {
+  const f = fixture([
+    tool("create_file", { path: "change.txt", content: "change" }),
+    reply("Done."),
+    reply("Done."),
+    tool("complete_work", { status: "done", summary: "Done." }, "early-finish"),
+    tool(
+      "run_command",
+      { command: "node", args: ["--version"] },
+      "check-after-rejection",
+    ),
+    tool(
+      "complete_work",
+      { status: "done", summary: "Checked the change." },
+      "final-finish",
+    ),
+  ]);
+  const chat = f.manager.create();
+  f.manager.chooseProject(chat.id, f.project);
+  f.manager.approveProject(chat.id, true);
+  f.manager.send(chat.id, "Create and check a file");
+  await vi.waitFor(() =>
+    expect(f.store.get(chat.id).pendingTool?.id).toBe("check-after-rejection"),
+  );
+  expect(f.complete.mock.calls[3][0].requiredTool).toBe("complete_work");
+  expect(f.complete.mock.calls[4][0].requiredTool).toBeUndefined();
+  f.manager.decideTool(chat.id, "check-after-rejection", true);
+  const done = await settled(f.store, chat.id);
+  expect(done.status).toBe("idle");
+  expect(done.messages.at(-1)?.completion?.status).toBe("done");
+  expect(
+    done.messages.some((message) =>
+      message.text.includes("Completion rejected:"),
+    ),
+  ).toBe(true);
+});
+
 it("allows an honest unverified reply after one coding continuation", async () => {
   const f = fixture([
     tool("create_file", { path: "change.txt", content: "change" }),
@@ -2449,7 +2660,7 @@ it("allows an honest unverified reply after one coding continuation", async () =
   expect(f.complete).toHaveBeenCalledTimes(3);
 });
 
-it("requires an evidence-backed completion after project edits", async () => {
+it("requires a completion action after repeated plain replies and reports a protocol failure", async () => {
   const f = fixture([
     tool("create_file", { path: "change.txt", content: "change" }),
     reply("The task is complete."),
@@ -2460,19 +2671,143 @@ it("requires an evidence-backed completion after project edits", async () => {
   f.manager.chooseProject(chat.id, f.project);
   f.manager.approveProject(chat.id, true);
   f.manager.send(chat.id, "Create and check a file");
+  const done = await settled(f.store, chat.id);
+  expect(done.status).toBe("paused");
+  expect(done.error).toContain("completion action");
+  expect(done.error).toContain("Choose another model");
+  expect(done.messages.at(-1)?.completion).toBeUndefined();
+  expect(done.taskChanges?.at(-1)?.files.map((file) => file.path)).toContain(
+    "change.txt",
+  );
+  expect(f.complete).toHaveBeenCalledTimes(4);
+  expect(f.complete.mock.calls.at(-1)?.[0].system).toContain("complete_work");
+  expect(f.complete.mock.calls.at(-1)?.[0].requiredTool).toBe("complete_work");
+});
+
+it("requires the completion action again when an older missing-completion turn continues", async () => {
+  const responses = [
+    tool("create_file", { path: "change.txt", content: "change" }),
+    reply("Done."),
+    reply("Done."),
+    reply("Done."),
+  ];
+  const f = fixture(responses);
+  const chat = f.manager.create();
+  f.manager.chooseProject(chat.id, f.project);
+  f.manager.approveProject(chat.id, true);
+  f.manager.send(chat.id, "Create a file");
+  await settled(f.store, chat.id);
+  const oldPause = f.store.get(chat.id);
+  oldPause.status = "paused";
+  oldPause.pauseKind = "completion_missing";
+  oldPause.error = "Work paused";
+  f.store.save(oldPause);
+  responses.push(reply("Done."), reply("Done."), reply("Done."));
+  f.manager.retry(chat.id);
+  const resumed = await settled(f.store, chat.id);
+  expect(resumed.status).toBe("paused");
+  expect(resumed.error).toContain("completion action");
+  expect(f.complete.mock.calls.at(-1)?.[0].requiredTool).toBe("complete_work");
+});
+
+it("allows a check after repeated rejected completion reports on Continue", async () => {
+  const f = fixture([
+    tool("create_file", { path: "change.txt", content: "change" }),
+    reply("Done."),
+    reply("Done."),
+    ...[1, 2, 3].map((index) =>
+      tool(
+        "complete_work",
+        { status: "done", summary: "Done." },
+        `rejected-finish-${index}`,
+      ),
+    ),
+    tool(
+      "run_command",
+      { command: "node", args: ["--version"] },
+      "check-after-repeated-rejection",
+    ),
+    tool(
+      "complete_work",
+      { status: "done", summary: "Checked the change." },
+      "accepted-finish",
+    ),
+  ]);
+  const chat = f.manager.create();
+  f.manager.chooseProject(chat.id, f.project);
+  f.manager.approveProject(chat.id, true);
+  f.manager.send(chat.id, "Create and check a file");
   const paused = await settled(f.store, chat.id);
   expect(paused.status).toBe("paused");
-  expect(paused.pauseKind).toBe("completion_missing");
-  expect(paused.pausedDraft).toBe("The task is complete.");
-  expect(
-    paused.messages.some(
-      (message) =>
-        message.role === "assistant" &&
-        !message.toolName &&
-        message.text === "The task is complete.",
+  expect(paused.error).toContain("three completion reports");
+  f.manager.retry(chat.id);
+  await vi.waitFor(() =>
+    expect(f.store.get(chat.id).pendingTool?.id).toBe(
+      "check-after-repeated-rejection",
     ),
-  ).toBe(false);
-  expect(f.complete.mock.calls.at(-1)?.[0].system).toContain("complete_work");
+  );
+  expect(f.complete.mock.calls.at(-1)?.[0].requiredTool).toBeUndefined();
+  f.manager.decideTool(chat.id, "check-after-repeated-rejection", true);
+  const done = await settled(f.store, chat.id);
+  expect(done.status).toBe("idle");
+  expect(done.messages.at(-1)?.completion?.status).toBe("done");
+});
+
+it("persists chat permission choices and rejects command tools when disabled", async () => {
+  const f = fixture([
+    tool("run_command", { command: "node", args: ["-v"] }),
+    reply("I cannot run that command in this chat."),
+  ]);
+  const chat = f.manager.create();
+  f.manager.chooseProject(chat.id, f.project);
+  f.manager.approveProject(chat.id, true);
+  expect(
+    f.manager.updatePermission(chat.id, "commands", false).permissions,
+  ).toEqual({
+    commands: false,
+    dependencyDownloads: true,
+  });
+  expect(f.store.get(chat.id).permissions?.commands).toBe(false);
+  expect(() => f.manager.updatePermission(chat.id, "all", true)).toThrow(
+    "Invalid permission setting",
+  );
+  expect(() => f.manager.updatePermission(chat.id, "commands", "yes")).toThrow(
+    "Invalid permission setting",
+  );
+  f.manager.send(chat.id, "Check the Node version");
+  expect(() => f.manager.updatePermission(chat.id, "commands", true)).toThrow(
+    "Wait for Pearl's current action",
+  );
+  const done = await settled(f.store, chat.id);
+  expect(done.status).toBe("idle");
+  expect(f.complete.mock.calls[0][0].allowedTools).not.toContain("run_command");
+  expect(f.complete.mock.calls[0][0].allowedTools).not.toContain(
+    "start_terminal",
+  );
+  expect(f.complete.mock.calls[0][0].allowedTools).not.toContain(
+    "install_dependencies",
+  );
+  expect(
+    done.messages.some(
+      (message) =>
+        message.role === "tool" && message.text.includes("Action rejected"),
+    ),
+  ).toBe(true);
+  expect(done.pendingTool).toBeUndefined();
+});
+
+it("turning off dependency downloads leaves ordinary command requests available", async () => {
+  const f = fixture([reply("I can propose a check, but not an install.")]);
+  const chat = f.manager.create();
+  f.manager.chooseProject(chat.id, f.project);
+  f.manager.approveProject(chat.id, true);
+  f.manager.updatePermission(chat.id, "dependencyDownloads", false);
+  f.manager.send(chat.id, "Check this project");
+  await settled(f.store, chat.id);
+  expect(f.complete.mock.calls[0][0].allowedTools).toContain("run_command");
+  expect(f.complete.mock.calls[0][0].allowedTools).not.toContain(
+    "install_dependencies",
+  );
 });
 
 it("rejects a done claim without a post-edit check and accepts an unverified completion", async () => {
